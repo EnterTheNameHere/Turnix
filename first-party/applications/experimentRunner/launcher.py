@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 6
+# file: first-party/applications/experimentRunner/launcher.py ; version: 7
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from threading import RLock, Thread
 from backend.io.managedIo import ManagedIo
 from backend.orchestration import Job
 from backend.orchestration.cancellation import ExecutionCancelled
+from backend.llm.errors import LlmExecutionCleanupError, LlmExecutionOwnershipError
 from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.runtime import RuntimeHost
 from backend.save import ApplicationStore
@@ -25,6 +26,7 @@ from backend.save import ApplicationStore
 schema = importlib.import_module('first-party.applications.experimentRunner.definition')
 results = importlib.import_module('first-party.applications.experimentRunner.results')
 archive = importlib.import_module('first-party.applications.experimentRunner.archive')
+observations = importlib.import_module('first-party.applications.experimentRunner.observations')
 APP = Path(__file__).resolve().parent
 ROOT = APP.parents[2]
 DRIVER = ROOT / 'first-party/llmDrivers/llamaCpp'
@@ -50,8 +52,12 @@ def readJson(path):
 def hostConfiguration(value):
     """Freeze trusted launch config separately from untrusted declarative experiments."""
     value = schema.decode(schema.canonical(value))
-    schema.fields(value, ('schemaId', 'llamaCpp', 'aliases', 'limits', 'archive'), ('persistConfigurationEvidence',))
-    schema.require(value['schemaId'] == 'actant.experiment.host@3', 'Unsupported host schema; use version 3.')
+    schema.fields(value, ('schemaId', 'llamaCpp', 'aliases', 'limits', 'archive'), ('persistConfigurationEvidence', 'observation'))
+    schema.require(value['schemaId'] in ('actant.experiment.host@3', 'actant.experiment.host@4'), 'Unsupported host schema.')
+    if value['schemaId'] == 'actant.experiment.host@4':
+        observations.validate(value.get('observation'))
+    else:
+        schema.require('observation' not in value, 'Host3 has no observation policy.')
     archiveValue = value['archive']
     schema.fields(archiveValue, (*archive.fmt.DEFAULTS, 'capturePolicy', 'hashAssets'))
     archive.fmt.limits({key: archiveValue[key] for key in archive.fmt.DEFAULTS})
@@ -86,8 +92,11 @@ def prepare(definitionValue, hostValue):
     """Validate every turn and selector before constructing or activating a runtime."""
     host = hostConfiguration(hostValue)
     definition = schema.validate(definitionValue, policyFor(host))
+    if host.value()['schemaId'] == 'actant.experiment.host@4':
+        observations.validate(host.value()['observation'], definition)
     archive.preflight(definition, policyFor(host) | {'captureRequired': host.value()['archive']['capturePolicy'] == 'required'},
-        {k: host.value()['archive'][k] for k in archive.fmt.DEFAULTS})
+        {k: host.value()['archive'][k] for k in archive.fmt.DEFAULTS},
+        observation=host.value()['schemaId'] == 'actant.experiment.host@4' and host.value()['observation']['enabled'])
     adapter = loadAdapter()
     catalog = adapter.LlamaCppCatalog.fromConfig(host.value()['llamaCpp'])
     schema.require(all(selector in catalog.profiles for selector in host.value()['aliases'].values()),
@@ -306,7 +315,7 @@ def unitStatus(unit):
     return 'failed'
 
 
-def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterrupt=True):
+def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterrupt=True, observationHandoff=None, telemetryService=None):
     """Execute config-major independent conversations, draining each Job before the next.
 
     R1's enclosing owned teardown and deferred first interrupt protect aggregate
@@ -315,6 +324,8 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
     """
     definition, hostConfig, composer = prepared
     config = hostConfig.value()
+    schema.require(observationHandoff is None or callable(observationHandoff), 'Invalid private observation hook.')
+    observer = observations.Controller(config['observation'], observationHandoff) if config['schemaId'] == 'actant.experiment.host@4' else None
     control = SuiteControl() if control is None else control
     if job is not None and job.cancellationRequested:
         control.cancel()
@@ -325,6 +336,8 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                 'launcherFailure': None, 'signalCleanupFailures': [],
                 'resultWriteFailure': None, 'hostCleanup': 'not-started',
                 'archive': {'archiveId': None, 'path': None, 'failure': None, 'close': None}}
+    if observer is not None:
+        envelope['schemaId'] = 'actant.experiment.execution@5'
     resultPath = None
     host, runtime = None, None
     temporary = tempfile.TemporaryDirectory(prefix='actant-experiment-')
@@ -369,8 +382,11 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
             try:
                 stage = 'archive-initial'
                 caps = {key: config['archive'][key] for key in archive.fmt.DEFAULTS}
-                writer = archive.ArchiveWriter(resultsDirectory, suite, caps, control.cancel, cancelled=control.raiseIfCancelled)
+                writer = archive.ArchiveWriter(resultsDirectory, suite, caps, control.cancel, cancelled=control.raiseIfCancelled,
+                    version=2 if observer is not None else 1)
                 archiveRun = archive.ArchiveRun(writer, definition, composer, config)
+                if observer is not None:
+                    archiveRun.observationPolicy = observations.archivePolicy(config['observation'], observer.effective)
                 envelope['archive'].update(archiveId=writer.archiveId, path=str(writer.path))
                 adapter = loadAdapter()
                 composer.requestEvidence = (adapter.PrivateRequestEvidence()
@@ -384,11 +400,24 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                     raise
                 stage = 'activation'
                 host = RuntimeHost(applicationStore=ApplicationStore(Path(temporary.name) / 'saves'),
-                    packResolver=PackResolver(roots=(DRIVER, APP)), providerComposers=(archiveRun,))
+                    packResolver=PackResolver(roots=(DRIVER, APP, ROOT / 'first-party/observationBridge')),
+                    providerComposers=(archiveRun,), telemetryService=telemetryService)
                 host.start()
                 runtime = host.createApplication(appPackId='applications.experimentRunner',
                     plan=ManualActivationPlan(packIds=('llmDrivers.llamaCpp', 'applications.experimentRunner')),
-                    config={'llamaCpp': config['llamaCpp'], 'experimentRunner': policyFor(hostConfig)})
+                    config={'llamaCpp': config['llamaCpp'], 'experimentRunner': policyFor(hostConfig),
+                        'observationBridge': dict(host='127.0.0.1', port=0, allowedOrigins=[] if observer is None or
+                            not config['observation']['live']['enabled'] else [config['observation']['live']['allowedOrigin']])})
+                if observer is not None and observer.effective == 'pending-activation':
+                    try:
+                        resolver = PackResolver(roots=(ROOT / 'first-party/observationBridge',))
+                        runtime.packLoader.activatePack(resolver.requireSingle('observation.bridge'))
+                        observer.effective = 'available'
+                    except Exception as error:
+                        if isinstance(error, (BaseExceptionGroup, LlmExecutionCleanupError, LlmExecutionOwnershipError)) or getattr(error, 'llmCompositionCleanup', None) is not None:
+                            raise RuntimeError('Observation activation cleanup is unknown.') from None
+                        observer.effective = 'bridge-unavailable'
+                    runtime.requireCompositionReady()
                 reader = runtime.invokeCapability('experimentRunner.reader@1')
                 previousHandler, handlerRestorationNeeded, relay = None, False, None
                 try:
@@ -421,6 +450,7 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                         try:
                             stage = 'preparation'
                             port = archiveRun.unit(unit, activeJob.jobId)
+                            port.observationController = observer
                             unitDefinition = schema.unitDefinition(definition, unit['configurationIndex'] - 1)
                             runId = runtime.invokeCapability('experimentRunner.prepare@1',
                                 {'unitId': unit['unitId'], 'definition': unitDefinition.value(), 'archivePort': port})
@@ -500,6 +530,8 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                 suite.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startedNs)
                 if archiveRun is not None:
                     try:
+                        if observer is not None:
+                            observer.finish(runtime)
                         archiveRun.suiteOutcome(suite)
                         archiveRun.cleanup('signal', 'failed-or-unknown' if envelope['signalCleanupFailures'] else 'completed',
                             dict(failures=envelope['signalCleanupFailures']))

@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/run.py ; version: 3
+# file: first-party/applications/experimentRunner/run.py ; version: 4
 """Terminal entry point; only explicit inspect displays private experiment content."""
 from __future__ import annotations
 
@@ -33,8 +33,49 @@ def main(argv=None):
         child.add_argument('--unit')
         child.add_argument('--turn')
         child.add_argument('--include-content', action='store_true')
+    for command in ('report', 'compare', 'export'):
+        child = commands.add_parser(command)
+        if command == 'export':
+            child.add_argument('--kind', choices=('report', 'compare'), required=True)
+            child.add_argument('--output-root', required=True)
+            child.add_argument('--name', required=True)
+        child.add_argument('--format', choices=('json', 'csv') if command == 'export' else ('table', 'json'),
+                           default='json' if command == 'export' else 'table')
+        child.add_argument('--archive')
+        child.add_argument('--unit', action='append', default=[])
+        child.add_argument('--turn', action='append', default=[])
+        child.add_argument('--include-content', action='store_true')
+        child.add_argument('--include-observations', action='store_true')
+        for side in ('left', 'right'):
+            for suffix in ('', '-unit', '-turn'):
+                child.add_argument('--' + side + suffix)
+        child.add_argument('--mode')
+        child.add_argument('--allow-input-differences', action='store_true')
     args = parser.parse_args(argv)
     try:
+        if args.command in ('report', 'compare', 'export'):
+            reporting = importlib.import_module('first-party.applications.experimentRunner.reporting')
+            exporting = importlib.import_module('first-party.applications.experimentRunner.exporting')
+            kind = args.kind if args.command == 'export' else args.command
+            if kind == 'report':
+                reporting.require(args.archive is not None and not any((args.left, args.right, args.mode, args.left_unit,
+                    args.right_unit, args.left_turn, args.right_turn, args.allow_input_differences)))
+                reporting.require(not (args.include_content or args.include_observations) or args.format == 'json')
+                value = reporting.report(args.archive, unitIds=args.unit, turnIds=args.turn, includeContent=args.include_content,
+                                         includeObservations=args.include_observations)
+            else:
+                reporting.require(all((args.left, args.right, args.left_unit, args.left_turn, args.right_unit, args.right_turn, args.mode))
+                                  and not any((args.archive, args.unit, args.turn, args.include_content, args.include_observations)))
+                value = reporting.compare(args.left, args.left_unit, args.left_turn, args.right, args.right_unit, args.right_turn,
+                                          mode=args.mode, allowInputDifferences=args.allow_input_differences)
+            reporting.reportSchema.validate(value)
+            if args.command == 'export':
+                marker = exporting.publish(value, args.output_root, args.name, kind=kind, format=args.format,
+                                           sourceDirectories=[args.archive] if kind == 'report' else [args.left, args.right][:len(value['sources'])])
+                print(exporting.jsonBytes(marker).decode('ascii'))
+            else:
+                print(exporting.jsonBytes(value).decode('ascii') if args.format == 'json' else exporting.table(value))
+            return exporting.exitCode(value)
         if args.command in ('inspect', 'recover') and args.archive:
             reader = importlib.import_module('first-party.applications.experimentRunner.archiveReader')
             value = reader.inspectArchive(args.archive, unitId=args.unit, turnId=args.turn, includeContent=args.include_content)
@@ -66,7 +107,7 @@ def main(argv=None):
         return launcher.exitCode(value)
     except Exception:
         print('Experiment input or launcher failed; private content was not printed.', file=sys.stderr)
-        return 1
+        return 2 if args.command in ('report', 'compare', 'export') else 1
 
 
 if __name__ == '__main__':

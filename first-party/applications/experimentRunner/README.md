@@ -331,3 +331,138 @@ rejects rather than implicitly opting out. Formerly accepted inconsistent archiv
 now report corruption at the first invalid committed record with the preceding
 validated prefix preserved, including selected inspection views. No archive repair,
 byte fabrication, retry or migration is performed.
+
+## EX-05 offline reports and selected observation
+
+These commands read the actual archive, not the execution JSON sidecar. They need
+only Python's standard library; they do not load backend, host configuration,
+model assets, processes or network services. Examples below use explicit private
+archive directories and archive-issued unit/turn IDs:
+
+```powershell
+python first-party/applications/experimentRunner/run.py report --archive C:\private\archive --format json
+python first-party/applications/experimentRunner/run.py compare --left C:\private\left --left-unit UNIT_ID --left-turn t1 --right C:\private\right --right-unit UNIT_ID --right-turn t1 --mode actant.experiment.answer-text@1 --format json
+python first-party/applications/experimentRunner/run.py export --kind report --archive C:\private\archive --format csv --output-root C:\private\exports --name summary
+```
+
+Comparison requires exactly one explicit pair and one mode:
+`actant.experiment.answer-text@1`, `actant.experiment.reasoning-text@1`, or
+`actant.experiment.request-body@1`. Text compares Unicode code points exactly;
+body compares original serialized bytes. There is no normalization or fallback.
+Completed empty text is available; absent reasoning is unavailable. Results are
+`Equal`, `NotEqual`, `NotComparable` (exit 0, 1, 2). Corruption is always
+NotComparable, even when an earlier valid prefix contains the selected answer.
+A valid incomplete prefix may support a narrow comparison, without claiming that
+the suite succeeded. Missing/invalid inputs and publication errors use exit 2.
+
+Alignment hashes the exact user prefix, turn ordinal, replay history policy and
+context policy. Different inputs require explicit `--allow-input-differences`.
+The report separately discloses actual query-history, requested-option,
+configuration and provenance digests. Equal user input does not imply equal
+earlier generated answers. Unit/configuration mapping is the selected pair; no
+automatic repetition joins or statistical independence is asserted. Copies of the
+same bound observation are labelled. Default summaries contain availability,
+lengths, hashes and first differing byte/code-point offset, with no text snippets.
+
+`report` accepts repeated exact `--unit` and `--turn` selectors (duplicates reject).
+No selector means all known planned rows. It preserves original archive/suite,
+unit, turn, Job, lifetime and cleanup outcomes. Counts distinguish planned rows,
+actual transport attempts and final may-have-sent observations. Metrics include
+the existing App turn duration, native reported completion tokens, PM first-text
+delivery latency, and PM delivered Unicode characters. App duration includes
+preparation/archive work and call cleanup, ending before the completed-turn ACK;
+it is not engine latency. PM measurements use only that call-final source session
+and monotonic epoch; hardware tail is never call cost. Character counts are not
+tokens. Missing measurements remain null. Aggregates have explicit contributing/
+excluded denominators, fixed reasons, exact decimal integers and rational means;
+row status and aggregate status strata remain visible. No timing/rate joins across
+clock epochs, performance ranking, quality grading or causal attribution is made.
+
+Default JSON/table/CSV omits prompts, answer/reasoning, request bytes, paths, raw
+startup diagnostics and connection credentials. `--include-content` requires ONE
+explicit unit/turn and JSON, and includes selected private answer/reasoning and
+base64 original body with original byte length/digest. `--include-observations`
+has the same selected JSON restriction and includes numeric call-final evidence.
+Neither flag exports runtime authority or live connection data. CSV is summary
+only, with fixed versioned columns, JSON-style control/bidi escaping and apostrophe
+protection for spreadsheet formulas. JSON preserves exact strings inside escapes.
+
+Reports bind the unfiltered reader-validated manifest hash and exact committed
+sequence/COMMIT hash. Later append activity is outside that bound; hostile
+concurrent mutation is not supported. They preserve the existing archive reader's
+R1 integrity checks. Limits: two archives, cumulative actual/declarative source
+bytes 512 MiB, retained views 128 MiB, selected blob workspace 48 MiB, 512 known
+rows across inputs, 256 reported/CSV rows, 4096 escaped characters per CSV cell,
+4 MiB summary output and 32 MiB selected private JSON. Base64 and escaping expansion
+are checked before allocation/publication. Excess rejects, without truncating
+comparison data. These are logical work bounds, not a process RSS guarantee.
+
+Exports require an existing root and an ASCII basename `[A-Za-z0-9_-]{1,64}`.
+The destination is reserved exclusively and cannot be beneath a supplied source
+archive. No overwrite/retry. Data is flushed/fsynced/closed then renamed inside
+the reserved directory. The digest-bound export manifest is published last.
+Without it, the directory is incomplete. `publicationState=complete` means complete
+export bytes, not source success, caller ACK return or stronger durability. Corrupt
+prefix diagnostics remain explicitly qualified and return exit 2.
+
+Host 3 continues accepted archive 1 / execution 4 behavior. `host4.example.json`
+adds an explicit disabled-by-default `observation` policy; host 4 emits archive 2,
+record/commit 2 and execution 5. There is one version-dispatching reader, no archive
+migration or source mutation. Archive 1 observations are unavailable. Archive 2
+requires typed policy/snapshots/cleanup and keeps every inherited R1 check.
+
+Only trusted host configuration selects up to eight exact configuration/repetition/
+turn triples. Needs are explicit booleans, retention <=128 samples/windows and
+cadence .25..30 seconds. One selected call can additionally request live viewing
+with an exact literal 127.0.0.1 HTTP origin/nonprivileged port; bridge binding is
+fixed loopback port zero. No observation sessions/claims/listener/Pack activation/
+worker/viewer start when disabled (the host's inactive default infrastructure exists).
+
+PM-only calls use fresh single-use RUN sessions. Live calls use APPLICATION sessions,
+with independent capture and viewer parent grants. `maxLifetimeSeconds` (.25..30,
+default 10) starts BEFORE session request and bounds viewer access/post-call tail;
+it is not an absolute forced source-disposal deadline. An in-flight guard covers
+setup, one actual facade call, immutable call-final copy and its archive ACK. Expiry
+revokes only viewer access during that period. Source/capture release follows guard
+exit immediately if expired, or after the remaining tail / suite teardown. There
+is no tail extension after a long call. Timer/callback code retains no Context or
+inference session. No controller lock spans inference, archive sinks, release or IO.
+Existing native hardware/service-lock hangs can delay cleanup; pending/unknown
+stays explicit. There is no force-stop guarantee.
+
+The immutable initial archive policy records `pending-activation` when live
+activation is still pending before runtime startup. Actual snapshots/independent
+cleanup facts supply later evidence; this marker is not an activation receipt.
+Optional setup/codec/viewer failures yield unavailable observations. An LLM error is
+never retried unobserved. Required archive failures stay fatal and first primary
+exits/provider cleanup remain distinct from observation and Job outcomes.
+
+The plain CLI has no private credential hook: live viewing is explicitly
+`no-private-handoff`, no bridge starts, and PM RUN capture still works. Embedders
+may call `launcher.execute(prepared, resultsDirectory,
+observationHandoff=trustedCallback)`. The callback receives one `PrivateNotice`;
+`notice.value()` gives `{schemaId,suiteId,unitId,turnId,observationId,connection,
+publication}` with the exact G-01 private connection and publication descriptors.
+It runs once on an independent worker, outside runtime/controller/queue locks;
+inference never waits for viewer readiness. Repr omits the <=4 KiB private notice.
+There is no descriptor file, stdout, URL credential, browser storage or automatic
+browser/server startup. Trusted callback code must keep this data private; it is
+not a sandbox. Exceptions become fixed handoff status, without raw cause/trace in
+Job/results. A stalled worker stays pending/owned until return/process exit;
+source/endpoint teardown makes its stale credential unusable. Trusted embedding
+may also supply a borrowed public `telemetryService`; unrelated claims survive.
+
+The runnable App-owned `tests.first_party.experimentRunner.browserSmoke` harness
+demonstrates this hook via a private child-stdin channel, unchanged G-02, actual
+App/LLM/PM/G lifecycle and explicitly SYNTHETIC held provider I/O:
+
+```powershell
+python -m tests.first_party.experimentRunner.browserSmoke --node NODE_EXE --playwright PLAYWRIGHT_PACKAGE --browser EDGE_EXE --screenshots NEW_PRIVATE_DIRECTORY
+```
+
+It verifies two independent viewer pages, polling bounds, pause/disconnect,
+call-final retention, revocation, endpoint closure and credential privacy, and
+produces screenshots for inspection. This does not claim real-model evidence.
+The worker has no approved local Qwen assets/prior private real archive. Integration
+must separately run its approved real archive/compare/export/opt-in eight-call gate
+after source review. No shared backend/provider/bridge/viewer changes were needed.

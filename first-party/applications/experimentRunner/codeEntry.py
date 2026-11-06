@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/codeEntry.py ; version: 3
+# file: first-party/applications/experimentRunner/codeEntry.py ; version: 4
 """One bounded conversation Job with ephemeral, rollback-independent diagnostics."""
 from __future__ import annotations
 
@@ -180,10 +180,13 @@ class Recorder:
                 try:
                     if port is not None:
                         port.begin(turn['id'], current['query'], requested)
-                    with port.capture() if port is not None else nullcontext() as captureState:
+                    observed = (port.observationController.begin(ctx, port, turn['id'])
+                        if port is not None and port.observationController is not None else None)
+                    with observed if observed is not None else nullcontext() as observation, \
+                         port.capture() if port is not None else nullcontext() as captureState:
                         response = ctx.llm.run(providerName='llama.cpp', model=selector, query=query.toQuery(),
                                                providerOptions=requested, context=FreshContext(required=False, retain=False),
-                                               streamObserver=observe, session=session)
+                                               streamObserver=observe, session=session, observation=observation)
                         if captureState is not None:
                             captureState[0] = True
                     evidence = evidenceSnapshot(response.executionEvidence)

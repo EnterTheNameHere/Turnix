@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveReader.py ; version: 1
+# file: first-party/applications/experimentRunner/archiveReader.py ; version: 2
 """Bounded read-only committed-prefix recovery, independent of backend and assets."""
 from __future__ import annotations
 
@@ -87,6 +87,7 @@ def _inspectArchive(root, unitId, turnId, includeContent):
     fmt.require(rawHeader == fmt.canonical(header))
     fmt.manifest(header)
     caps = header['limits']
+    version = int(header['schemaId'].rsplit('@', 1)[1])
     reader, grammar = BlobReader(root, caps), fmt.Grammar(header)
     total = 0
     count = 0
@@ -104,7 +105,7 @@ def _inspectArchive(root, unitId, turnId, includeContent):
                     total += info.st_size
                     fmt.require(total <= caps['archiveBytes'])
     regular(root / 'records.log')
-    view = dict(schemaId=fmt.PREFIX + 'archive-view@1', archiveId=header['archiveId'],
+    view = dict(schemaId=fmt.PREFIX + 'archive-view@' + str(version), archiveId=header['archiveId'],
         suiteId=header['suiteId'], status='incomplete', tail='none', committedSequence=0,
         ackObservation='unavailable', writerCloseObservation='unavailable',
         lastObservedSuiteStatus=None, records=[], content=[], failureSequence=None)
@@ -136,9 +137,9 @@ def _inspectArchive(root, unitId, turnId, includeContent):
                 fmt.require(line == fmt.canonical(value) + b'\n')
                 if pending is None:
                     fmt.fields(value, fmt.DATA_KEYS)
-                    fmt.require(value['schemaId'] == fmt.PREFIX + 'archive-record@1')
-                    fmt.require(type(value['kind']) is str and value['kind'] in fmt.PAYLOADS)
-                    fmt.fields(value['payload'], fmt.PAYLOADS[value['kind']])
+                    fmt.require(value['schemaId'] == fmt.PREFIX + 'archive-record@' + str(version))
+                    fmt.require(type(value['kind']) is str)
+                    fmt.fields(value['payload'], fmt.payloadKeys(value['kind'], version))
                     fmt.require(value['sequence'] == view['committedSequence'] + 1)
                     fmt.integer(value['sequence'], 1, caps['logicalRecords'])
                     fmt.require(value['previousCommitHash'] == previous and value['dataSha256'] == fmt.hashWithout(value, 'dataSha256'))
@@ -147,7 +148,7 @@ def _inspectArchive(root, unitId, turnId, includeContent):
                 fmt.require(len(line) <= 1024)
                 fmt.fields(value, fmt.COMMIT_KEYS)
                 fmt.integer(value['sequence'], 1, caps['logicalRecords'])
-                fmt.require(value['schemaId'] == fmt.PREFIX + 'archive-commit@1' and
+                fmt.require(value['schemaId'] == fmt.PREFIX + 'archive-commit@' + str(version) and
                     value['sequence'] == pending['sequence'] and value['dataSha256'] == pending['dataSha256'] and
                     value['previousCommitHash'] == previous and value['commitSha256'] == fmt.hashWithout(value, 'commitSha256'))
                 grammar.apply(pending, reader)
@@ -202,6 +203,8 @@ def _inspectArchive(root, unitId, turnId, includeContent):
             lifetimeBoundary='unavailable' if observed is None else observed['lifetimeBoundary'], turns=turns))
     view['units'] = observations
     view['limits'] = dict(caps)
+    if version == 2:
+        view['observations'] = grammar.observations
     fmt.require(unitId is None or unitId in grammar.planned)
     fmt.require(turnId is None or any(turnId in unit['turnIds'] for key, unit in grammar.planned.items() if unitId is None or key == unitId))
     fmt.require(len(fmt.canonical(view)) <= caps['inspectBytes'])

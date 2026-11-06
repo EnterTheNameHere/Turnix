@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archive.py ; version: 1
+# file: first-party/applications/experimentRunner/archive.py ; version: 2
 """Launcher-owned bounded archive worker, outside invocation rollback/IO scope."""
 from __future__ import annotations
 
@@ -28,13 +28,13 @@ def document(schemaId, **facts):
     return artifact(fmt.canonical(dict(schemaId=fmt.PREFIX + schemaId, **facts)))
 
 
-def preflight(definition, policy, caps):
+def preflight(definition, policy, caps, *, observation=False):
     """Reserve worst-case records/escaped bounded data before archive or model startup."""
     fmt.limits(caps)
     value = definition.value()
     units = len(value['configurations']) * value['repetitions']
     turns = units * len(value['conversation']['turns'])
-    records = 8 + units * 2 + turns * (caps['partialRecords'] + 7)
+    records = 8 + units * 2 + turns * (caps['partialRecords'] + 7) + (24 if observation else 0)
     fmt.require(records <= caps['logicalRecords'])
     chars = policy['maxOutputCharacters']
     conversation = value['conversation']['turns']
@@ -48,6 +48,7 @@ def preflight(definition, policy, caps):
     partial = caps['pendingBytes']
     reserve = records * caps['frameBytes'] + turns * (caps['requestBytes'] + query + 6 * chars + 65536)
     reserve += turns * caps['partialRecords'] * partial + units * 262144 + 1048576
+    reserve += 32 * 1024 * 1024 if observation else 0
     fmt.require(reserve <= caps['archiveBytes'] and query <= caps['artifactBytes'])
 
 
@@ -77,14 +78,16 @@ def writeAll(handle, raw):
 class ArchiveWriter:
     """One worker owns handles until completion/exit; timeout never steals its IO."""
 
-    def __init__(self, root, suite, caps, cancel, *, cancelled=None):
+    def __init__(self, root, suite, caps, cancel, *, cancelled=None, version=1):
         """Prepare inert ownership so callers can root cleanup before thread startup."""
         self.caps = fmt.limits(caps)
         self.archiveId = uuid4().hex
         self.path = Path(root).absolute() / self.archiveId
-        self.header = dict(schemaId=fmt.PREFIX + 'archive@1', archiveId=self.archiveId,
+        fmt.require(type(version) is int and version in (1, 2))
+        self.version = version
+        self.header = dict(schemaId=fmt.PREFIX + 'archive@' + str(version), archiveId=self.archiveId,
             suiteId=suite['suiteId'], createdTimeNs=time.time_ns(), definitionSha256=suite['definitionSha256'],
-            format='data-commit-json-lines@1', durability='local-process-death-os-running', limits=self.caps)
+            format='data-commit-json-lines@' + str(version), durability='local-process-death-os-running', limits=self.caps)
         self.cancel = cancel
         self.forwardCancellation = cancelled
         self.lane = Condition()
@@ -286,14 +289,14 @@ class ArchiveWriter:
                     writeAll(target, raw)
                 self.bytes += len(raw)
         directorySync(self.path / 'artifacts')
-        data = dict(schemaId=fmt.PREFIX + 'archive-record@1', sequence=self.sequence + 1,
+        data = dict(schemaId=fmt.PREFIX + 'archive-record@' + str(self.version), sequence=self.sequence + 1,
             previousCommitHash=self.previous, kind=command['kind'], archiveId=self.archiveId,
             suiteId=self.header['suiteId'], unitId=command['unitId'], turnId=command['turnId'],
             observedTimeNs=time.time_ns(), payload=fmt.decode(command['payload']),
             artifacts=[ref for ref, _ in unique.values()])
         data['dataSha256'] = fmt.hashWithout(data, 'dataSha256')
         self.grammar.apply(data, reader.BlobReader(self.path, self.caps))
-        commit = dict(schemaId=fmt.PREFIX + 'archive-commit@1', sequence=data['sequence'],
+        commit = dict(schemaId=fmt.PREFIX + 'archive-commit@' + str(self.version), sequence=data['sequence'],
             dataSha256=data['dataSha256'], previousCommitHash=self.previous)
         commit['commitSha256'] = fmt.hashWithout(commit, 'commitSha256')
         dataRaw, commitRaw = fmt.canonical(data) + b'\n', fmt.canonical(commit) + b'\n'
@@ -367,6 +370,27 @@ class UnitArchivePort:
         self.turnRefs = []
         self.started = []
         self.attemptId = self.turnId = None
+        self.attemptIds, self.callIds, self.observationTurns = {}, {}, {}
+        self.observationController = None
+        self.configurationIndex, self.repetition = unit['configurationIndex'], unit['repetition']
+
+    def attemptIdFor(self, turnId):
+        """Resolve the immutable planned attempt instead of the port's later active turn."""
+        return self.attemptIds[turnId]
+
+    def callIdFor(self, turnId):
+        """Use only actual request-evidence call identity; opt-out remains unavailable."""
+        return self.callIds.get(turnId)
+
+    def observationRecord(self, kind, observationId, value):
+        """ACK versioned per-attempt observations without altering Job/provider outcomes."""
+        if kind == 'observation-snapshot':
+            self.observationTurns[observationId] = value['turnId']
+        turnId = self.observationTurns[observationId]
+        blob = artifact(fmt.canonical(value))
+        payload = dict(attemptId=self.attemptIdFor(turnId), observationId=observationId)
+        payload['observationRef' if kind == 'observation-snapshot' else 'cleanupRef'] = blob[0]
+        self.writer.checkpoint(kind, payload, unitId=self.unitId, turnId=turnId, artifacts=(blob,))
 
     def check(self):
         """Gate every later turn on sticky host writer failure."""
@@ -377,6 +401,7 @@ class UnitArchivePort:
         self.check()
         fmt.require(turnId in self.turnIds)
         self.turnId, self.attemptId = turnId, uuid4().hex
+        self.attemptIds[turnId] = self.attemptId
         queryBlob, optionsBlob = artifact(fmt.canonical(query)), artifact(fmt.canonical(options))
         self.writer.checkpoint('turn-planned', dict(queryRef=queryBlob[0], requestedOptionsRef=optionsBlob[0],
             attemptId=self.attemptId), unitId=self.unitId, turnId=turnId, artifacts=(queryBlob, optionsBlob),
@@ -402,6 +427,7 @@ class UnitArchivePort:
     def evidence(self, event):
         """Durably ACK exact private provider bytes/phase facts, never reserialize body."""
         self.check()
+        self.callIds[self.turnId] = event.callId
         body = None if event.body is None else artifact(event.body, encoding='raw')
         payload = dict(attemptId=self.attemptId, providerCallId=event.callId, phase=event.phase,
             bodyRef=None if body is None else body[0], length=event.length, sha256=event.sha256,
@@ -436,6 +462,7 @@ class ArchiveRun:
         self.ports, self.unitRefs = {}, []
         self.initialProvenance = None
         self.suiteSequence = None
+        self.observationPolicy = None
 
     def compose(self, snapshot):
         """Delegate actual provider publication then bind the exact loaded caller."""
@@ -452,8 +479,14 @@ class ArchiveRun:
         plan = document('plan@1', units=[dict(unitId=u['unitId'], configurationIndex=u['configurationIndex'],
             repetition=u['repetition'], profileAlias=u['profileAlias'], turnIds=[t['turnId'] for t in u['run']['turns']]) for u in suite['units']])
         self.initialProvenance = document('provenance@1', facts=provenance)
-        self.writer.checkpoint('suite-planned', dict(definitionRef=definition[0], planRef=plan[0],
-            initialProvenanceRef=self.initialProvenance[0]), artifacts=(definition, plan, self.initialProvenance))
+        payload = dict(definitionRef=definition[0], planRef=plan[0], initialProvenanceRef=self.initialProvenance[0])
+        artifacts = (definition, plan, self.initialProvenance)
+        if self.writer.version == 2:
+            fmt.require(self.observationPolicy is not None)
+            policy = artifact(fmt.canonical(self.observationPolicy))
+            payload['observationPolicyRef'] = policy[0]
+            artifacts += (policy,)
+        self.writer.checkpoint('suite-planned', payload, artifacts=artifacts)
 
     def unit(self, unit, jobId):
         """ACK planned Job and unit options before prepare/runJob and model transition."""

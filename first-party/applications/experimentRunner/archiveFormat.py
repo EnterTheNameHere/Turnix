@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 2
+# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 3
 """Strict, standard-library-only archive grammar; no execution or runtime imports."""
 from __future__ import annotations
 
@@ -38,6 +38,17 @@ PAYLOADS = {
 TURN_KEYS = ('turnId', 'input', 'status', 'query', 'requestedOptions', 'answer', 'reasoning',
     'native', 'executionProfile', 'executionEvidence', 'cleanup', 'startedTimeNs',
     'endedTimeNs', 'durationNs', 'error', 'partial')
+
+
+def payloadKeys(kind, version):
+    """Dispatch exact versioned additions while preserving the complete original grammar."""
+    if version == 2:
+        if kind == 'suite-planned':
+            return (*PAYLOADS[kind], 'observationPolicyRef')
+        if kind in ('observation-snapshot', 'observation-cleanup'):
+            return ('attemptId', 'observationId', 'observationRef' if kind == 'observation-snapshot' else 'cleanupRef')
+    require(kind in PAYLOADS)
+    return PAYLOADS[kind]
 
 
 class ArchiveError(RuntimeError):
@@ -140,13 +151,13 @@ def reference(value, caps):
 def manifest(value):
     """Validate immutable archive identity and process-death durability declaration."""
     fields(value, ('schemaId', 'archiveId', 'suiteId', 'createdTimeNs', 'definitionSha256', 'format', 'durability', 'limits'))
-    require(value['schemaId'] == PREFIX + 'archive@1')
+    require(value['schemaId'] in (PREFIX + 'archive@1', PREFIX + 'archive@2'))
     identifier(value['archiveId'], opaque=True)
     identifier(value['suiteId'], opaque=True)
     require(value['archiveId'] != value['suiteId'])
     integer(value['createdTimeNs'])
     hashValue(value['definitionSha256'])
-    require(value['format'] == 'data-commit-json-lines@1')
+    require(value['format'] == 'data-commit-json-lines@' + value['schemaId'].rsplit('@', 1)[1])
     require(value['durability'] == 'local-process-death-os-running')
     limits(value['limits'])
 
@@ -177,6 +188,10 @@ class Grammar:
         """Start an empty committed-prefix projection from a validated manifest."""
         manifest(header)
         self.header, self.caps = header, header['limits']
+        self.version = int(header['schemaId'].rsplit('@', 1)[1])
+        self.observationPolicy = None
+        self.observations = {}
+        self.observationBytes = 0
         self.planned, self.units, self.terminals = {}, {}, {}
         self.unitStatuses = {}
         self.unitObservations = {}
@@ -200,12 +215,12 @@ class Grammar:
         referenced blobs are checked even if an inspection omits their content.
         """
         fields(data, DATA_KEYS)
-        require(data['schemaId'] == PREFIX + 'archive-record@1' and self.seal is None)
+        require(data['schemaId'] == PREFIX + 'archive-record@' + str(self.version) and self.seal is None)
         require(data['archiveId'] == self.header['archiveId'] and data['suiteId'] == self.header['suiteId'])
         integer(data['observedTimeNs'])
         kind, payload = data['kind'], data['payload']
-        require(type(kind) is str and kind in PAYLOADS)
-        fields(payload, PAYLOADS[kind])
+        require(type(kind) is str)
+        fields(payload, payloadKeys(kind, self.version))
         require(type(data['artifacts']) is list and len(data['artifacts']) <= 4)
         declared = {}
         for ref in data['artifacts']:
@@ -263,12 +278,71 @@ class Grammar:
             for unit, expectedUnit in zip(self.planned.values(), expected, strict=True):
                 require((unit['configurationIndex'], unit['repetition'], unit['profileAlias']) == expectedUnit)
                 require(unit['turnIds'] == [turn['id'] for turn in definition['conversation']['turns']])
+            if self.version == 2:
+                observationFormat = importlib.import_module('first-party.applications.experimentRunner.observationFormat')
+                self.observationPolicy = decode(blob(payload['observationPolicyRef']))
+                observationFormat.policy(self.observationPolicy)
+                for selected in self.observationPolicy['calls']:
+                    require(any(selected['configurationIndex'] == unit['configurationIndex'] and selected['repetition'] == unit['repetition']
+                        and selected['turnId'] in unit['turnIds'] for unit in self.planned.values()))
             self.started = True
         else:
             require(self.started)
             if unitId is not None:
-                require(unitId in self.planned and self.suiteOutcome is None)
-            if kind == 'unit-planned':
+                require(unitId in self.planned and (self.suiteOutcome is None or kind in ('observation-snapshot', 'observation-cleanup')))
+            if kind in ('observation-snapshot', 'observation-cleanup'):
+                observationFormat = importlib.import_module('first-party.applications.experimentRunner.observationFormat')
+                require(self.version == 2 and self.observationPolicy['enabled'] and (unitId, turnId) in self.turns)
+                turn = self.turns[unitId, turnId]
+                planned = self.planned[unitId]
+                require(dict(configurationIndex=planned['configurationIndex'], repetition=planned['repetition'], turnId=turnId)
+                        in self.observationPolicy['calls'])
+                require(payload['attemptId'] == turn['attemptId'])
+                identifier(payload['observationId'], opaque=True)
+                key = payload['observationId']
+                ref = payload['observationRef' if kind == 'observation-snapshot' else 'cleanupRef']
+                require(ref['bytes'] <= 2 * 1024 * 1024)
+                self.observationBytes += ref['bytes']
+                require(self.observationBytes <= 32 * 1024 * 1024)
+                value = decode(blob(ref))
+                if kind == 'observation-snapshot':
+                    observationFormat.observation(value)
+                    live = self.observationPolicy['liveSelection']
+                    if value['sourceLifetime'] == 'application':
+                        require(live['requested'] and live['call'] == dict(configurationIndex=planned['configurationIndex'],
+                            repetition=planned['repetition'], turnId=turnId) and self.observationPolicy['effectiveLiveAvailability']
+                            not in ('not-requested', 'no-private-handoff'))
+                    if value['publicData'] is not None:
+                        request = self.observationPolicy['request']
+                        public = value['publicData']
+                        require(all(public['needs'][k] == request[k] for k in ('memory', 'cpu', 'gpu', 'stream')))
+                        require(all(public[k] == request[k] for k in ('sampleIntervalSeconds', 'windowSeconds')))
+                        require(public['retention']['hardwareSamples'] == str(request['historySamples']) and
+                            public['retention']['streamWindows'] == str(request['historyWindows']))
+                    require(all(value[k] == data[k] for k in ('suiteId', 'unitId', 'turnId')))
+                    require(value['attemptId'] == payload['attemptId'] and value['observationId'] == key)
+                    require(value['providerCallId'] == turn['providerCallId'])
+                    if value['phase'] == 'call-final':
+                        require(key not in self.observations and not any(o['unitId'] == unitId and o['turnId'] == turnId for o in self.observations.values()))
+                        require(len(self.observations) < 8)
+                        self.observations[key] = dict(unitId=unitId, turnId=turnId, sourceLifetime=value['sourceLifetime'],
+                            sessionId=value['sessionId'], clockEpochId=value['clockEpochId'], tail=False, cleanup=False)
+                    else:
+                        require(key in self.observations)
+                        prior = self.observations[key]
+                        require(not prior['tail'] and not prior['cleanup'] and value['sourceLifetime'] == prior['sourceLifetime'] == 'application')
+                        require(all(value[k] == prior[k] for k in ('unitId', 'turnId')))
+                        if value['availability'] == 'available' and prior['sessionId'] is not None:
+                            require(all(value[k] == prior[k] for k in ('sessionId', 'clockEpochId')))
+                        require(not any(o['tail'] for o in self.observations.values()))
+                        prior['tail'] = True
+                else:
+                    observationFormat.cleanup(value)
+                    require(value['observationId'] == key and key in self.observations)
+                    prior = self.observations[key]
+                    require(not prior['cleanup'] and prior['unitId'] == unitId and prior['turnId'] == turnId)
+                    prior['cleanup'] = True
+            elif kind == 'unit-planned':
                 require(turnId is None and self.activeUnit is None and unitId not in self.units)
                 require(self.nextUnit < len(self.planned) and list(self.planned)[self.nextUnit] == unitId)
                 planned = self.planned[unitId]
@@ -308,6 +382,8 @@ class Grammar:
                     require(state['active'] is None and state['turnIndex'] < len(self.planned[unitId]['turnIds']))
                     require(self.planned[unitId]['turnIds'][state['turnIndex']] == turnId)
                     identifier(payload['attemptId'], opaque=True)
+                    if self.version == 2:
+                        require(not any(t['attemptId'] == payload['attemptId'] for t in self.turns.values()))
                     query = decode(blob(payload['queryRef']))
                     fields(query, ('formatId', 'messages'))
                     require(query['formatId'] == 'actant.llm.messages@1' and type(query['messages']) is list)
@@ -411,6 +487,12 @@ class Grammar:
                 require(type(decode(blob(payload['evidenceRef']))) is dict)
             elif kind == 'archive-seal':
                 require(unitId is None and turnId is None and self.suiteOutcome is not None)
+                if self.version == 2 and self.observationPolicy['enabled']:
+                    for (unit, turnId), turn in self.turns.items():
+                        planned = self.planned[unit]
+                        selected = dict(configurationIndex=planned['configurationIndex'], repetition=planned['repetition'], turnId=turnId)
+                        if selected in self.observationPolicy['calls']:
+                            require(any(o['unitId'] == unit and o['turnId'] == turnId and o['cleanup'] for o in self.observations.values()))
                 require(payload['lastObservedSuiteStatus'] == self.suiteOutcome and payload['finalizationObserved'] == 'not-yet-closed')
                 integer(payload['terminalSequence'], 1, data['sequence'] - 1)
                 self.seal = data['sequence']
