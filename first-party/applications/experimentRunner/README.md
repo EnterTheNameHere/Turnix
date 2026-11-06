@@ -466,3 +466,30 @@ produces screenshots for inspection. This does not claim real-model evidence.
 The worker has no approved local Qwen assets/prior private real archive. Integration
 must separately run its approved real archive/compare/export/opt-in eight-call gate
 after source review. No shared backend/provider/bridge/viewer changes were needed.
+
+EX-05-R1 preserves the provider's actual cleanup action status (`attempted`,
+`acknowledged`, `failed`, `unknown`) separately from `confirmed`/`unknown`
+quiescence in reports, JSON, CSV and table output. Missing action evidence is
+`unavailable`; confirmation of quiescence never fabricates an acknowledgement.
+Unrecognized private diagnostic values are not copied into summaries. The report
+generator identifies this correction as sourceVersion 2; stored schema IDs stay
+unchanged.
+
+Retained PM timestamps now need consistent bounds within their recorded epoch:
+origin/observed-through/end, first/last delivery, first-text latency and elapsed
+silence. Active, terminal, unavailable and released evidence must agree with its
+nullable fields. Windows validate their own bounds, delivered counts, gap extrema
+and sums, numeric rates, ordering and matching correlation intervals. Gap statistics
+can include an arrival before a window, and evicted windows are never treated as
+complete retained history. Whole-host collection intervals remain separate from
+the stream span, and display wall time is not used for monotonic arithmetic.
+Empty/no-first-text, partial, cancelled, unavailable and truncated observations
+remain supported. An outer unavailable-stream marker excludes PM metrics even
+when a numeric snapshot is retained.
+
+Contradictory committed snapshots are corruption at that record, preserving the
+preceding validated prefix in both full and selected views. Their measurements
+cannot become available report metrics. Online optional codec contradictions become
+unavailable observation evidence, with no inference retry or changed Job/provider
+outcome. No timestamp is repaired, no clock domain is inferred, and no shared
+backend/provider/bridge/viewer contract was changed.

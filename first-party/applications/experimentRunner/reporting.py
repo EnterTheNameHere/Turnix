@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/reporting.py ; version: 1
+# file: first-party/applications/experimentRunner/reporting.py ; version: 2
 """Offline, bounded comparisons and descriptive reports over validated archives."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ reportSchema = importlib.import_module('first-party.applications.experimentRunne
 fmt = reader.fmt
 MIB = 1024 * 1024
 BASE_REF = 'f7e95c536944e25abf3ff79652cbb18d9e8cce44'
-GENERATOR = dict(implementationId='applications.experimentRunner.reporting', sourceVersion=1,
+GENERATOR = dict(implementationId='applications.experimentRunner.reporting', sourceVersion=2,
                  applicationBaseRef=BASE_REF)
 MODES = tuple(fmt.PREFIX + item + '@1' for item in ('answer-text', 'reasoning-text', 'request-body'))
 METRICS = (('application.turn-duration-ns@1', 'nanoseconds'),
@@ -254,7 +254,7 @@ def metrics(selected):
             metric(*METRICS[1], tokens, 'native-usage-unavailable', 'provider-reported-completion-tokens')]
     observation = selected['observation']
     data = None if observation is None else observation['publicData']
-    stream = None if data is None else data['stream']
+    stream = None if data is None or data['streamAvailability'] == 'unavailable' else data['stream']
     for definition, key in ((METRICS[2], 'firstTextLatencyNs'), (METRICS[3], 'characterCount')):
         measured = None if stream is None or stream['availability'] != 'available' or stream['originNs'] is None else stream[key]
         provenance = dict(definition='pm-stream-delivery@1', phase='call-final',
@@ -331,7 +331,8 @@ def report(directory, *, unitIds=(), turnIds=(), includeContent=False, includeOb
 
 
 def cleanCleanup(value):
-    """Project only known cleanup facts; arbitrary private archive metadata is not output."""
-    statuses = ('unavailable', 'not-required', 'confirmed', 'failed', 'unknown', 'pending', 'completed')
-    return dict(status=value.get('status') if value.get('status') in statuses else 'unknown',
+    """Preserve actual action status separately from quiescence and absent evidence."""
+    status = value.get('status')
+    status = 'unavailable' if status is None else status if status in reportSchema.CLEANUP_STATUSES else 'unknown'
+    return dict(status=status,
                 quiescence='confirmed' if value.get('quiescence') == 'confirmed' else 'unknown')

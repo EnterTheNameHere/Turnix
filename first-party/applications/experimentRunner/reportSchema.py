@@ -1,10 +1,12 @@
-# file: first-party/applications/experimentRunner/reportSchema.py ; version: 1
+# file: first-party/applications/experimentRunner/reportSchema.py ; version: 2
 """Closed typed offline report values; generated diagnostics carry no live authority."""
 import importlib
 import base64
 import re
 
 fmt = importlib.import_module('first-party.applications.experimentRunner.archiveFormat')
+# ProviderEffect's action status is independent of its quiescence evidence.
+CLEANUP_STATUSES = ('attempted', 'acknowledged', 'failed', 'unknown', 'unavailable')
 
 
 def enum(value, choices):
@@ -113,7 +115,7 @@ def validate(value):
         fmt.fields(value, (*common, 'mode', 'result', 'reasons', 'alignment', 'fieldAvailability', 'difference', 'sourceOutcomes'))
     fmt.fields(value['generator'], ('implementationId', 'sourceVersion', 'applicationBaseRef'))
     fmt.require(value['generator']['implementationId'] == 'applications.experimentRunner.reporting')
-    fmt.integer(value['generator']['sourceVersion'], 1, 1)
+    fmt.integer(value['generator']['sourceVersion'], 1, 2)
     fmt.require(type(value['generator']['applicationBaseRef']) is str and re.fullmatch('[0-9a-f]{40}', value['generator']['applicationBaseRef']))
     fmt.require(type(value['sources']) is list and len(value['sources']) <= 2)
     for item in value['sources']:
@@ -160,7 +162,7 @@ def report(value):
         fmt.require(row['jobOutcome'] is None or row['jobOutcome'] in ('unavailable', 'Pending', 'Running', 'Succeeded', 'Failed', 'Cancelled'))
         enum(row['lifetimeBoundary'], ('not-started', 'unavailable', 'completed', 'failed-or-unknown'))
         fmt.fields(row['callCleanup'], ('status', 'quiescence'))
-        enum(row['callCleanup']['status'], ('unavailable', 'not-required', 'confirmed', 'failed', 'unknown', 'pending', 'completed'))
+        enum(row['callCleanup']['status'], CLEANUP_STATUSES)
         enum(row['callCleanup']['quiescence'], ('unknown', 'confirmed'))
         availability(row['fieldAvailability'])
         fmt.require(type(row['metrics']) is list and len(row['metrics']) == 4)

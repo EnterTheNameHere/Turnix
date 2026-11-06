@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/observationFormat.py ; version: 1
+# file: first-party/applications/experimentRunner/observationFormat.py ; version: 2
 """Stdlib typed App observation archive projection; no collectors or runtime imports."""
 import importlib
 import math
@@ -92,6 +92,100 @@ def window(value):
         decimal(value[key], nullable=key in ('firstTextNs', 'lastTextNs', 'minGapNs', 'maxGapNs'))
     fmt.require(int(value['endNs']) >= int(value['startNs']) and type(value['partial']) is bool)
     signal(value['charactersPerSecond'], 'unicode-code-points/second')
+    deliveryFacts(value)
+    start, end = int(value['startNs']), int(value['endNs'])
+    if value['firstTextNs'] is not None:
+        fmt.require(start <= int(value['firstTextNs']) <= int(value['lastTextNs']) <= end)
+        fmt.require(value['partial'] or int(value['lastTextNs']) < end)
+    count, gaps = int(value['deliveryCount']), int(value['gapCount'])
+    fmt.require(max(0, count - 1) <= gaps <= count)
+    if gaps == 0:
+        fmt.require(value['gapSumNs'] == '0' and value['minGapNs'] is None and value['maxGapNs'] is None)
+    else:
+        fmt.require(value['minGapNs'] is not None and value['maxGapNs'] is not None)
+        low, high, total = int(value['minGapNs']), int(value['maxGapNs']), int(value['gapSumNs'])
+        fmt.require(low <= high and low * gaps <= total <= high * gaps)
+    # Gaps include the previous arrival even outside this window: no span cap.
+    rate = int(value['characterCount']) * 1e9 / (end - start) if end > start else None
+    encodedRate = rate if rate is not None and math.isfinite(rate) and abs(rate) <= 2 ** 53 - 1 else None
+    fmt.require(value['charactersPerSecond']['value'] == encodedRate)
+
+
+def deliveryFacts(value):
+    """Keep empty delivery evidence distinct from missing first text or positive counts."""
+    characters, deliveries = int(value['characterCount']), int(value['deliveryCount'])
+    fmt.require(characters >= deliveries and (characters == 0) == (deliveries == 0))
+    first, last = value['firstTextNs'], value['lastTextNs']
+    if deliveries == 0:
+        fmt.require(first is None and last is None)
+    else:
+        fmt.require(first is not None and last is not None and int(first) <= int(last))
+        fmt.require(deliveries != 1 or first == last)
+
+
+def streamFacts(value, windowSeconds, windowLimit):
+    """Check same-epoch stream bounds and derived values without reconstructing lost history."""
+    deliveryFacts(value)
+    origin, through, end = (None if value[key] is None else int(value[key])
+                            for key in ('originNs', 'observedThroughNs', 'endNs'))
+    first, last = (None if value[key] is None else int(value[key]) for key in ('firstTextNs', 'lastTextNs'))
+    active, released = value['active'], value['released']
+    fmt.require(not released or not active)
+    fmt.require(not active or value['outcome'] is None)
+    if value['availability'] == 'unavailable':
+        fmt.require(value['state'] == 'unavailable')
+    else:
+        fmt.require(value['state'] == ('not-started' if origin is None else 'active' if active else 'terminal'))
+        if origin is None:
+            fmt.require(not active and (value['outcome'] is None or released))
+        elif not active:
+            fmt.require(value['outcome'] is not None and (released or end is not None))
+    if origin is None:
+        fmt.require(through is None and end is None and first is None and last is None)
+        fmt.require(value['firstTextLatencyNs'] is None and value['silenceNs'] is None and not value['windows'])
+    else:
+        fmt.require(through is not None and through >= origin)
+        if end is not None:
+            fmt.require(not active and origin <= end == through)
+        if first is not None:
+            fmt.require(origin <= first <= last <= through)
+        fmt.require(value['firstTextLatencyNs'] == (None if first is None else str(first - origin)))
+        fmt.require(value['silenceNs'] == str(through - (origin if last is None else last)))
+    if released:
+        fmt.require(not value['windows'] and value['characterCount'] == value['deliveryCount'] == '0')
+    windows = value['windows']
+    fmt.require(len(windows) <= windowLimit)
+    period = int(windowSeconds * 1e9)
+    chars = deliveries = 0
+    previousEnd = None
+    for index, item in enumerate(windows):
+        window(item)
+        start, stop = int(item['startNs']), int(item['endNs'])
+        fmt.require(origin is not None and origin <= start <= stop <= through)
+        fmt.require(previousEnd is None or previousEnd <= start)
+        fmt.require(stop - start <= period and (item['partial'] or stop - start == period))
+        fmt.require(not item['partial'] or index == len(windows) - 1)
+        if item['firstTextNs'] is not None:
+            fmt.require(first is not None and first <= int(item['firstTextNs']) <= int(item['lastTextNs']) <= last)
+            if int(item['firstTextNs']) == first:
+                fmt.require(int(item['gapCount']) == int(item['deliveryCount']) - 1 and
+                            int(item['gapSumNs']) == int(item['lastTextNs']) - first)
+            else:
+                fmt.require(item['gapCount'] == item['deliveryCount'])
+                fmt.require(int(item['lastTextNs']) - int(item['firstTextNs']) <=
+                            int(item['gapSumNs']) <= int(item['lastTextNs']) - first)
+        chars += int(item['characterCount'])
+        deliveries += int(item['deliveryCount'])
+        previousEnd = stop
+    fmt.require(chars <= int(value['characterCount']) and deliveries <= int(value['deliveryCount']))
+    if value['droppedWindowCount'] == '0':
+        fmt.require(chars == int(value['characterCount']) and deliveries == int(value['deliveryCount']))
+        if windows:
+            fmt.require(int(windows[0]['startNs']) == origin)
+            fmt.require(all(a['endNs'] == b['startNs'] for a, b in zip(windows, windows[1:])))
+    if origin is not None and not released:
+        fmt.require((bool(windows) and int(windows[-1]['endNs']) == through) or
+                    (not windows and origin == through and value['deliveryCount'] == '0'))
 
 
 def hardware(value):
@@ -100,6 +194,8 @@ def hardware(value):
                        'actualIntervalSeconds', 'memory', 'swap', 'cpu', 'gpu'))
     for key in ('collectionStartNs', 'collectionEndNs', 'displayWallTimeNs'):
         decimal(value[key], nullable=True)
+    if value['collectionStartNs'] is not None and value['collectionEndNs'] is not None:
+        fmt.require(int(value['collectionStartNs']) <= int(value['collectionEndNs']))
     for key in ('targetIntervalSeconds', 'actualIntervalSeconds'):
         if value[key] is not None:
             number(value[key], 0, 2 ** 53 - 1)
@@ -163,27 +259,39 @@ def publicData(value):
                    'droppedWindowCount', 'firstTextLatencyNs', 'silenceNs')
         fmt.fields(stream, (*numeric, 'availability', 'state', 'outcome', 'active', 'released', 'windows'))
         for key in numeric:
-            decimal(stream[key], nullable=True)
+            decimal(stream[key], nullable=key not in ('characterCount', 'deliveryCount', 'droppedWindowCount'))
         enum(stream['availability'], ('available', 'unavailable'))
         enum(stream['state'], ('unavailable', 'not-started', 'active', 'terminal'))
         fmt.require(stream['outcome'] is None or stream['outcome'] in ('completed', 'failed', 'cancelled', 'closed'))
         fmt.require(type(stream['active']) is bool and type(stream['released']) is bool)
         fmt.require(type(stream['windows']) is list and len(stream['windows']) <= 128)
-        for item in stream['windows']:
-            window(item)
+        streamFacts(stream, value['windowSeconds'], int(retention['streamWindows']))
+        fmt.require(value['needs']['stream'] and value['streamAvailability'] != 'disabled')
+    elif not value['needs']['stream']:
+        fmt.require(value['streamAvailability'] == 'disabled')
+    else:
+        fmt.require(value['streamAvailability'] == 'unavailable')
     fmt.require(type(value['correlation']) is list and len(value['correlation']) <= 128)
-    for item in value['correlation']:
+    windows = [] if value['stream'] is None else value['stream']['windows']
+    fmt.require(len(value['correlation']) == len(windows))
+    for item, streamWindow in zip(value['correlation'], windows, strict=True):
         fmt.fields(item, ('startNs', 'endNs', 'hardwareIndices', 'uncoveredIntervalsNs'))
-        decimal(item['startNs']); decimal(item['endNs'])
+        decimal(item['startNs'])
+        decimal(item['endNs'])
         fmt.require(int(item['endNs']) >= int(item['startNs']))
+        fmt.require(all(item[key] == streamWindow[key] for key in ('startNs', 'endNs')))
         fmt.require(type(item['hardwareIndices']) is list and len(item['hardwareIndices']) <= 128)
+        fmt.require(len(set(item['hardwareIndices'])) == len(item['hardwareIndices']))
         for index in item['hardwareIndices']:
             fmt.integer(index, 0, len(value['hardware']) - 1)
         fmt.require(type(item['uncoveredIntervalsNs']) is list and len(item['uncoveredIntervalsNs']) <= 129)
+        previousEnd = int(item['startNs'])
         for pair in item['uncoveredIntervalsNs']:
             fmt.require(type(pair) is list and len(pair) == 2)
-            decimal(pair[0]); decimal(pair[1])
-            fmt.require(int(pair[1]) >= int(pair[0]))
+            decimal(pair[0])
+            decimal(pair[1])
+            fmt.require(previousEnd <= int(pair[0]) < int(pair[1]) <= int(item['endNs']))
+            previousEnd = int(pair[1])
     fmt.require(value['correlationMeaning'] == 'collection-interval-overlap; sequential-reads; no-interpolation')
 
 
