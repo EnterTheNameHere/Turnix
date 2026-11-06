@@ -1,0 +1,189 @@
+EX-06 SHARED PROCESS / WORKSPACE - IMPLEMENTATION DELIVERY
+===========================================================
+Date:2026-11-06. Owner: EX implementer, shared platform dependency.
+Status: IMPLEMENTED / VERIFIED / PUSHED; NOT INTEGRATED OR ACCEPTED.
+Historical original delivery below. Integration reviewcfbdffe found first-primary
+R1 despite original1876 tests passing. Corrected source27147c8 and current evidence:
+knowledge/experiment-runner-ex06-shared-r1-implementation.txt. Acceptance still pending.
+Source branch:actant-ex06-process-workspace.
+Exact source443041805a170ccad50dd8fbc4f3fe5c08b9cf48.
+Exact parent/authorization533fe5feedaea7713f9031a0eaae4553dccb06b8.
+Authority: experiment-runner-ex06-concrete-contract-review.txt at that parent.
+Application remains0d84010bc64095c1080dc44842247c92945b48b8, unchanged.
+Canonical coordination only on actant-integration; no App source imported upstream.
+
+DELIVERED BOUNDARY
+--------------------
+13 paths: backend/process/{capture,context,runtime,api,__init__}.py;
+backend/workspace/{runtime,context,__init__}.py;
+backend/context/codeEntryContext.py; backend/application/applicationRuntime.py;
+backend/llm/providerComposition.py; new platform tests
+tests/backend/application/test_boundedProcess.py and
+tests/backend/workspace/test_boundedRead.py. No executionSessions/provider API,
+tracer, Application source/test or reusable-Pack source change.
+Private composition hook only composes sticky quarantine with existing invocation/
+activation admission. Existing lifecycle/finalization authorities stay in place.
+
+ProcessFacade.prepare/execute implement frozen request/one-use exact invocation
+binding, actual Job ID/signal, strict finite resource controls, environment snapshot
+and exact argv/cwd/host tool resolution. No shell. beforeLaunch gets immutable
+request on the owned supervisor thread, outside its runtime/control lock ownership;
+only exact True ACK permits admission. Callback must not capture Context/Job or
+reenter runtime. All platform worker Threads explicitly use empty Context, avoiding
+ambient ContextVar authority inheritance. Prepared tickets cannot copy/serialize.
+Expiry/cancel/invalidation/abandonment prevent a late ACK from authorizing launch.
+An ALREADY-ENTERED native spawn attempt may complete/create its owned child later;
+returned unknown preserves that uncertainty, and late registration applies stop.
+No atomic cancel-versus-native-spawn or hard native-latency guarantee asserted.
+
+Concurrent raw streams read at most remaining+1, <=8192/read. Each retains <=cap,
+observes <=cap+1, distinguishes EOF, limit and read failure. No decoding/newline
+repair on bounded API. Timeout/cancel/overflow latches stop; exact owned child is
+terminated, then killed if still live, and reaped. No borrowed/process-name kill.
+Original legacy run success/nonzero/text semantics intact; safe fixed error text,
+pre-admission cancellation and sticky quarantine apply. No bounded legacy output
+or cancellation of already-running legacy run is claimed.
+
+OWNERSHIP / ACK / FIRST EXIT
+------------------------------
+ACK callback frame/closure necessarily stays rooted while blocked, including its
+bounded archive port. Pending owner roots request, exact worker/child/readers/pipes
+and workspace pin. No live Context/Job is retained by platform workers; caller's
+own callback is contractually forbidden from capturing them. Callback references
+cleared after resolution, including platform caller frames before error publication.
+Cleanup adds workersSettled beyond the prior five obligations, and scope explicitly
+includes ACK/spawn/supervisor/capture workers. Confirmed requires actual supervisor
+termination, reader joins, ACK/spawn resolution, pipes closed and owned child reaped
+(or a vacuous no-child obligation). A reaper's final resource-free ownership handoff
+does not reopen execution or change previously returned evidence.
+
+Unknown is latched BEFORE return: permanent ProcessRunner quarantine, normal
+runtime Job/capability/activation admission rejected through existing gates, legacy
+run/new prepare/execute and same-capability new LLM facade execution denied.
+Swallowing unknown cannot turn the enclosing Job into success. Trusted existing
+lifecycle cleanup still attempts independent provider/observation/memory/workspace
+teardown; process resources/pin survive Context/runtime close. Repeated stop/close
+reports pending until resources actually resolve. No global reset or repair API.
+
+Main wait returns immutable unknown after finite cleanup policy; worker may remain
+blocked in ACK/native/pipe IO. Retained owner waits for actual worker resolution,
+disposes exact late child and joins capture, then releases pin/root; no force-close
+of a pipe another reader owns. Callback cannot run its cleanup loop while blocked.
+If OS cannot start retained-owner thread, roots/pin stay retained; no fabricated
+finite cleanup. Descendant-held pipes may retain ownership indefinitely. Confirmed
+scope is owned child/capture, NEVER universal descendant/process-tree quiescence.
+Workspace deletion remains best effort, not a receipt. Interpreter termination
+has no stronger physical cleanup guarantee.
+
+First non-Exception primary is re-raised as the SAME object with opaque immutable
+processEvidence best effort; later cleanup does not replace it. Ordinary errors
+sanitized outside raw exception context. Context invalidation first revokes use,
+then attempts each owned cleanup even after another fails; original primary kept.
+Errors' attrs/args/notes/str/repr and formatted chains are safe under EXISTING
+captureExceptionSnapshot; evidence is opaque safe-repr, explicit snapshot opt-in.
+No tracing attribute-capture rule changed.
+
+CONSISTENCY TABLE (ACTUAL IMPLEMENTED RULES)
+--------------------------------------------
+case                      status / phase / launch / stop / failure / cleanup
+prepare resolution        no outcome; ProcessOperationError category resolution
+prepare pre-cancel        no outcome; ProcessCancelled category cancelled
+execute expired           failed/admission/not-attempted/null/expired/confirmed
+execute pre-cancel        cancelled/admission/not-attempted/cancelled/null/confirmed
+ACK false/None/1          failed/ack/not-attempted/null/ack-rejected/confirmed
+ACK ordinary exception    failed/ack/not-attempted/null/ack-failed/confirmed
+ACK critical primary      failed/ack/not-attempted/interrupted/ack-failed/confirmed
+blocked ACK deadline      timeout/cleanup/not-attempted/timeout/cleanup-unknown/unknown
+spawn OSError             failed/spawn/attempted/null/spawn-failed/confirmed
+normal child0 or7         completed/completed/started/null/null/confirmed
+timeout, reaped/drained    timeout/capture/started/timeout/null/confirmed
+raw overflow, drained     output-limit/capture/started/stream-limit/capture-failed/confirmed
+read failure, closed      failed/capture/started/execution-failed/capture-failed/confirmed
+known exit, held pipe     timeout/cleanup/started/timeout/cleanup-unknown/unknown
+critical read/close       same-object primary; safe failed outcome, cleanup as observed
+API misuse                safe TypeError/ValueError/RuntimeError; no effects/outcome
+Child exitCode is null unless owned child actually reaped. A resolved Popen OSError
+without an owned child, like not-attempted, satisfies the child obligation vacuously;
+this is not a child-exit observation. Unknown may retain a known exitCode.
+workersSettled=false while retained ownership handoff remains; prior outcome never
+changes after background resolution. No completed outcome with absent/incomplete/
+failed/overflowed streams or unknown cleanup. Job cancellation after completed
+process facts can legitimately yield ProcessOutcome completed + Job Cancelled.
+
+WORKSPACE SNAPSHOT
+--------------------
+WorkspaceRead / WorkspaceFileIdentity frozen safe-repr records, exact raw data,
+derived hash/length and explicit detached metadata snapshot. readBytes performs
+one maxBytes+1 read, no retry or second hash read; rejects nonregular/reparse/
+escape/missing/oversize/detected change/inactive. Rechecks lifetime after read.
+Descriptor fstat before/after compares device/inode/size/mtime/ctime. Path/open
+comparison uses device/inode/size/mtime; ctime cross-API is not comparable under
+observed Windows3.15.0b4 behavior: local200-file probe found30 unchanged files with
+different descriptor/path ctime, while descriptor before/after agreed. Regression
+test proves this handling; detected descriptor changes still reject. No exclusion
+of hostile same-size rewrites with restored metadata or removal receipt claimed.
+
+TESTS / REAL EXECUTION / STATIC CHECKS
+---------------------------------------
+Own Windows Python3.15.0b4 / pytest9.2.0, on exact delivered source:
+prefix .\python-embedded\python.exe -X frozen_modules=off -m pytest -q
+ --tb=short
+Focused: tests/backend/process tests/backend/workspace
+ tests/backend/application/test_boundedProcess.py
+ tests/backend/application/test_processContextIntegration.py
+ tests/backend/application/test_workspaceProcessIntegration.py
+74 passed/3.28s, zero skips (same final code; subsequent test-only ambient Context
+assertion is additionally included in final full run).
+Relevant: tests/backend/application tests/backend/llm tests/backend/runtime
+ tests/backend/process tests/backend/workspace tests/first_party/llmDrivers
+863 passed/8.60s before final empty-worker-Context/reference clearing edits;
+all these tests also pass in final full run below. Earlier Windows ctime mismatch
+failures were reproduced/corrected; no failing test weakened to accept mutation.
+Final full: tests ->1876 passed/15.51s, zero skips,50 new platform cases.
+Original platform1826 and all existing tests unchanged; no App source/tests present
+in patch. Earlier1852/1876 runs retain intermediate scope, not substituted for final.
+
+Actual owned synthetic children test exact raw CRLF/nonUTF8 + nonzero7, concurrent
+stdout/stderr overflow, timeout, actual Job cancellation, completed child versus
+cancelled Job, descendant-held pipe with known parent exit, stalled entered spawn
+and late owned disposition, stalled reader, and exact critical reader primary.
+Deterministic ACK false/error/block/late/cancel/expiry/foreign/reused/reentrant
+cases, callback root clearing, supervisor-start failure, sticky quarantine after
+caught unknown (legacy/new process/LLM/helper/new Job), close after unknown,
+independent invalidation/primary cleanup, safe actual capability trace and grouped
+captureExceptionSnapshot/format_exception sentinels. No forced test child takeover;
+test-owned descendants exit naturally, fixture waits exact ownership drain.
+Workspace exact bounds, path namespace, metadata change, native reparse flag,
+close-during-read, pin lifetime, descriptor/path ctime difference all pass.
+Headers/AST/docstrings13 Python files, authorized path boundary and diff checks
+pass. Existing Python embedded-home warning remains. Ruff/ty absent; no installation
+or Ruff claim. No model/browser/GGUF/real Ruff/ty run or archived EX-05 mutation.
+
+APP CONTRACT CORRECTIONS / BUDGET EVIDENCE (NO APP CODE)
+--------------------------------------------------------
+Canonical addendum now uses semantic inputsSha256 over sorted exact
+{inputId,bytes,sha256}; full input-index digest remains provenance only. Metadata/
+location changes preserve semantic identity; different ID/content changes it;
+missing/corrupt evidence unavailable, never invented empty input hash.
+Concrete host5 fixture and arithmetic:
+knowledge/experiment-runner-ex06-budget-evidence.json.
+One unit:9 steps/2 inference/4 CLI; message bounds142/19597, query5142/135272,
+wire323848/1885408 bytes;114 records; archive39953361 bytes.
+2x2:36 steps/8 inference/16 CLI;288 records; archive53240974 bytes.
+Both include raw/normalized definition,84 input bytes,5 reserved file revisions/
+unit, raw CLI streams, partials, full32MiB observation reserve; command aggregate
+46257448 <=64MiB, final sidecar526835 /2107868 and private content export15356516 /
+61164908 bytes fit64MiB. Raw observation snapshot export separately selected/capped.
+Oversize message, all-config request and aggregate archive cases reject. Executed
+offline arithmetic and pure actual provider serialization checks, NOT implemented
+App preflight or a real procedure run. Placeholder authorized-asset/tool paths do
+not exist here and are not asset/tool installation or launch authorization.
+
+NEXT / OWNERSHIP
+------------------
+Integration independently reviews exact4430418 plus original regressions and these
+evidence/limits, requests corrections or accepts shared source. Do not merge App
+source upstream. After shared acceptance, safely import LATEST COMPLETE Integration
+into owning App preserving all43 App-owned files, record exact refs/projection and
+combined tests. App addendum/budget review and separate App code authorization
+remain required. No downstream import or EX-06 acceptance claimed by this delivery.

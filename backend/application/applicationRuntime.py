@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 22
+# file: backend/application/applicationRuntime.py ; version: 23
 from __future__ import annotations
 
 from contextlib import suppress
@@ -22,6 +22,7 @@ from backend.packs.runtime import PackLoader, PackResolver
 from backend.process.configuration import processToolDefinitionsFromConfig
 from backend.process.context import ProcessFacade
 from backend.process.runtime import ProcessRunner, ProcessToolRegistry
+from backend.process.capture import processJobScope
 from backend.registration import RegistrationScope
 from backend.save import ApplicationStore, LoadedApplicationSave, SaveBundle
 from backend.tracing import Tracer, TraceSinkDestination
@@ -353,6 +354,7 @@ class ApplicationRuntime:
             for codeEntryId in tuple(self._llmOwners):
                 self.revokeLlmCodeEntry(codeEntryId)
             if not self.applicationRun.active:
+                self.processRunner.requireDrained()
                 return
 
             self._observationOwner.release()
@@ -370,6 +372,10 @@ class ApplicationRuntime:
                 },
             )
             self.applicationRun.stop()
+            try:
+                self.processRunner.requireDrained()
+            except Exception as error:
+                errors.append(error)
 
             if errors:
                 raise ExceptionGroup(
@@ -392,6 +398,7 @@ class ApplicationRuntime:
             for codeEntryId in tuple(self._llmOwners):
                 self.revokeLlmCodeEntry(codeEntryId)
             if self._closed:
+                self.processRunner.requireDrained()
                 return
 
             self._observationOwner.release()
@@ -417,6 +424,10 @@ class ApplicationRuntime:
                 self._tracerClosed = True
 
             self._closed = True
+            try:
+                self.processRunner.requireDrained()
+            except Exception as error:
+                errors.append(error)
             if errors:
                 raise ExceptionGroup(
                     "ApplicationRuntime close reported errors.",
@@ -569,6 +580,7 @@ class ApplicationRuntime:
             )
             try:
                 result = self.capabilities.invokeResolved(registration, context=context, payload=payload)
+                self.processRunner.requireReady()
             except ExecutionCancelled:
                 self.trace(
                     "capability-invocation-cancelled",
@@ -655,13 +667,14 @@ class ApplicationRuntime:
             self.trace("job-started", attributes=orchestrationAttributes)
             try:
                 activeJob.cancellationSignal.raiseIfRequested()
-                result = self.invokeCapability(
-                    capabilityId,
-                    payload,
-                    memoryView=unit.memoryView,
-                    ioView=ioTransaction,
-                    cancellationSignal=activeJob.cancellationSignal,
-                )
+                with processJobScope(activeJob):
+                    result = self.invokeCapability(
+                        capabilityId,
+                        payload,
+                        memoryView=unit.memoryView,
+                        ioView=ioTransaction,
+                        cancellationSignal=activeJob.cancellationSignal,
+                    )
                 activeJob.cancellationSignal.raiseIfRequested()
                 unit.commitMutation()
                 activeJob.authoritativeStateAccepted = True

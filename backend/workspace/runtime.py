@@ -1,15 +1,22 @@
-# file: backend/workspace/runtime.py ; version: 1
+# file: backend/workspace/runtime.py ; version: 2
 """Actant-owned ephemeral filesystem workspaces for invocation-local tool inputs."""
 
 from __future__ import annotations
 
 import shutil
 import tempfile
+import hashlib
+import os
+import stat
+import time
+from dataclasses import dataclass
+from threading import RLock
 from pathlib import Path, PurePath
 
 from backend.core.errors import ActantError
 
-__all__ = ["EphemeralWorkspace", "WorkspaceError", "WorkspacePathError", "WorkspaceWriteError"]
+__all__ = ["EphemeralWorkspace", "WorkspaceError", "WorkspacePathError", "WorkspaceWriteError",
+           "WorkspaceRead", "WorkspaceReadError", "WorkspaceFileIdentity"]
 
 
 class WorkspaceError(ActantError, RuntimeError):
@@ -22,6 +29,70 @@ class WorkspacePathError(WorkspaceError):
 
 class WorkspaceWriteError(WorkspaceError):
     """Raised when Actant cannot materialize an ephemeral workspace artifact."""
+
+
+class WorkspaceReadError(WorkspaceError):
+    """Expose only a fixed read category, without private paths or raw causes."""
+
+    def __init__(self, category):
+        """Keep safe category evidence independent of the failed file contents."""
+        super().__init__("Workspace read failed.")
+        self.category = category
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class WorkspaceFileIdentity:
+    """Observed descriptor metadata, not a stable portable file authority."""
+
+    device: int
+    inode: int
+    size: int
+    mtimeNs: int
+    ctimeNs: int
+
+    def __repr__(self):
+        """Do not disclose local filesystem metadata in incidental diagnostics."""
+        return "<WorkspaceFileIdentity>"
+
+    def snapshot(self):
+        """Return detached native metadata with no hidden active resource."""
+        return dict(device=self.device, inode=self.inode, size=self.size,
+                    mtimeNs=self.mtimeNs, ctimeNs=self.ctimeNs)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class WorkspaceRead:
+    """Own exact bounded bytes and observations, never an active file handle."""
+
+    data: bytes
+    relativePath: str
+    observedTimeNs: int
+    identity: WorkspaceFileIdentity
+
+    def __repr__(self):
+        """Prevent generic exception snapshotters from exposing private file data."""
+        return "<WorkspaceRead>"
+
+    @property
+    def bytes(self):
+        """Return the length of exactly the captured payload."""
+        return len(self.data)
+
+    @property
+    def sha256(self):
+        """Hash the already bounded immutable bytes, without another file read."""
+        return hashlib.sha256(self.data).hexdigest()
+
+    def snapshot(self):
+        """Export detached metadata; private data remains explicitly separate."""
+        return dict(schemaId="actant.workspace.read@1", relativePath=self.relativePath,
+                    bytes=self.bytes, sha256=self.sha256, observedTimeNs=self.observedTimeNs,
+                    identity=self.identity.snapshot())
+
+
+def _identity(info):
+    """Compare opened-file observations without claiming hostile-mutation exclusion."""
+    return WorkspaceFileIdentity(info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
 class EphemeralWorkspace:
@@ -37,7 +108,7 @@ class EphemeralWorkspace:
     workspace removes the directory best-effort and permanently ends its use.
     """
 
-    __slots__ = ("_closed", "_root")
+    __slots__ = ("_closed", "_root", "_lane", "_pins")
 
     def __init__(self) -> None:
         """Creates a private Actant-owned temporary directory.
@@ -51,6 +122,8 @@ class EphemeralWorkspace:
         except OSError as err:
             raise WorkspaceWriteError(f"Failed to create ephemeral workspace: {err}.") from err
         self._closed = False
+        self._lane = RLock()
+        self._pins = 0
 
     @property
     def root(self) -> Path:
@@ -110,10 +183,96 @@ class EphemeralWorkspace:
 
     def close(self) -> None:
         """Ends workspace authority and removes all ephemeral files best-effort."""
-        if self._closed:
-            return
-        self._closed = True
-        shutil.rmtree(self._root, ignore_errors=True)
+        with self._lane:
+            self._closed = True
+            remove = self._pins == 0
+        if remove:
+            shutil.rmtree(self._root, ignore_errors=True)
+
+    def _pin(self):
+        """Keep files owned until exact process workers and ACK callback settle."""
+        with self._lane:
+            self._requireActive()
+            self._pins += 1
+
+    def _unpin(self):
+        """Release one internal process lease; deletion remains best effort."""
+        with self._lane:
+            self._pins -= 1
+            remove = self._closed and self._pins == 0
+        if remove:
+            shutil.rmtree(self._root, ignore_errors=True)
+
+    def readBytes(self, relativePath, *, maxBytes):
+        """Observe one regular contained file with a maxBytes+1 allocation bound.
+
+        Detected path/metadata changes fail without retry. Same-size hostile
+        rewrites with restored metadata are outside this observation contract.
+        """
+        if type(maxBytes) is not int or not 1 <= maxBytes <= 1048576:
+            raise ValueError("Invalid workspace read bound.")
+        category = None
+        try:
+            with self._lane:
+                if self._closed:
+                    raise WorkspaceReadError("inactive")
+                raw = str(relativePath) if isinstance(relativePath, Path) else relativePath
+                if (type(raw) is not str or not raw or "\x00" in raw or ":" in raw
+                        or any(p in ("", ".", "..") for p in raw.replace("\\", "/").split("/"))):
+                    raise WorkspaceReadError("invalid-path")
+                path = self._resolveRelative(raw)
+                cursor = self._root
+                for part in (None, *Path(raw).parts):
+                    if part is not None:
+                        cursor = cursor / part
+                    info = cursor.lstat()
+                    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 1024:
+                        raise WorkspaceReadError("reparse")
+                if not stat.S_ISREG(info.st_mode):
+                    raise WorkspaceReadError("not-regular")
+                self._pins += 1
+            try:
+                with path.open("rb") as source:
+                    before = os.fstat(source.fileno())
+                    if not stat.S_ISREG(before.st_mode):
+                        raise WorkspaceReadError("not-regular")
+                    data = source.read(maxBytes + 1)
+                    after = os.fstat(source.fileno())
+                with self._lane:
+                    if self._closed:
+                        raise WorkspaceReadError("inactive")
+                if len(data) > maxBytes:
+                    raise WorkspaceReadError("over-limit")
+                current = path.lstat()
+                cursor = self._root
+                for part in (None, *Path(raw).parts):
+                    if part is not None:
+                        cursor = cursor / part
+                    info = cursor.lstat()
+                    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 1024:
+                        raise WorkspaceReadError("changed")
+                if (stat.S_ISLNK(current.st_mode) or getattr(current, "st_file_attributes", 0) & 1024
+                        or _identity(before) != _identity(after)
+                        or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                        != (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)):
+                    # Windows descriptor/path ctime observations can differ even
+                    # for unchanged files. Compare ctime only within fstat above.
+                    raise WorkspaceReadError("changed")
+                with self._lane:
+                    if self._closed:
+                        raise WorkspaceReadError("inactive")
+                return WorkspaceRead(data, raw, time.time_ns(), _identity(after))
+            finally:
+                self._unpin()
+        except WorkspaceReadError:
+            raise
+        except FileNotFoundError:
+            category = "not-found"
+        except WorkspacePathError:
+            category = "invalid-path"
+        except (OSError, ValueError):
+            category = "read-failed"
+        raise WorkspaceReadError(category) from None
 
     def _resolveRelative(self, relativePath: str | Path) -> Path:
         """Resolves a caller path while enforcing containment in this workspace."""

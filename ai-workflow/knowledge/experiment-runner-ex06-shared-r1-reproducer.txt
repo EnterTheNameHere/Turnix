@@ -1,0 +1,63 @@
+"""Raw Integration regression for EX-06 shared4430418, Python3.15/pytest.
+
+Copy unchanged to a temporary test_primary.py and run from the exact shared source
+with that source explicitly first on sys.path. No child/model/tool is launched.
+The first critical exception is recorded BEFORE the second is injected.
+"""
+from pathlib import Path
+import sys
+
+import pytest
+
+from backend.process import capture
+from backend.process.context import ProcessFacade
+from backend.process.runtime import ProcessRunner, ProcessToolDefinition, ProcessToolRegistry
+from backend.workspace import EphemeralWorkspace
+
+
+def test_worker_first_primary_survives_later_caller_interruption(monkeypatch):
+    """An already observed worker primary must outrank a later wait interruption."""
+    first = KeyboardInterrupt("worker-first")
+    second = SystemExit("caller-second")
+    original = capture._Operation.__init__
+    ordered = []
+
+    def instrument(operation, *args, **kwargs):
+        """Inject only after the real supervisor stored its exact first object."""
+        original(operation, *args, **kwargs)
+        native_wait = operation.done.wait
+        injected = False
+
+        def wait(timeout=None):
+            """Observe terminal worker evidence before delivering the later primary."""
+            nonlocal injected
+            ready = native_wait(timeout)
+            if ready and operation.primary is first and not injected:
+                injected = True
+                ordered.append("worker-first-already-recorded")
+                raise second
+            return ready
+
+        operation.done.wait = wait
+
+    monkeypatch.setattr(capture._Operation, "__init__", instrument)
+    workspace = EphemeralWorkspace()
+    runner = ProcessRunner(ProcessToolRegistry((
+        ProcessToolDefinition("python", Path(sys.executable).resolve()),)))
+    facade = ProcessFacade(runner=runner, requireValid=lambda: None)
+    facade._bind(capture.ProcessInvocation(workspace=workspace))
+    ticket = facade.prepare("python", ("-c", "pass"), workingDirectory=workspace.root)
+
+    def ack(request):
+        """Raise before native launch; supervisor records this first interruption."""
+        raise first
+
+    try:
+        with pytest.raises(BaseException) as caught:
+            facade.execute(ticket, beforeLaunch=ack)
+        assert ordered == ["worker-first-already-recorded"]
+        assert caught.value.processEvidence.cleanup.disposition == "confirmed"
+        assert runner._active is None
+        assert caught.value is first, "Later caller interruption replaced recorded worker primary"
+    finally:
+        workspace.close()

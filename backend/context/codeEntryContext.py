@@ -1,8 +1,9 @@
-# file: backend/context/codeEntryContext.py ; version: 28
+# file: backend/context/codeEntryContext.py ; version: 29
 from __future__ import annotations
 
 from contextlib import suppress
 from copy import deepcopy
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ from backend.llm.llmTypes import LlmQuery
 from backend.observation import ObservationFacade, ObservationOwner, ObservationSession
 from backend.process.context import ProcessFacade
 from backend.process.runtime import ProcessRunner, ProcessToolRegistry
+from backend.process.capture import ProcessInvocation
 from backend.values.committed import ValueState
 from backend.workspace.context import WorkspaceFacade
 from backend.workspace.runtime import EphemeralWorkspace
@@ -439,11 +441,18 @@ class CodeEntryContext:
         self.io = _IoFacade(io=io, requireValid=self.requireValid)
         self.workspace = WorkspaceFacade(workspace=self._workspace, requireValid=self.requireValid)
         self.process = process or ProcessFacade(runner=ProcessRunner(ProcessToolRegistry()), requireValid=self.requireValid)
+        self._processInvocation = ProcessInvocation(identity, cancellationSignal, self._workspace)
+        self.process._bind(self._processInvocation)
         self.memory = _MemoryFacade(state=memory, requireValid=self.requireValid, producer=identity.producerSnapshot())
         self.cancellation = _CancellationFacade(signal=cancellationSignal, requireValid=self.requireValid)
         self.capabilities = _CapabilityFacade(ownerId=identity.codeEntryInstanceId, registry=capabilities, scope=registrationScope, invoker=capabilityInvoker, requireValid=self.requireValid, allowRegistration=allowRegistration)
         self.observations = ObservationFacade(observationOwner, self.requireValid)
-        self.llm = _LlmFacade(ownerId=identity.codeEntryInstanceId, registry=llmProviders, scope=registrationScope, pipeline=llmPipeline, memory=memory, requireValid=self.requireValid, allowRegistration=allowRegistration, cancellationSignal=cancellationSignal, observationOwner=observationOwner, executionAccess=executionAccess)
+        self.llm = _LlmFacade(ownerId=identity.codeEntryInstanceId, registry=llmProviders, scope=registrationScope, pipeline=llmPipeline, memory=memory, requireValid=self.requireExecution, allowRegistration=allowRegistration, cancellationSignal=cancellationSignal, observationOwner=observationOwner, executionAccess=executionAccess)
+
+    def requireExecution(self):
+        """Compose sticky process quarantine with existing invocation/LLM authority."""
+        self.requireValid()
+        self.process._runner.requireReady()
 
     def requireValid(self) -> None:
         """Rejects use after Actant has ended this invocation turn."""
@@ -454,9 +463,29 @@ class CodeEntryContext:
         """Ends invocation authority and releases invocation-owned resources."""
         if not self._valid:
             return
-        if self._executionAccess is not None:
-            self._executionAccess.close()
-        self.observations.close()
-        self.memory.close()
-        self._workspace.close()
+        primary = sys.exception()
         self._valid = False
+        self._processInvocation.valid.clear()
+        if self.process._prepared is not None and not self.process._prepared._used:
+            self.process._prepared._environment = None
+        self.process._prepared = None
+        errors = []
+        actions = [self.observations.close, self.memory.close, self._workspace.close]
+        if self._executionAccess is not None:
+            actions.insert(0, self._executionAccess.close)
+        for action in actions:
+            try:
+                action()
+            except BaseException as error:
+                errors.append(error)
+        if errors:
+            if primary is not None:
+                try:
+                    primary.invocationCleanupFailed = True
+                except BaseException:
+                    pass
+            else:
+                critical = next((e for e in errors if not isinstance(e, Exception)), None)
+                if critical is not None:
+                    raise critical
+                raise ExceptionGroup("Invocation cleanup failed.", errors)
