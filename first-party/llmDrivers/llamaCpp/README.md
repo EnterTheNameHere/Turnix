@@ -600,3 +600,52 @@ flags together with LC-01 controls, still meaning advertised pinned surface only
 LC-02 request/estimation/separate reasoning semantics and optional answer-only
 observation remain unchanged. ER-03 adds the controlled adoption below; no automatic
 restart or consumer adoption is provided.
+
+### Private request evidence (EX-04 shared dependency)
+
+Trusted composition optionally accepts `requestEvidence=PrivateRequestEvidence()`
+and immutable `evidencePolicies=(RequestEvidencePolicy(entry, required=True,
+maxBodyBytes=2097152),)`. Default is off. Explicit disabled policies and omitted
+owners capture nothing. Each selector resolves to an actual runtime-issued caller;
+repeated composition rejects policy replacement. Capture does not grant execution.
+
+The trusted host obtains that actual owner from its activation composition snapshot
+and wraps exactly one managed call in
+`broker.scope(owner, correlation=(suiteId, unitId, turnId), sink=privateSink)`.
+Correlation is an immutable tuple of one to four ASCII identifiers, each at most
+128 characters. Sinks receive frozen `RequestEvidence` records and must return the
+singleton `True` only after their own required acknowledgement. The broker does
+not implement filesystem durability, timeouts or background workers; host sinks
+must provide bounded waits/cancellation. Scope exit must always be observed.
+
+A required matching owner fails before inference send without its live scope.
+Scopes are instance-local, thread-bound and atomically single-use across copied
+contexts; nested/cross-thread/reused scopes reject. Estimator/template/slot traffic
+is not captured. Serialized records contain the exact immutable `Request.data`
+bytes, byte length and SHA-256, with JSON/UTF-8 declarations. Default body cap is
+2 MiB, hard maximum 8 MiB. The body is intentional private prompt capture; sinks
+must protect it. No headers, Authorization, cookies, URLs, live owners or grants
+are included in records, metadata or generic events. Ordinary sink errors become
+fixed errors without retained exception cause/context chains.
+
+Phases are serialized, transport-attempt (intention before open), successful-open
+response-headers-observed, and final transport observations. Final mayHaveSent is
+not consumption; serverConsumption is always unknown. Error-path headers and
+unobserved body facts remain unavailable. An on-disk preparation/attempt receipt
+cannot prove send or receipt after process death. Native cleanup remains separate.
+Final callbacks run after actual provider cleanup, outside its locks. A final sink
+failure is sticky and raised on host scope exit if there was no earlier primary;
+an already returned successful Job remains a successful Job with a separate host
+capture failure. Earlier provider/cancellation/non-Exception exits keep precedence.
+
+Adapter admission delegates forward validation to its exact issuing backend call,
+using a private weak method reference. Missing/expired validators fail closed;
+retaining admission does not retain the closed call or its mutation scope. The
+provider rechecks after required forward callbacks, immediately before inference
+open (including disabled/default-off), and at stream-read boundaries. Owner/access,
+registration, mutation/conversation and claim checks remain backend-owned. Old
+ticket cleanup/final diagnostics do not require forward validity. No authority lock
+is held across sinks or IO: revocation after a final check can still race with send.
+This is a boundary check, not an atomic send-versus-revoke guarantee. Independent
+shared acceptance precedes Application adoption. No complete EX-04 archive acceptance,
+real-provider archive evidence or stronger delivery/durability guarantee is claimed.
