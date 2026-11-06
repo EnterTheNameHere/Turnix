@@ -1,4 +1,4 @@
-# file: backend/workspace/context.py ; version: 1
+# file: backend/workspace/context.py ; version: 2
 """Invocation-bound CodeEntry facade for ephemeral workspace materialization."""
 
 from __future__ import annotations
@@ -42,3 +42,10 @@ class WorkspaceFacade:
         """Materializes exact UTF-8 text and returns its process-visible path."""
         self._requireValid()
         return str(self._workspace.materializeText(relativePath, text))
+
+    def readBytes(self, relativePath: str | Path, *, maxBytes: int):
+        """Return bounded exact bytes/metadata only while invocation authority lives."""
+        self._requireValid()
+        value = self._workspace.readBytes(relativePath, maxBytes=maxBytes)
+        self._requireValid()
+        return value
