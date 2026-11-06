@@ -16,23 +16,23 @@ from backend.llm.errors import (LlmExecutionConflictError, LlmExecutionCleanupEr
 from backend.llm.structuredMessages import LlmMessage, LlmMessages
 from backend.orchestration.cancellation import ExecutionCancelled
 
-schema = importlib.import_module('first-party.applications.experimentRunner.definition')
-results = importlib.import_module('first-party.applications.experimentRunner.results')
-archive = importlib.import_module('first-party.applications.experimentRunner.archive')
+schema = importlib.import_module("first-party.applications.experimentRunner.definition")
+results = importlib.import_module("first-party.applications.experimentRunner.results")
+archive = importlib.import_module("first-party.applications.experimentRunner.archive")
 
 
 def safeError(error, stage):
     """Expose fixed categories only; raw provider exception messages remain private."""
-    category = 'cancelled' if isinstance(error, ExecutionCancelled) else 'execution-failed'
-    for kind, label in ((LlmExecutionConflictError, 'execution-conflict'), (LlmExecutionCleanupError, 'cleanup-failed'),
-                        (LlmExecutionOwnershipError, 'execution-ownership'), (LlmProviderConnectionError, 'provider-connection'),
-                        (LlmProviderProtocolError, 'provider-protocol'), (LlmProviderRequestError, 'provider-request')):
+    category = "cancelled" if isinstance(error, ExecutionCancelled) else "execution-failed"
+    for kind, label in ((LlmExecutionConflictError, "execution-conflict"), (LlmExecutionCleanupError, "cleanup-failed"),
+                        (LlmExecutionOwnershipError, "execution-ownership"), (LlmProviderConnectionError, "provider-connection"),
+                        (LlmProviderProtocolError, "provider-protocol"), (LlmProviderRequestError, "provider-request")):
         if isinstance(error, kind):
             category = label
             break
-    result = {'category': category, 'stage': stage}
+    result = {"category": category, "stage": stage}
     if isinstance(error, LlmExecutionConflictError):
-        result['conflictReason'] = error.conflict.reason.value
+        result["conflictReason"] = error.conflict.reason.value
     return result
 
 
@@ -44,25 +44,25 @@ def evidenceSnapshot(value):
 def cleanupSnapshot(evidence):
     """Keep cleanup disposition independent of inference and Job success."""
     if evidence is None:
-        return {'status': 'unavailable', 'quiescence': 'unknown'}
-    return {'status': evidence['cleanupStatus'], 'quiescence': evidence['quiescence'],
-            'iteratorCloseFailed': evidence['iteratorCloseFailed']}
+        return {"status": "unavailable", "quiescence": "unknown"}
+    return {"status": evidence["cleanupStatus"], "quiescence": evidence["quiescence"],
+            "iteratorCloseFailed": evidence["iteratorCloseFailed"]}
 
 
 def boundedNative(metadata):
     """Retain bounded allowlisted native facts, excluding task IDs and live authority."""
     selected = {key: value for key, value in metadata.items()
-                if key in ('usage', 'timings', 'model', 'finish_reason', 'reasoning_format')}
+                if key in ("usage", "timings", "model", "finish_reason", "reasoning_format")}
     # Provider metadata is already recursively immutable; convert JSON containers only.
     def plain(value):
         """Detach immutable mappings/tuples without introspecting arbitrary objects."""
-        if hasattr(value, 'items'):
+        if hasattr(value, "items"):
             return {key: plain(item) for key, item in value.items()}
         if isinstance(value, (tuple, list)):
             return [plain(item) for item in value]
         return value
     encoded = schema.canonical(plain(selected))
-    return json.loads(encoded) if len(encoded) <= 16384 else {'truncated': True}
+    return json.loads(encoded) if len(encoded) <= 16384 else {"truncated": True}
 
 
 class DiagnosticReader:
@@ -91,23 +91,23 @@ class Recorder:
 
     def prepare(self, ctx, payload):
         """Validate/freeze a new invocation before its caller-retained Job is started."""
-        schema.fields(payload, ('unitId', 'definition'), ('archivePort',))
-        port = payload.get('archivePort')
-        schema.require(port is None or type(port) is archive.UnitArchivePort, 'Invalid archive port.')
-        schema.require(type(payload['unitId']) is str and len(payload['unitId']) == 32
-                       and all(char in '0123456789abcdef' for char in payload['unitId']), 'Invalid unit identity.')
-        definition = schema.validate(payload['definition'], self.policy.value())
-        schema.require(len(definition.value()['configurations']) == 1 and definition.value()['repetitions'] == 1,
-                       'A conversation Job requires exactly one unit.')
+        schema.fields(payload, ("unitId", "definition"), ("archivePort",))
+        port = payload.get("archivePort")
+        schema.require(port is None or type(port) is archive.UnitArchivePort, "Invalid archive port.")
+        schema.require(type(payload["unitId"]) is str and len(payload["unitId"]) == 32
+                       and all(char in "0123456789abcdef" for char in payload["unitId"]), "Invalid unit identity.")
+        definition = schema.validate(payload["definition"], self.policy.value())
+        schema.require(len(definition.value()["configurations"]) == 1 and definition.value()["repetitions"] == 1,
+                       "A conversation Job requires exactly one unit.")
         with self.lock:
             if self.pending:
-                raise RuntimeError('An experiment invocation is already pending.')
+                raise RuntimeError("An experiment invocation is already pending.")
             self.definition = definition
             self.archivePort = port
-            self.snapshot = schema.Snapshot(schema.canonical(results.initialResult(definition, payload['unitId'])))
+            self.snapshot = schema.Snapshot(schema.canonical(results.initialResult(definition, payload["unitId"])))
             self.startedNs = time.monotonic_ns()
             self.pending = True
-            return self.snapshot.value()['runId']
+            return self.snapshot.value()["runId"]
 
     def inspect(self, ctx, payload):
         """Return immutable ephemeral diagnostics, including after Job rollback."""
@@ -124,97 +124,97 @@ class Recorder:
     def execute(self, ctx, runId):
         """Hold one actual exclusive session across answer replay and all per-call cleanup."""
         with self.lock:
-            if not self.pending or self.snapshot.value()['runId'] != runId:
-                raise RuntimeError('No matching prepared invocation.')
+            if not self.pending or self.snapshot.value()["runId"] != runId:
+                raise RuntimeError("No matching prepared invocation.")
             # The runtime serializes Jobs; this separate guard also protects direct calls.
-            if self.snapshot.value()['applicationOutcome'] != 'not-started':
-                raise RuntimeError('Invocation has already been executed.')
+            if self.snapshot.value()["applicationOutcome"] != "not-started":
+                raise RuntimeError("Invocation has already been executed.")
             result = self.snapshot.value()
-            result['applicationOutcome'] = 'running'
+            result["applicationOutcome"] = "running"
             self.publish(result)
         definition = self.definition.value()
-        config = definition['configurations'][0]
-        selector = self.policy.value()['aliases'][config['profile']]
-        limit = self.policy.value()['maxOutputCharacters']
+        config = definition["configurations"][0]
+        selector = self.policy.value()["aliases"][config["profile"]]
+        limit = self.policy.value()["maxOutputCharacters"]
         history = []
         started = self.startedNs
-        stage, current = 'transition', None
+        stage, current = "transition", None
         session = None
         port = self.archivePort
         try:
             ctx.cancellation.raiseIfRequested()
-            profile = ctx.llm.profile(providerName='llama.cpp', model=selector)
+            profile = ctx.llm.profile(providerName="llama.cpp", model=selector)
             ctx.llm.transitionProfile(profile)
-            stage = 'reservation'
-            result['reservation']['acquisition'] = 'attempted'
+            stage = "reservation"
+            result["reservation"]["acquisition"] = "attempted"
             session = ctx.llm.reserveConversation(profile)
-            result['reservation']['acquisition'] = 'acquired'
-            for turn, current in zip(definition['conversation']['turns'], result['turns'], strict=True):
-                stage = 'before-turn'
+            result["reservation"]["acquisition"] = "acquired"
+            for turn, current in zip(definition["conversation"]["turns"], result["turns"], strict=True):
+                stage = "before-turn"
                 if port is not None:
                     port.check()
                 ctx.cancellation.raiseIfRequested()
-                query = LlmMessages(tuple(history + [LlmMessage('user', turn['content'])]))
-                requested = config['defaults'] | turn.get('overrides', {})
-                current.update(status='running', query={'formatId': query.toQuery().formatId, 'messages': query.snapshot()},
+                query = LlmMessages(tuple(history + [LlmMessage("user", turn["content"])]))
+                requested = config["defaults"] | turn.get("overrides", {})
+                current.update(status="running", query={"formatId": query.toQuery().formatId, "messages": query.snapshot()},
                                requestedOptions=requested, startedTimeNs=time.time_ns())
                 turnStart = time.monotonic_ns()
-                partial = {'answer': '', 'reasoning': '', 'partial': True, 'truncated': False}
+                partial = {"answer": "", "reasoning": "", "partial": True, "truncated": False}
 
                 def observe(event):
                     """Keep bounded private deltas as diagnostics only, never as replay history."""
                     if port is not None:
                         port.observe(event)
-                    if event.eventType != 'delta':
+                    if event.eventType != "delta":
                         return
-                    reasoning = event.metadata.get('llamaCppReasoning', {}).get('content', '')
-                    for key, text in (('answer', event.text), ('reasoning', reasoning)):
-                        room = max(0, limit - len(partial['answer']) - len(partial['reasoning']))
+                    reasoning = event.metadata.get("llamaCppReasoning", {}).get("content", "")
+                    for key, text in (("answer", event.text), ("reasoning", reasoning)):
+                        room = max(0, limit - len(partial["answer"]) - len(partial["reasoning"]))
                         partial[key] += text[:room]
-                        partial['truncated'] |= len(text) > room
-                    current['partial'] = dict(partial)
+                        partial["truncated"] |= len(text) > room
+                    current["partial"] = dict(partial)
                     self.publish(result)
 
-                stage = 'inference'
+                stage = "inference"
                 self.publish(result)
                 try:
                     if port is not None:
-                        port.begin(turn['id'], current['query'], requested)
-                    observed = (port.observationController.begin(ctx, port, turn['id'])
+                        port.begin(turn["id"], current["query"], requested)
+                    observed = (port.observationController.begin(ctx, port, turn["id"])
                         if port is not None and port.observationController is not None else None)
                     with observed if observed is not None else nullcontext() as observation, \
                          port.capture() if port is not None else nullcontext() as captureState:
-                        response = ctx.llm.run(providerName='llama.cpp', model=selector, query=query.toQuery(),
+                        response = ctx.llm.run(providerName="llama.cpp", model=selector, query=query.toQuery(),
                                                providerOptions=requested, context=FreshContext(required=False, retain=False),
                                                streamObserver=observe, session=session, observation=observation)
                         if captureState is not None:
                             captureState[0] = True
                     evidence = evidenceSnapshot(response.executionEvidence)
-                    current['executionEvidence'] = evidence
-                    current['cleanup'] = cleanupSnapshot(evidence)
-                    reasoning = response.providerMetadata.get('llamaCppReasoning', {}).get('content')
-                    if len(response.rawText) + len(reasoning or '') > limit:
-                        raise RuntimeError('Host output bound exceeded.')
+                    current["executionEvidence"] = evidence
+                    current["cleanup"] = cleanupSnapshot(evidence)
+                    reasoning = response.providerMetadata.get("llamaCppReasoning", {}).get("content")
+                    if len(response.rawText) + len(reasoning or "") > limit:
+                        raise RuntimeError("Host output bound exceeded.")
                     current.update(answer=response.rawText, reasoning=reasoning, native=boundedNative(response.providerMetadata),
-                                   executionProfile={'contextWindowTokens': response.executionProfile.contextWindowTokens,
-                                                     'metadata': boundedProfile(response.executionProfile.metadata)}, partial=None)
-                    if current['cleanup']['quiescence'] != 'confirmed':
-                        raise RuntimeError('Execution cleanup is not confirmed.')
-                    current['status'] = 'succeeded'
+                                   executionProfile={"contextWindowTokens": response.executionProfile.contextWindowTokens,
+                                                     "metadata": boundedProfile(response.executionProfile.metadata)}, partial=None)
+                    if current["cleanup"]["quiescence"] != "confirmed":
+                        raise RuntimeError("Execution cleanup is not confirmed.")
+                    current["status"] = "succeeded"
                     current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - turnStart)
                     if port is not None:
-                        stage = 'archive-turn'
+                        stage = "archive-turn"
                         port.check()
                         port.completed(current)
-                    history.extend((LlmMessage('user', turn['content']), LlmMessage('assistant', response.rawText)))
+                    history.extend((LlmMessage("user", turn["content"]), LlmMessage("assistant", response.rawText)))
                 except Exception as error:
-                    attached = getattr(error, 'llmCleanup', None)
+                    attached = getattr(error, "llmCleanup", None)
                     if attached is not None:
-                        current['executionEvidence'] = evidenceSnapshot(attached)
-                        current['cleanup'] = cleanupSnapshot(current['executionEvidence'])
-                    if stage != 'archive-turn':
-                        current['status'] = 'cancelled' if isinstance(error, ExecutionCancelled) else 'failed'
-                        current['error'] = safeError(error, stage)
+                        current["executionEvidence"] = evidenceSnapshot(attached)
+                        current["cleanup"] = cleanupSnapshot(current["executionEvidence"])
+                    if stage != "archive-turn":
+                        current["status"] = "cancelled" if isinstance(error, ExecutionCancelled) else "failed"
+                        current["error"] = safeError(error, stage)
                         current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - turnStart)
                         if port is not None:
                             try:
@@ -223,41 +223,41 @@ class Recorder:
                                 port.writer.fail(archiveError)
                     # Re-raise a fixed message so RuntimeHost's generic error tracing cannot expose content.
                     if isinstance(error, ExecutionCancelled):
-                        raise ExecutionCancelled('Experiment execution cancelled.') from None
-                    raise RuntimeError('Experiment inference failed.') from None
+                        raise ExecutionCancelled("Experiment execution cancelled.") from None
+                    raise RuntimeError("Experiment inference failed.") from None
                 finally:
-                    if current['endedTimeNs'] is None:
+                    if current["endedTimeNs"] is None:
                         current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - turnStart)
                     self.publish(result)
             ctx.cancellation.raiseIfRequested()
-            result['applicationOutcome'] = 'completed'
+            result["applicationOutcome"] = "completed"
         except Exception as error:
-            if stage == 'reservation' and session is None:
-                result['reservation']['acquisition'] = 'failed'
-            result['applicationOutcome'] = 'cancelled' if isinstance(error, ExecutionCancelled) else 'failed'
-            result['error'] = (current['error'] if current is not None and current['error'] is not None
+            if stage == "reservation" and session is None:
+                result["reservation"]["acquisition"] = "failed"
+            result["applicationOutcome"] = "cancelled" if isinstance(error, ExecutionCancelled) else "failed"
+            result["error"] = (current["error"] if current is not None and current["error"] is not None
                                else safeError(error, stage))
             if isinstance(error, ExecutionCancelled):
-                raise ExecutionCancelled('Experiment execution cancelled.') from None
-            raise RuntimeError('Experiment execution failed.') from None
+                raise ExecutionCancelled("Experiment execution cancelled.") from None
+            raise RuntimeError("Experiment execution failed.") from None
         finally:
             primary = sys.exception()
             closeError = None
             if session is not None:
                 try:
                     session.close()
-                    result['reservation']['close'] = 'queued'
+                    result["reservation"]["close"] = "queued"
                 except BaseException as error:
                     closeError = error
-                    result['reservation']['close'] = 'failed'
-                    if result['error'] is None:
-                        result['error'] = safeError(error, 'reservation-close')
+                    result["reservation"]["close"] = "failed"
+                    if result["error"] is None:
+                        result["error"] = safeError(error, "reservation-close")
             result.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - started)
             self.publish(result)
             if closeError is not None and primary is None:
                 if not isinstance(closeError, Exception):
                     raise closeError
-                raise RuntimeError('Conversation reservation close failed.') from None
+                raise RuntimeError("Conversation reservation close failed.") from None
         return runId
 
     def finish(self, ctx, payload):
@@ -267,14 +267,14 @@ class Recorder:
         The containing launcher records the actual Job object independently.
         """
         with self.lock:
-            schema.fields(payload, ('runId', 'jobOutcome'))
-            schema.require(self.pending and self.snapshot.value()['runId'] == payload['runId'], 'Unknown invocation.')
-            schema.require(payload['jobOutcome'] in ('Succeeded', 'Failed', 'Cancelled'), 'Job is not terminal.')
+            schema.fields(payload, ("runId", "jobOutcome"))
+            schema.require(self.pending and self.snapshot.value()["runId"] == payload["runId"], "Unknown invocation.")
+            schema.require(payload["jobOutcome"] in ("Succeeded", "Failed", "Cancelled"), "Job is not terminal.")
             value = self.snapshot.value()
-            if value['endedTimeNs'] is None:
+            if value["endedTimeNs"] is None:
                 value.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - self.startedNs)
-            value['status'] = ('cancelled' if payload['jobOutcome'] == 'Cancelled' else
-                               'succeeded' if payload['jobOutcome'] == 'Succeeded' and value['applicationOutcome'] == 'completed' else 'failed')
+            value["status"] = ("cancelled" if payload["jobOutcome"] == "Cancelled" else
+                               "succeeded" if payload["jobOutcome"] == "Succeeded" and value["applicationOutcome"] == "completed" else "failed")
             self.publish(value)
             self.pending = False
             self.definition = None
@@ -284,13 +284,13 @@ class Recorder:
 
 def boundedProfile(metadata):
     """Detach safe provider profile summaries without copying estimators or handles."""
-    return boundedNative({'usage': metadata}).get('usage')
+    return boundedNative({"usage": metadata}).get("usage")
 
 
 def onLoad(ctx):
     """Create one per-Application recorder and register capabilities without inference."""
-    recorder = Recorder(ctx.config['experimentRunner'])
-    for name, handler in (('prepare', recorder.prepare), ('run', recorder.execute),
-                          ('inspect', recorder.inspect), ('reader', recorder.reader), ('finish', recorder.finish)):
-        ctx.capabilities.register('experimentRunner.' + name + '@1', handler)
+    recorder = Recorder(ctx.config["experimentRunner"])
+    for name, handler in (("prepare", recorder.prepare), ("run", recorder.execute),
+                          ("inspect", recorder.inspect), ("reader", recorder.reader), ("finish", recorder.finish)):
+        ctx.capabilities.register("experimentRunner." + name + "@1", handler)
     return recorder
