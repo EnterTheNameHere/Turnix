@@ -43,10 +43,10 @@ def _implementation():
 
 
 _impl = _implementation()
-_transportName = 'actantFirstPartyLlamaCppOwnedTransport'
+_transportName = "actantFirstPartyLlamaCppOwnedTransport"
 if _transportName not in sys.modules:
     _transportSpec = importlib.util.spec_from_file_location(
-        _transportName, Path(__file__).with_name('ownedTransport.py'))
+        _transportName, Path(__file__).with_name("ownedTransport.py"))
     _transportModule = importlib.util.module_from_spec(_transportSpec)
     sys.modules[_transportName] = _transportModule
     try:
@@ -55,10 +55,10 @@ if _transportName not in sys.modules:
         sys.modules.pop(_transportName, None)
         raise
 _transport = sys.modules[_transportName]
-_evidenceName = 'actantFirstPartyLlamaCppRequestEvidence'
+_evidenceName = "actantFirstPartyLlamaCppRequestEvidence"
 if _evidenceName not in sys.modules:
     _evidenceSpec = importlib.util.spec_from_file_location(
-        _evidenceName, Path(__file__).with_name('requestEvidence.py'))
+        _evidenceName, Path(__file__).with_name("requestEvidence.py"))
     _evidenceModule = importlib.util.module_from_spec(_evidenceSpec)
     sys.modules[_evidenceName] = _evidenceModule
     try:
@@ -417,8 +417,8 @@ class _ExecutionAdapter:
                         effect = _OK
                     elif reason is LlmSessionExit.COMPLETED and ticket.nativeDone and not ticket.stopped:
                         own = ticket.readSlot(timeout=min(ticket.options.timeoutSeconds, 1.0), cleanup=True)
-                        if (own['is_processing'] is False and
-                                (ticket.nativeTask is None or own.get('id_task') == ticket.nativeTask)):
+                        if (own["is_processing"] is False and
+                                (ticket.nativeTask is None or own.get("id_task") == ticket.nativeTask)):
                             effect = _OK
                     elif ticket.confirmStopped():
                         effect = _OK
@@ -486,7 +486,7 @@ class _Session:
         """Read the exact owned slot in a complete validated native slot set."""
         require = self.requireOwnedResidency if cleanup else self.requireResident
         require()
-        request = http.Request(f'{self.driver.baseUrl}/slots', method='GET')
+        request = http.Request(f"{self.driver.baseUrl}/slots", method="GET")
         deadline = time.monotonic() + timeout
         transport = _transport.OwnedHttpTransport()
         pieces, size = [], 0
@@ -495,7 +495,7 @@ class _Session:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError('Managed slot acknowledgement arrived too late.')
+                    raise TimeoutError("Managed slot acknowledgement arrived too late.")
                 transport.setReadTimeout(remaining)
                 piece = response.read1(min(65536, 1048577 - size))
                 if not piece:
@@ -503,20 +503,20 @@ class _Session:
                 pieces.append(piece)
                 size += len(piece)
                 if size > 1048576:
-                    raise LlmProviderProtocolError('Managed slot acknowledgement exceeds its bound.')
+                    raise LlmProviderProtocolError("Managed slot acknowledgement exceeds its bound.")
         finally:
             transport.close()
         if time.monotonic() >= deadline:
-            raise TimeoutError('Managed slot acknowledgement arrived too late.')
-        raw = b''.join(pieces)
-        slots = json.loads(raw.decode('utf-8'))
+            raise TimeoutError("Managed slot acknowledgement arrived too late.")
+        raw = b"".join(pieces)
+        slots = json.loads(raw.decode("utf-8"))
         require()
         if (type(slots) is not list or len(slots) != self.model.parallelSlots or
-                not all(type(s) is dict and type(s.get('id')) is int and
-                        type(s.get('is_processing')) is bool for s in slots) or
-                {s['id'] for s in slots} != set(range(self.model.parallelSlots))):
-            raise LlmProviderProtocolError('Managed slot acknowledgement has invalid ownership shape.')
-        return next(s for s in slots if s['id'] == self.slot)
+                not all(type(s) is dict and type(s.get("id")) is int and
+                        type(s.get("is_processing")) is bool for s in slots) or
+                {s["id"] for s in slots} != set(range(self.model.parallelSlots))):
+            raise LlmProviderProtocolError("Managed slot acknowledgement has invalid ownership shape.")
+        return next(s for s in slots if s["id"] == self.slot)
 
     def bindNativeTask(self):
         """Bind once while this sole admitted request actively owns its native slot.
@@ -527,8 +527,8 @@ class _Session:
         """
         try:
             own = self.readSlot(timeout=min(self.options.timeoutSeconds, 1.0))
-            task = own.get('id_task')
-            if own['is_processing'] is not True:
+            task = own.get("id_task")
+            if own["is_processing"] is not True:
                 return  # Already finished: normal terminal path may still establish drain.
             if (type(task) is not int or task < 0 or
                     (self.baselineTask is not None and task <= self.baselineTask)):
@@ -554,9 +554,9 @@ class _Session:
             if remaining <= 0:
                 return False
             own = self.readSlot(timeout=min(remaining, 0.5), cleanup=True)
-            if time.monotonic() >= deadline or type(own.get('id_task')) is not int or own['id_task'] != self.nativeTask:
+            if time.monotonic() >= deadline or type(own.get("id_task")) is not int or own["id_task"] != self.nativeTask:
                 return False
-            idle = idle + 1 if own['is_processing'] is False else 0
+            idle = idle + 1 if own["is_processing"] is False else 0
             if idle == 2:
                 return True
             Event().wait(min(0.05, max(0, deadline - time.monotonic())))
@@ -683,13 +683,13 @@ class _Session:
                 if signal is not None:
                     signal.raiseIfRequested()
             baseline = self.readSlot(timeout=min(self.options.timeoutSeconds, 1.0))
-            if baseline['is_processing'] is not False:
+            if baseline["is_processing"] is not False:
                 self.uncertain = True
-                raise LlmProviderProtocolError('The admitted native slot was already active before send.')
-            previous = baseline.get('id_task')
+                raise LlmProviderProtocolError("The admitted native slot was already active before send.")
+            previous = baseline.get("id_task")
             if type(previous) is int and previous >= 0:
                 self.baselineTask = previous
-            elif 'id_task' in baseline:
+            elif "id_task" in baseline:
                 self.correlationLost = True
             self.requireResident()
             self.readerDone.clear()
