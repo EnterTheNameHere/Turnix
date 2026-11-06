@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 7
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 8
 """EX-01/02/R1/03 architectural tests: actual runtime/provider, synthetic process/HTTP IO."""
 import importlib
 import json
@@ -248,7 +248,8 @@ def test_invalid_input_never_launches(rig, path, new):
 
 
 @pytest.mark.parametrize('data', [b'{"a":1,"a":2}', b'{"x":{"a":1,"a":2}}', b'{"x":NaN}',
-                                 b'{"x":1e999}', b'\xff', b' ' * (schema.MAX_BYTES + 1)])
+                                 b'{"x":1e999}', b'\xff', b' ' * (schema.MAX_BYTES + 1)],
+                         ids=["duplicate-key", "nested-duplicate-key", "nan", "overflow", "invalid-utf8", "oversized"])
 def test_strict_json(data):
     """Duplicate keys, invalid UTF-8, oversized JSON and nonfinite values never enter models."""
     with pytest.raises(schema.ValidationError):
