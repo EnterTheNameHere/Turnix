@@ -1,0 +1,115 @@
+EX-06 SHARED R1 - FIRST CRITICAL OBSERVATION CORRECTION
+=======================================================
+Date:2026-11-06. Owner: shared EX implementer.
+Status: CORRECTED / VERIFIED / PUSHED; NOT INTEGRATED OR ACCEPTED.
+Source branch:actant-ex06-process-workspace.
+Correction27147c8bb3cd25ba91d238c96437f8f54c7794c7.
+Exact parent876e999cc0c1704ed6ee1f68b1f407883f428238.
+That parent safely merges original source4430418 and latest canonical review
+cfbdffe76659c45b28cb7e2a7a09bba3a0ece1e9. Merge changed coordination only;
+platform source before R1 was byte-identical to reviewed4430418. No history rewrite.
+Authorization: existing shared scope plus inbox2026-11-06-ex06-shared-r1-first-primary.txt.
+Review: knowledge/experiment-runner-ex06-shared-review.txt.
+App remains0d84010bc64095c1080dc44842247c92945b48b8, no source/adoption authorized.
+
+DEFECT / CORRECTION
+---------------------
+Original4430418 kept caller-local primary and operation.primary separately, chose
+caller first on return, and used exception truthiness in several selection sites.
+Thus a later caller SystemExit replaced a worker KeyboardInterrupt already stored
+before completion signal. Always preferring worker would fail reverse ordering.
+
+One _Operation.recordCritical method now accepts the first non-Exception object
+under the operation's existing short RLock, iff primary is None. Every reader read/
+close, supervisor, caller start/wait/unregister, retained-owner scheduling and
+release failure uses that same arbitration. Record is the first action of handled
+critical paths, not deferred until other bookkeeping. No exception truthiness,
+no caller-local competing primary, no thread-priority rule, no lock over IO/client
+callbacks. Final selection reads the one latch and re-raises the identical object.
+Opaque immutable evidence/trace semantics unchanged; ordinary cleanup failures do
+not replace the first critical object.
+
+Retained cleanup now catches/records critical exits without discarding exact roots.
+If final release fails, preserve the first critical object and report immutable
+UNKNOWN with sticky quarantine/exact retained ownership, rather than prematurely
+claiming confirmed release or leaking an unowned handle. No speculative retry of
+partially completed release, no force-clear or new recovery API. Normal confirmed
+release remains unchanged. Background completion never rewrites returned UNKNOWN.
+This correction does not add process/workspace/provider APIs or change App scope.
+
+CHANGED SOURCE / OWNERSHIP
+----------------------------
+Exactly two paths relative to synchronized parent876e999:
+ backend/process/capture.py (version1->2)
+ tests/backend/application/test_processPrimaryR1.py (new version1)
+Existing1876 tests unchanged. Original13-path shared patch remains on its source
+branch; only capture.py and14 new R1 cases are added by this commit. Coordination
+merge is not a platform source change. No App/reusable-Pack/tracer/provider/session/
+resource contract change or downstream synchronization. Integration should review
+original4430418 plus correction27147c8, not import a whole Application branch.
+
+RAW REVIEWER REGRESSION - UNCHANGED
+------------------------------------
+Canonical file knowledge/experiment-runner-ex06-shared-r1-reproducer.txt copied as
+exact bytes to ignored python-embedded/ex06-r1-probe/test_primary.py.
+SHA25675990b16fcd373d3a4958c8ad64d821b4d99c104fa6693fd2b9cbbc57867137e.
+Byte equality verified before/after. Original file not edited or reinterpreted.
+On synchronized old source876e999:1 failed/0.09s, exact later SystemExit versus
+expected earlier KeyboardInterrupt. No child/model/tool launched by raw case.
+After correction:1 passed/0.05s. Full raw + new R1 group:15 passed/0.31s.
+
+OWN NEW REGRESSIONS / ACTUAL EXECUTION
+---------------------------------------
+14 cases, explicit Event/real completion wait/latch barriers, not guessed sleeps:
+- worker-first then caller and unregister critical exits, both ordinary/false-
+  valued first objects;
+- caller-first then supervisor, gate released ONLY after actual first arbitration;
+- real configured Python child reader-first, secondary pipe-close and caller exits;
+- reverse caller-first then actual reader (reader release gated by first latch);
+- caller critical during Thread.start after real ACK worker entry, then worker;
+- worker first then retained-owner Thread.start failure while supervisor tail
+  remains live (UNKNOWN retains exact roots/pin, no new child);
+- critical and ordinary final-release secondary failure with a false-valued first.
+Exact first object, safe captureExceptionSnapshot/format_exception with private
+request sentinel, no spawn after failed ACK, callbacks withdrawn, confirmed worker/
+child cleanup and no confirmed root leak are asserted. Test-owned UNKNOWN failure
+injections resume ONLY the exact original owner's cleanup after removing injected
+failure; quarantine is never reset. Tests launch only configured owned synthetic
+Python children; no borrowed/process-name kill, model or physical promise.
+Existing tests retain actual Job cancellation, raw caps, late ACK/UNKNOWN retention,
+privacy and independent cleanup coverage. No new App/model/browser/Ruff/ty run.
+
+FINAL VERIFICATION ON EXACT CORRECTED SOURCE
+---------------------------------------------
+Windows Python3.15.0b4 / pytest9.2.0, prefix:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --tb=short
+
+Focused (includes unchanged external raw):
+ python-embedded/ex06-r1-probe/test_primary.py
+ tests/backend/process tests/backend/workspace
+ tests/backend/application/test_boundedProcess.py
+ tests/backend/application/test_processPrimaryR1.py
+ tests/backend/application/test_processContextIntegration.py
+ tests/backend/application/test_workspaceProcessIntegration.py
+Result:89 passed/3.29s, zero skips.
+
+Relevant:
+ tests/backend/application tests/backend/llm tests/backend/runtime
+ tests/backend/process tests/backend/workspace tests/first_party/llmDrivers
+Result:877 passed/9.26s, zero skips.
+
+Full platform: tests
+Result:1890 passed/15.61s, zero skips (original1876 +14 new cases).
+Raw remains outside tracked tests, additionally verified unchanged/passing above.
+Two-file path/version/header/AST/docstrings and diff checks pass; all original
+platform/first-party tests and App ref unchanged. Existing embedded-home warning
+remains; Ruff absent/not claimed, no installation or archive mutation.
+
+NEXT
+------
+Integration independently reviews correction27147c8 against exact original4430418
+and raw test; accept shared source or request further bounded correction. No shared
+acceptance/integration/adoption claimed by worker. App semantic identity/budget
+direction remains favorably reviewed, not executed App code. Shared acceptance,
+LATEST COMPLETE platform import preserving all App files/refs/projection/combined
+tests, and separate App implementation authorization still gate downstream work.
