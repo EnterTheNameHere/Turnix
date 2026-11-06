@@ -1,4 +1,4 @@
-# file: backend/llm/providerComposition.py ; version: 3
+# file: backend/llm/providerComposition.py ; version: 4
 """Trusted activation composition, distinct from execution admission and Jobs."""
 from __future__ import annotations
 
@@ -129,6 +129,7 @@ def requireReady(runtime):
 
 def _requireReadyUnlocked(runtime):
     """Inspect only runtime-issued gate state; never call user code under this lane."""
+    runtime.processRunner.requireReady()
     if runtime._closed or runtime._shutdownAdmission or runtime._unloadAdmission:
         raise LlmExecutionOwnershipError("Runtime execution admission is closed.")
     attempt = runtime._compositionAttempt
@@ -222,6 +223,7 @@ class ActivationAttempt:
         self.snapshot = None
         self.continuationThread = None
         with self._gate:
+            runtime.processRunner.requireReady()
             if (runtime._compositionAttempt is not None or runtime._closed or runtime._shutdownAdmission
                     or runtime._unloadAdmission or runtime._invocationAdmissions or runtime._cleanupAdmissions):
                 raise LlmExecutionOwnershipError("Activation is busy or runtime admission is closed.")
