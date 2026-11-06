@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveReader.py ; version: 2
+# file: first-party/applications/experimentRunner/archiveReader.py ; version: 3
 """Bounded read-only committed-prefix recovery, independent of backend and assets."""
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def _inspectArchive(root, unitId, turnId, includeContent):
         with os.scandir(base) as entries:
             for item in entries:
                 count += 1
-                fmt.require(count <= caps["logicalRecords"] * 4 + 8)
+                fmt.require(count <= caps["logicalRecords"] * (32 if version == 3 else 4) + 8)
                 info = item.stat(follow_symlinks=False)
                 fmt.require(not item.is_symlink() and not getattr(info, "st_file_attributes", 0) & 1024)
                 if item.is_file(follow_symlinks=False):
@@ -203,8 +203,13 @@ def _inspectArchive(root, unitId, turnId, includeContent):
             lifetimeBoundary="unavailable" if observed is None else observed["lifetimeBoundary"], turns=turns))
     view["units"] = observations
     view["limits"] = dict(caps)
-    if version == 2:
+    if version in (2, 3):
         view["observations"] = grammar.observations
+    if version == 3:
+        view["procedureSteps"] = importlib.import_module("first-party.applications.experimentRunner.procedureGrammar").view(grammar, unitId)
+        view["procedureIdentity"] = dict(procedureSha256=None if not grammar.started else
+            fmt.digest(fmt.canonical(grammar.procDefinition["procedure"])),
+            inputsSha256=getattr(grammar, "procInputsSha", None))
     fmt.require(unitId is None or unitId in grammar.planned)
     fmt.require(turnId is None or any(turnId in unit["turnIds"] for key, unit in grammar.planned.items() if unitId is None or key == unitId))
     fmt.require(len(fmt.canonical(view)) <= caps["inspectBytes"])

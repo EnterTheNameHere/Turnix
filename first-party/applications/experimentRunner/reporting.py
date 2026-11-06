@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/reporting.py ; version: 2
+# file: first-party/applications/experimentRunner/reporting.py ; version: 3
 """Offline, bounded comparisons and descriptive reports over validated archives."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ reportSchema = importlib.import_module("first-party.applications.experimentRunne
 fmt = reader.fmt
 MIB = 1024 * 1024
 BASE_REF = "f7e95c536944e25abf3ff79652cbb18d9e8cce44"
-GENERATOR = dict(implementationId="applications.experimentRunner.reporting", sourceVersion=2,
+GENERATOR = dict(implementationId="applications.experimentRunner.reporting", sourceVersion=3,
                  applicationBaseRef=BASE_REF)
 MODES = tuple(fmt.PREFIX + item + "@1" for item in ("answer-text", "reasoning-text", "request-body"))
 METRICS = (("application.turn-duration-ns@1", "nanoseconds"),
@@ -64,7 +64,7 @@ class Sources:
         reader.regular(root, directory=True)
         raw = reader.readBytes(root / "manifest.json", 65536)
         header = fmt.decode(raw)
-        if type(header) is dict and header.get("schemaId") not in (fmt.PREFIX + "archive@1", fmt.PREFIX + "archive@2"):
+        if type(header) is dict and header.get("schemaId") not in tuple(fmt.PREFIX + "archive@" + str(i) for i in (1, 2, 3)):
             raise SourceFailure("unsupported-version")
         fmt.manifest(header)
         require(raw == fmt.canonical(header))
@@ -78,7 +78,7 @@ class Sources:
             with os.scandir(base) as entries:
                 for item in entries:
                     count += 1
-                    require(count <= caps["logicalRecords"] * 4 + 8)
+                    require(count <= caps["logicalRecords"] * (32 if header["schemaId"].endswith("@3") else 4) + 8)
                     if item.is_dir(follow_symlinks=False):
                         require(base == root and item.name == "artifacts")
                     else:
@@ -149,12 +149,15 @@ class Source:
                 if candidate["phase"] == "call-final":
                     observation = candidate
                     break
-        ordinal = next(i for i, turn in enumerate(self.definition["conversation"]["turns"]) if turn["id"] == turnId)
+        procedure = self.definition["schemaId"] == fmt.PREFIX + "definition@3"
+        turns = ([s for s in self.definition["procedure"] if s["op"] == "inference"] if procedure else self.definition["conversation"]["turns"])
+        ordinal = next(i for i, turn in enumerate(turns) if turn["id"] == turnId)
         config = self.definition["configurations"][units[0]["configurationIndex"] - 1]
-        prefix = self.definition["conversation"]["turns"][:ordinal + 1]
+        prefix = turns[:ordinal + 1]
         signature = fmt.digest(fmt.canonical(dict(ordinal=ordinal + 1,
             historyPolicy=self.definition["conversation"]["historyPolicy"], contextPolicy=self.definition["contextPolicy"],
-            messages=[dict(role="user", content=t["content"]) for t in prefix])))
+            messages=[dict(role="user", content=t["content"]) for t in prefix]))) if not procedure else fmt.digest(fmt.canonical(dict(
+                ordinal=ordinal + 1, **self.view["procedureIdentity"], querySha256=None if planned is None else planned["queryRef"]["sha256"])))
         queryHash = None if planned is None else planned["queryRef"]["sha256"]
         optionsHash = None if planned is None else planned["requestedOptionsRef"]["sha256"]
         return dict(unit=units[0], turn=turns[0], result=result, body=body, records=records,
@@ -201,6 +204,15 @@ def compare(left, leftUnit, leftTurn, right, rightUnit, rightTurn, *, mode, allo
         sources.append(source)
         result["sources"].append(source.binding)
         result["sourceOutcomes"].append(dict(archiveStatus=source.view["status"], suiteOutcome=source.view["lastObservedSuiteStatus"]))
+    if any(s.header["schemaId"].endswith("@3") for s in sources):
+        result["schemaId"] = fmt.PREFIX + "comparison@2"
+        result["procedureQualification"] = dict(leftProcedureSha256=None, rightProcedureSha256=None,
+            leftInputsSha256=None, rightInputsSha256=None, leftQuerySha256=None, rightQuerySha256=None,
+            differencesAllowed=allowInputDifferences)
+        for side, source in zip(("left", "right"), sources, strict=True):
+            identity = source.view.get("procedureIdentity", {})
+            result["procedureQualification"][side + "ProcedureSha256"] = identity.get("procedureSha256")
+            result["procedureQualification"][side + "InputsSha256"] = identity.get("inputsSha256")
     if any(source.view["status"] == "corrupt" for source in sources):
         result["reasons"] = ["source-invalid"]
         return result
@@ -210,6 +222,9 @@ def compare(left, leftUnit, leftTurn, right, rightUnit, rightTurn, *, mode, allo
         result["reasons"] = ["selection-missing"]
         return result
     result["fieldAvailability"] = [availability(item) for item in selected]
+    if "procedureQualification" in result:
+        for side, item in zip(("left", "right"), selected, strict=True):
+            result["procedureQualification"][side + "QuerySha256"] = item["querySha256"]
     result["alignment"] = dict(inputSignatures=[item["inputSignature"] for item in selected],
         querySha256=[item["querySha256"] for item in selected], requestedOptionsSha256=[item["optionsSha256"] for item in selected],
         configurationSha256=[fmt.digest(fmt.canonical(item["config"])) for item in selected],
@@ -320,7 +335,7 @@ def report(directory, *, unitIds=(), turnIds=(), includeContent=False, includeOb
                   transportAttempts=sum(r["kind"] == "request-evidence" and r["payload"]["phase"] == "transport-attempt" for r in records),
                   finalMayHaveSent=sum(r["kind"] == "request-evidence" and r["payload"]["phase"] == "final"
                                        and r["payload"]["mayHaveSent"] is True for r in records))
-    return dict(schemaId=fmt.PREFIX + "report@1", generator=dict(GENERATOR), sources=[source.binding],
+    value = dict(schemaId=fmt.PREFIX + "report@1", generator=dict(GENERATOR), sources=[source.binding],
                 selection=dict(unitIds=list(unitIds), turnIds=list(turnIds)),
                 scopeCompleteness="invalid-prefix" if source.view["status"] == "corrupt" else
                     "sealed-source" if source.view["status"] == "sealed" else "incomplete-prefix",
@@ -328,6 +343,10 @@ def report(directory, *, unitIds=(), turnIds=(), includeContent=False, includeOb
                 contentPolicy="selected-private" if includeContent or includeObservations else "summary-only", content=content,
                 diagnostics=dict(ackObservation="unavailable", writerCloseObservation="unavailable",
                                  aggregateStatusStrata=statuses))
+    if source.header["schemaId"].endswith("@3"):
+        module = importlib.import_module("first-party.applications.experimentRunner.procedureReporting")
+        module.extend(value, source, unitIds, includeContent)
+    return value
 
 
 def cleanCleanup(value):

@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archive.py ; version: 2
+# file: first-party/applications/experimentRunner/archive.py ; version: 3
 """Launcher-owned bounded archive worker, outside invocation rollback/IO scope."""
 from __future__ import annotations
 
@@ -83,8 +83,10 @@ class ArchiveWriter:
         self.caps = fmt.limits(caps)
         self.archiveId = uuid4().hex
         self.path = Path(root).absolute() / self.archiveId
-        fmt.require(type(version) is int and version in (1, 2))
+        fmt.require(type(version) is int and version in (1, 2, 3))
         self.version = version
+        if version == 3:
+            self.path = Path(root).absolute() / suite["suiteId"] / "archive"
         self.header = dict(schemaId=fmt.PREFIX + "archive@" + str(version), archiveId=self.archiveId,
             suiteId=suite["suiteId"], createdTimeNs=time.time_ns(), definitionSha256=suite["definitionSha256"],
             format="data-commit-json-lines@" + str(version), durability="local-process-death-os-running", limits=self.caps)
@@ -92,6 +94,8 @@ class ArchiveWriter:
         self.forwardCancellation = cancelled
         self.lane = Condition()
         self.command = self.active = self.partial = None
+        self.commandHeld = 0
+        self.knownRefs = {}
         self.partialFlightBytes = 0
         self.failure = self.primary = None
         self.stopping = self.closed = False
@@ -142,6 +146,9 @@ class ArchiveWriter:
 
     def _checkpoint(self, kind, payload, *, unitId=None, turnId=None, artifacts=(), cancelled=None):
         """Bound and detach host data before admitting one worker command."""
+        if self.version == 3:
+            module = importlib.import_module("first-party.applications.experimentRunner.procedureArchive")
+            return module.checkpoint(self, kind, payload, unitId, turnId, artifacts, cancelled)
         self.check()
         encoded = fmt.canonical(payload)
         fmt.require(len(encoded) <= self.caps["frameBytes"] - 2048 and len(artifacts) <= 4)
@@ -260,7 +267,12 @@ class ArchiveWriter:
 
     def _initialize(self):
         """Create exclusive files and sync them; collisions are errors, never retries."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.version == 3:
+            self.path.parent.parent.mkdir(parents=True, exist_ok=True)
+            reader.regular(self.path.parent.parent, directory=True)
+            self.path.parent.mkdir(exist_ok=False)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         reader.regular(self.path.parent, directory=True)
         self.path.mkdir(exist_ok=False)
         (self.path / "artifacts").mkdir(exist_ok=False)
@@ -278,10 +290,13 @@ class ArchiveWriter:
         fmt.require(self.sequence < self.caps["logicalRecords"])
         unique = {}
         for ref, raw in command["artifacts"]:
-            unique[ref["sha256"]] = (ref, raw)
+            unique[fmt.refKey(ref) if self.version == 3 else ref["sha256"]] = (ref, raw)
         for ref, raw in unique.values():
             path = self.path / "artifacts" / (ref["sha256"] + ".blob")
-            if path.exists():
+            if raw is None:
+                fmt.require(self.knownRefs.get(fmt.refKey(ref)) == ref)
+                reader.BlobReader(self.path, self.caps)(ref)
+            elif path.exists():
                 fmt.require(reader.readBytes(path, self.caps["artifactBytes"]) == raw)
             else:
                 fmt.require(self.bytes + len(raw) <= self.caps["archiveBytes"])
@@ -308,6 +323,9 @@ class ArchiveWriter:
         self.sequence, self.previous = data["sequence"], commit["commitSha256"]
         command["ack"] = dict(archiveId=self.archiveId, sequence=self.sequence, commitSha256=self.previous,
             artifacts=[ref["sha256"] for ref, _ in unique.values()])
+        if self.version == 3:
+            with self.lane:
+                self.knownRefs.update({fmt.refKey(ref): dict(ref) for ref, raw in unique.values()})
 
     def _work(self):
         """Own IO until completion; poison on first failure and never invoke cancel locked."""
@@ -335,6 +353,9 @@ class ArchiveWriter:
                         self.lane.notify_all()
                     self._commit(batch, journal)
                     with self.lane:
+                        if self.version == 3:
+                            batch["artifacts"] = ()
+                            self.commandHeld -= batch.pop("charge", 0)
                         self.active = None
                         self.partialFlightBytes = 0
                         batch["done"].set()
@@ -343,6 +364,11 @@ class ArchiveWriter:
             self.fail(error)
         finally:
             with self.lane:
+                if self.version == 3:
+                    for batch in (self.command, self.active):
+                        if batch is not None:
+                            batch["artifacts"] = ()
+                            self.commandHeld -= batch.pop("charge", 0)
                 self.closed = True
                 self.lane.notify_all()
 

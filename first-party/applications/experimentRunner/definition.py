@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/definition.py ; version: 2
+# file: first-party/applications/experimentRunner/definition.py ; version: 3
 """Strict bootstrap experiment schema and immutable canonical JSON snapshots."""
 from __future__ import annotations
 
@@ -119,6 +119,9 @@ class Snapshot:
 
 def validate(value, policy):
     """Freeze a v2 suite only after every configuration and expansion budget validates."""
+    if type(value) is dict and value.get("schemaId") == "actant.experiment.definition@3":
+        import importlib
+        return importlib.import_module("first-party.applications.experimentRunner.procedureFormat").validate(value, policy)
     try:
         value = decode(canonical(value))
     except (TypeError, ValueError, UnicodeError, RecursionError, OverflowError) as error:

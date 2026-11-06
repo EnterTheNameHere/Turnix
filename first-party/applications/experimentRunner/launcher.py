@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 7
+# file: first-party/applications/experimentRunner/launcher.py ; version: 8
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ from backend.save import ApplicationStore
 schema = importlib.import_module("first-party.applications.experimentRunner.definition")
 results = importlib.import_module("first-party.applications.experimentRunner.results")
 archive = importlib.import_module("first-party.applications.experimentRunner.archive")
+procedureFormat = importlib.import_module("first-party.applications.experimentRunner.procedureFormat")
+procedureInputs = importlib.import_module("first-party.applications.experimentRunner.inputs")
 observations = importlib.import_module("first-party.applications.experimentRunner.observations")
 APP = Path(__file__).resolve().parent
 ROOT = APP.parents[2]
@@ -52,15 +54,22 @@ def readJson(path):
 def hostConfiguration(value):
     """Freeze trusted launch config separately from untrusted declarative experiments."""
     value = schema.decode(schema.canonical(value))
-    schema.fields(value, ("schemaId", "llamaCpp", "aliases", "limits", "archive"), ("persistConfigurationEvidence", "observation"))
-    schema.require(value["schemaId"] in ("actant.experiment.host@3", "actant.experiment.host@4"), "Unsupported host schema.")
-    if value["schemaId"] == "actant.experiment.host@4":
+    procedure = value.get("schemaId") == "actant.experiment.host@5"
+    schema.fields(value, ("schemaId", "llamaCpp", "aliases", "limits", "archive",
+        *(("observation", "processTools", "approvedCommands", "procedureLimits") if procedure else ())),
+        ("persistConfigurationEvidence",) if procedure else ("persistConfigurationEvidence", "observation"))
+    schema.require(value["schemaId"] in ("actant.experiment.host@3", "actant.experiment.host@4", "actant.experiment.host@5"), "Unsupported host schema.")
+    if value["schemaId"] in ("actant.experiment.host@4", "actant.experiment.host@5"):
         observations.validate(value.get("observation"))
     else:
         schema.require("observation" not in value, "Host3 has no observation policy.")
     archiveValue = value["archive"]
-    schema.fields(archiveValue, (*archive.fmt.DEFAULTS, "capturePolicy", "hashAssets"))
-    archive.fmt.limits({key: archiveValue[key] for key in archive.fmt.DEFAULTS})
+    archiveKeys = (*archive.fmt.DEFAULTS, *(("commandBytes",) if procedure else ()))
+    schema.fields(archiveValue, (*archiveKeys, "capturePolicy", "hashAssets"))
+    archive.fmt.limits({key: archiveValue[key] for key in archiveKeys})
+    if procedure:
+        procedureFormat.host(value)
+        value["processTools"] = {name: str(Path(executable)) for name, executable in value["processTools"].items()}
     schema.require(archiveValue["capturePolicy"] in ("required", "disabled") and type(archiveValue["hashAssets"]) is bool,
                    "Invalid archive capture policy.")
     aliases, limits = value["aliases"], value["limits"]
@@ -85,18 +94,34 @@ def hostConfiguration(value):
 def policyFor(host):
     """Project only frozen aliases and request/output limits into Application config."""
     value = host.value()
+    if value["schemaId"] == "actant.experiment.host@5":
+        return procedureFormat.policy(value)
     return {"aliases": value["aliases"], **value["limits"]}
 
 
 def prepare(definitionValue, hostValue):
     """Validate every turn and selector before constructing or activating a runtime."""
     host = hostConfiguration(hostValue)
+    source = definitionValue if type(definitionValue) is procedureInputs.Source else None
+    if source is not None:
+        definitionValue = source.value()
+    procedure = procedureFormat.isProcedure(definitionValue)
+    schema.require(procedure == (host.value()["schemaId"] == "actant.experiment.host@5"), "Definition/host version mismatch.")
     definition = schema.validate(definitionValue, policyFor(host))
-    if host.value()["schemaId"] == "actant.experiment.host@4":
+    if host.value()["schemaId"] in ("actant.experiment.host@4", "actant.experiment.host@5"):
         observations.validate(host.value()["observation"], definition)
-    archive.preflight(definition, policyFor(host) | {"captureRequired": host.value()["archive"]["capturePolicy"] == "required"},
-        {k: host.value()["archive"][k] for k in archive.fmt.DEFAULTS},
-        observation=host.value()["schemaId"] == "actant.experiment.host@4" and host.value()["observation"]["enabled"])
+    if procedure:
+        if source is None:
+            schema.require(not definition.value()["inputs"], "File-backed procedure requires authored source.")
+            source = procedureInputs.Source(schema.canonical(definitionValue), definition.data, Path.cwd(), "json")
+        frozen = procedureInputs.freeze(source, definition, policyFor(host))
+        procedureFormat.budget(definition, policyFor(host), {k: host.value()["archive"][k] for k in (*archive.fmt.DEFAULTS, "commandBytes")},
+            {k: len(v) for k, v in frozen.data().items()}, originalBytes=len(frozen.original), observation=host.value()["observation"]["enabled"])
+        toolEvidence = procedureInputs.tools(host.value())
+    else:
+        archive.preflight(definition, policyFor(host) | {"captureRequired": host.value()["archive"]["capturePolicy"] == "required"},
+            {k: host.value()["archive"][k] for k in archive.fmt.DEFAULTS},
+            observation=host.value()["schemaId"] == "actant.experiment.host@4" and host.value()["observation"]["enabled"])
     adapter = loadAdapter()
     catalog = adapter.LlamaCppCatalog.fromConfig(host.value()["llamaCpp"])
     schema.require(all(selector in catalog.profiles for selector in host.value()["aliases"].values()),
@@ -107,6 +132,8 @@ def prepare(definitionValue, hostValue):
     provider = adapter.EntrySelector.fromSource("llmDrivers.llamaCpp", "0.3.0", "driver", DRIVER / "structuredCodeEntry.py")
     composer = adapter.LlamaCppComposition(domainId="experiment-runner", catalog=catalog,
         providerEntries=(provider,), grants=(adapter.LlamaCppGrant(caller, selectors, allowTransition=True),))
+    if procedure:
+        composer.procedureInputs, composer.procedureTools = frozen, toolEvidence
     return definition, host, composer
 
 
@@ -152,6 +179,8 @@ def privateConfiguration(value):
 def persist(io, directory, result):
     """Atomically write one opaque-run file into an explicitly selected private directory."""
     directory = Path(directory).resolve()
+    if result["suite"]["schemaId"] == "actant.experiment.suite@2":
+        directory = directory / result["suite"]["suiteId"]
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / (result["suite"]["suiteId"] + ".json")
     encoded = schema.canonical(result)
@@ -324,8 +353,9 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
     """
     definition, hostConfig, composer = prepared
     config = hostConfig.value()
+    procedure = procedureFormat.isProcedure(definition.value())
     schema.require(observationHandoff is None or callable(observationHandoff), "Invalid private observation hook.")
-    observer = observations.Controller(config["observation"], observationHandoff) if config["schemaId"] == "actant.experiment.host@4" else None
+    observer = observations.Controller(config["observation"], observationHandoff) if config["schemaId"] in ("actant.experiment.host@4", "actant.experiment.host@5") else None
     control = SuiteControl() if control is None else control
     if job is not None and job.cancellationRequested:
         control.cancel()
@@ -338,6 +368,8 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                 "archive": {"archiveId": None, "path": None, "failure": None, "close": None}}
     if observer is not None:
         envelope["schemaId"] = "actant.experiment.execution@5"
+    if procedure:
+        envelope["schemaId"] = "actant.experiment.execution@6"
     resultPath = None
     host, runtime = None, None
     temporary = tempfile.TemporaryDirectory(prefix="actant-experiment-")
@@ -382,9 +414,13 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
             try:
                 stage = "archive-initial"
                 caps = {key: config["archive"][key] for key in archive.fmt.DEFAULTS}
+                if procedure:
+                    caps["commandBytes"] = config["archive"]["commandBytes"]
                 writer = archive.ArchiveWriter(resultsDirectory, suite, caps, control.cancel, cancelled=control.raiseIfCancelled,
-                    version=2 if observer is not None else 1)
-                archiveRun = archive.ArchiveRun(writer, definition, composer, config)
+                    version=3 if procedure else 2 if observer is not None else 1)
+                runType = (importlib.import_module("first-party.applications.experimentRunner.procedureArchive").Run
+                           if procedure else archive.ArchiveRun)
+                archiveRun = runType(writer, definition, composer, config)
                 if observer is not None:
                     archiveRun.observationPolicy = observations.archivePolicy(config["observation"], observer.effective)
                 envelope["archive"].update(archiveId=writer.archiveId, path=str(writer.path))
@@ -405,7 +441,8 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                 host.start()
                 runtime = host.createApplication(appPackId="applications.experimentRunner",
                     plan=ManualActivationPlan(packIds=("llmDrivers.llamaCpp", "applications.experimentRunner")),
-                    config={"llamaCpp": config["llamaCpp"], "experimentRunner": policyFor(hostConfig),
+                    config={**({"processTools": config["processTools"]} if procedure else {}),
+                        "llamaCpp": config["llamaCpp"], "experimentRunner": policyFor(hostConfig),
                         "observationBridge": dict(host="127.0.0.1", port=0, allowedOrigins=[] if observer is None or
                             not config["observation"]["live"]["enabled"] else [config["observation"]["live"]["allowedOrigin"]])})
                 if observer is not None and observer.effective == "pending-activation":
@@ -487,6 +524,8 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                             if unit["run"]["status"] is None:
                                 unit["run"]["status"] = "failed"
                             unit["status"] = unitStatus(unit)
+                            if procedure and unit["run"]["workspaceDisposition"] != "retained":
+                                unit["run"]["workspaceDisposition"] = ("ephemeral-ended" if unit["lifetimeBoundary"] == "completed" else "unknown")
                             if config.get("persistConfigurationEvidence", False):
                                 try:
                                     selector = config["aliases"][unit["profileAlias"]]
@@ -562,6 +601,13 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                     archiveRun.cleanup("host", envelope["hostCleanup"] if host is not None else "unavailable",
                         dict(outcome=envelope["hostCleanup"]))
                     archiveRun.cleanup("temporary", temporaryOutcome, dict(outcome=temporaryOutcome))
+                    if procedure:
+                        boundaries = [u["run"]["processBoundary"] for u in suite["units"]]
+                        workspaces = [u["run"]["workspaceDisposition"] for u in suite["units"] if u["status"] != "not-started"]
+                        archiveRun.cleanup("process", "retained" if "unknown" in boundaries else "completed" if "confirmed" in boundaries else "unavailable",
+                            dict(unitBoundaries=boundaries))
+                        archiveRun.cleanup("workspace", "retained" if "retained" in workspaces else "failed-or-unknown" if "unknown" in workspaces else "completed",
+                            dict(unitDispositions=workspaces, removalReceipt="unavailable"))
                     archiveRun.seal(suite["status"])
                 except BaseException as error:
                     archiveFailure(error, "archive-finalization")

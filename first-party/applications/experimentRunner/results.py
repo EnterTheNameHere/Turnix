@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/results.py ; version: 2
+# file: first-party/applications/experimentRunner/results.py ; version: 3
 """Detached initial diagnostics shared by the Application and trusted launcher."""
 from uuid import uuid4
 import time
@@ -8,7 +8,10 @@ def initialResult(definition, runId=None):
     """Allocate one opaque invocation identity with explicit unavailable turn evidence."""
     value = definition.value()
     config = value["configurations"][0]
-    return {"schemaId": "actant.experiment.result@2", "runId": uuid4().hex if runId is None else runId,
+    procedure = value["schemaId"] == "actant.experiment.definition@3"
+    turns = ([dict(id=s["id"], content="") for s in value["procedure"] if s["op"] == "inference"]
+             if procedure else value["conversation"]["turns"])
+    result = {"schemaId": "actant.experiment.result@3" if procedure else "actant.experiment.result@2", "runId": uuid4().hex if runId is None else runId,
             "experimentId": value["experimentId"], "definition": value, "definitionSha256": definition.sha256,
             "configurationName": config["name"], "profileAlias": config["profile"],
             "status": None, "applicationOutcome": "not-started", "startedTimeNs": time.time_ns(),
@@ -18,7 +21,12 @@ def initialResult(definition, runId=None):
                            requestedOptions=None, answer=None, reasoning=None, native=None, executionProfile=None,
                            executionEvidence=None, cleanup={"status": "unavailable", "quiescence": "unknown"},
                            startedTimeNs=None, endedTimeNs=None, durationNs=None, error=None, partial=None)
-                      for turn in value["conversation"]["turns"]]}
+                      for turn in turns]}
+    if procedure:
+        result.update(steps=[dict(opId=s["id"], ordinal=i + 1, op=s["op"], status="not-started",
+                                 requestRef=None, outcomeRef=None) for i, s in enumerate(value["procedure"])],
+                      processBoundary="not-used", workspaceDisposition="unknown")
+    return result
 
 
 def initialSuite(definition, unitDefinition):
@@ -33,7 +41,7 @@ def initialSuite(definition, unitDefinition):
                           "repetition": repetition, "status": "not-started", "jobOutcome": None,
                           "lifetimeBoundary": "not-started", "configurationEvidence": None,
                           "run": initialResult(unitDefinition(definition, index), unitId)})
-    return {"schemaId": "actant.experiment.suite@1", "suiteId": uuid4().hex,
+    return {"schemaId": "actant.experiment.suite@2" if value["schemaId"] == "actant.experiment.definition@3" else "actant.experiment.suite@1", "suiteId": uuid4().hex,
             "experimentId": value["experimentId"], "definition": value, "definitionSha256": definition.sha256,
             "status": None, "startedTimeNs": time.time_ns(), "endedTimeNs": None, "durationNs": None,
             "units": units}

@@ -508,3 +508,74 @@ selected private report internally; the CLI still requires JSON for private flag
 ASCII JSON escaping contains control/bidi strings. One 4 MiB whole-output budget
 counts every line and delimiter before joining/printing, so a size failure emits no
 partial diagnostic to stdout. No execution/observation path or stored schema changed.
+# EX-06 Classic procedures
+
+`example.procedure.json5` is an explicit nine-step message → inference → save →
+Ruff safe fix → Ruff format → ty check → Ruff check → feedback message → correction
+inference. Each command runs once. The original assistant draft stays in the growing
+message history; feedback includes the current observed source revision and selected
+diagnostics. The final answer is returned without an implicit second save. Generated
+Python is neither imported nor executed.
+
+Use `host5.example.json` with authorized local server/model/Ruff/ty paths. Its paths
+are placeholders. Install the Application authoring dependency from this directory's
+`requirements.txt` in your chosen environment (`json5==0.17.3`); no installation or
+actual tool/model launch is performed by this change. Definitions default to strict
+JSON; JSON5 requires explicit `--definition-format json5` and definition@3. Host@5
+requires definition@3; older definition@2/host@3/@4 behavior remains available.
+
+```powershell
+.\python-embedded\python.exe first-party/applications/experimentRunner/run.py validate --definition first-party/applications/experimentRunner/example.procedure.json5 --definition-format json5 --host-config first-party/applications/experimentRunner/host5.example.json
+```
+
+Validation freezes authored bytes, normalized meaning and strict UTF-8 inputs once,
+then checks every configuration/reference and conservative history/stream/archive/
+queued-command bound before runtime activation. The sample reserves approximately
+40 MB of archive space and 47 MB of aggregate command space. Limits are rejection
+bounds; larger valid definitions can require a different host policy or fail preflight.
+Input paths are relative to the definition directory and cannot traverse or use links.
+Artifact paths are portable relative names with case/ancestor/device collisions rejected.
+Messages have only user/assistant roles; file and CLI feedback is explicitly authored.
+
+Each configuration/repetition has one actual Job, exclusive conversation session and
+ephemeral invocation workspace. Save uses mediated materialization/read APIs. CLI
+uses a fixed host recipe and a prepared process request whose exact archive record
+must be acknowledged before spawn. There is no shell, resume/replay, loop, condition,
+tool selection, or inference retry. Process completion, allowed exit, bounded streams,
+post-file capture, step outcome, Job outcome and cleanup remain separate facts.
+Unknown process cleanup stops the suite, records unavailable post-capture, and retains
+the platform workspace pin. Confirmed cleanup is scoped to the owned child and
+workers, with no claim of descendant-process termination or a hard native deadline.
+
+New outputs are execution@6/result@3/suite@2/archive@3. Each run is stored under
+`RESULTS/<suiteId>/`, with `archive/` and an atomic `<suiteId>.json` sidecar. Suite,
+archive, unit, Job and call attempt identities are distinct. The archive retains raw
+authored inputs, exact model wire capture, strict extraction, observed file revisions,
+raw streams, process intent/outcome and explicit pending/unstarted failure prefixes.
+References with identical content may have distinct raw/document type metadata;
+the immutable blob bytes are stored once and each typed reference is validated.
+Acknowledged publication and observed COMMIT visibility remain distinct.
+
+Existing `inspect`, `recover`, `report`, `compare` and `export` commands support the
+new archives offline using only the standard library. They require no backend,
+JSON5 parser, original inputs, tool binary, model, network or process. Readers verify
+digest-bound normalized procedure/step meaning and recorded interpreter identity;
+they do not independently re-parse authored JSON5 to attest the transformation.
+An ephemeral-ended workspace observation means invocation authority ended, not a
+physical deletion receipt. A sealed failed suite remains a failed suite.
+
+Report@2 keeps inference rows/denominators separate from procedure step rows and
+CLI retained-byte/duration metrics. CLI duration is the shared process software
+interval, never inference time. Missing measurements stay null with reasons. Default
+JSON/table/CSV omit source content, argv, cwd, streams and environment. Explicit
+single-unit/single-inference `--include-content --format json` adds bounded private
+artifacts; treat these exports as private. CSV contains typed step summary records.
+Comparison@2 discloses procedure, semantic frozen-input and actual-query hashes;
+cross-input differences require `--allow-input-differences`. Semantic input identity
+hashes sorted `{inputId,bytes,sha256}` entries, excluding physical paths/timestamps.
+Export retains the exclusive-directory, manifest-last publication protocol.
+
+Host@5 PM/G selectors address only inference operation IDs. Each inference retains
+the existing in-flight final-copy acknowledgement guard and viewer-only expiry.
+An Application observation tail may span CLI gaps until its original deadline;
+the source is not reopened or extended and CLI time is not attributed to inference.

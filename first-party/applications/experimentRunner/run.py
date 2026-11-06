@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/run.py ; version: 4
+# file: first-party/applications/experimentRunner/run.py ; version: 5
 """Terminal entry point; only explicit inspect displays private experiment content."""
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ def main(argv=None):
     for command in ("validate", "run"):
         child = commands.add_parser(command)
         child.add_argument("--definition", required=True)
+        child.add_argument("--definition-format", choices=("json", "json5"), default="json")
         child.add_argument("--host-config", required=True)
         if command == "run":
             child.add_argument("--results", required=True)
@@ -90,7 +91,8 @@ def main(argv=None):
             print(json.dumps(json.loads(data.decode("utf-8")), ensure_ascii=False, indent=2))
             return 0
         launcher = importlib.import_module("first-party.applications.experimentRunner.launcher")
-        prepared = launcher.prepare(launcher.readJson(args.definition), launcher.readJson(args.host_config))
+        source = launcher.procedureInputs.readDefinition(args.definition, args.definition_format)
+        prepared = launcher.prepare(source, launcher.readJson(args.host_config))
         if args.command == "validate":
             print("Valid definition and managed host configuration; no model launched.")
             return 0

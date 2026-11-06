@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 3
+# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 4
 """Strict, standard-library-only archive grammar; no execution or runtime imports."""
 from __future__ import annotations
 
@@ -40,8 +40,19 @@ TURN_KEYS = ("turnId", "input", "status", "query", "requestedOptions", "answer",
     "endedTimeNs", "durationNs", "error", "partial")
 
 
+def refKey(ref):
+    """Distinguish two typed references to the same immutable content bytes."""
+    return ref["sha256"], ref["mediaType"], ref["encoding"]
+
+
 def payloadKeys(kind, version):
     """Dispatch exact versioned additions while preserving the complete original grammar."""
+    if version == 3:
+        module = importlib.import_module("first-party.applications.experimentRunner.procedureGrammar")
+        if kind in module.KEYS:
+            return module.KEYS[kind]
+        if kind in ("observation-snapshot", "observation-cleanup"):
+            return ("attemptId", "observationId", "observationRef" if kind == "observation-snapshot" else "cleanupRef")
     if version == 2:
         if kind == "suite-planned":
             return (*PAYLOADS[kind], "observationPolicyRef")
@@ -127,7 +138,8 @@ def hashValue(value):
 
 def limits(value):
     """Validate all trusted bounds; archived limits may never exceed hard ceilings."""
-    fields(value, DEFAULTS)
+    extended = type(value) is dict and "commandBytes" in value
+    fields(value, (*DEFAULTS, "commandBytes") if extended else DEFAULTS)
     for key, maximum in MAXIMA.items():
         item = value[key]
         if key in ("ackSeconds", "partialSeconds"):
@@ -135,6 +147,8 @@ def limits(value):
         else:
             integer(item, 1, maximum)
     require(value["requestBytes"] <= value["artifactBytes"])
+    if extended:
+        integer(value["commandBytes"], 65536, 64 * 1024 * 1024)
     return dict(value)
 
 
@@ -151,7 +165,7 @@ def reference(value, caps):
 def manifest(value):
     """Validate immutable archive identity and process-death durability declaration."""
     fields(value, ("schemaId", "archiveId", "suiteId", "createdTimeNs", "definitionSha256", "format", "durability", "limits"))
-    require(value["schemaId"] in (PREFIX + "archive@1", PREFIX + "archive@2"))
+    require(value["schemaId"] in (PREFIX + "archive@1", PREFIX + "archive@2", PREFIX + "archive@3"))
     identifier(value["archiveId"], opaque=True)
     identifier(value["suiteId"], opaque=True)
     require(value["archiveId"] != value["suiteId"])
@@ -160,6 +174,7 @@ def manifest(value):
     require(value["format"] == "data-commit-json-lines@" + value["schemaId"].rsplit("@", 1)[1])
     require(value["durability"] == "local-process-death-os-running")
     limits(value["limits"])
+    require((value["schemaId"] == PREFIX + "archive@3") == ("commandBytes" in value["limits"]))
 
 
 def validateTransportFacts(turn, facts):
@@ -221,19 +236,21 @@ class Grammar:
         kind, payload = data["kind"], data["payload"]
         require(type(kind) is str)
         fields(payload, payloadKeys(kind, self.version))
-        require(type(data["artifacts"]) is list and len(data["artifacts"]) <= 4)
+        require(type(data["artifacts"]) is list and len(data["artifacts"]) <= (32 if self.version == 3 else 4))
         declared = {}
         for ref in data["artifacts"]:
             reference(ref, self.caps)
-            require(ref["sha256"] not in declared)
-            declared[ref["sha256"]] = ref
+            key = refKey(ref) if self.version == 3 else ref["sha256"]
+            require(key not in declared)
+            declared[key] = ref
             read(ref)
         used = set()
         def blob(ref):
             """Require every payload reference to have one identical declared ref."""
             reference(ref, self.caps)
-            require(declared.get(ref["sha256"]) == ref)
-            used.add(ref["sha256"])
+            key = refKey(ref) if self.version == 3 else ref["sha256"]
+            require(declared.get(key) == ref)
+            used.add(key)
             return read(ref)
         def document(ref, schemaId, keys):
             """Decode one bounded explicitly versioned JSON artifact."""
@@ -243,6 +260,11 @@ class Grammar:
             require(value["schemaId"] == PREFIX + schemaId)
             return value
         unitId, turnId = data["unitId"], data["turnId"]
+        if self.version == 3:
+            procedureGrammar = importlib.import_module("first-party.applications.experimentRunner.procedureGrammar")
+            if procedureGrammar.apply(self, data, blob, document):
+                require(used == set(declared))
+                return
         if kind == "suite-planned":
             require(not self.started and unitId is None and turnId is None)
             raw = blob(payload["definitionRef"])
@@ -292,7 +314,7 @@ class Grammar:
                 require(unitId in self.planned and (self.suiteOutcome is None or kind in ("observation-snapshot", "observation-cleanup")))
             if kind in ("observation-snapshot", "observation-cleanup"):
                 observationFormat = importlib.import_module("first-party.applications.experimentRunner.observationFormat")
-                require(self.version == 2 and self.observationPolicy["enabled"] and (unitId, turnId) in self.turns)
+                require(self.version in (2, 3) and self.observationPolicy["enabled"] and (unitId, turnId) in self.turns)
                 turn = self.turns[unitId, turnId]
                 planned = self.planned[unitId]
                 require(dict(configurationIndex=planned["configurationIndex"], repetition=planned["repetition"], turnId=turnId)
@@ -453,7 +475,7 @@ class Grammar:
                         if turn["finalFacts"] is not None:
                             validateTransportFacts(turn, turn["finalFacts"])
                     else:
-                        value = document(payload["resultRef"], "turn-result@1", ("result",))["result"]
+                        value = document(payload["resultRef"], "turn-result@2" if self.version == 3 else "turn-result@1", ("result",))["result"]
                         fields(value, TURN_KEYS)
                         require(value["turnId"] == turnId and value["status"] in ("succeeded", "failed", "cancelled"))
                         if value["status"] == "succeeded":

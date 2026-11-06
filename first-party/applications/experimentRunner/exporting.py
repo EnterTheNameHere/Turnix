@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/exporting.py ; version: 2
+# file: first-party/applications/experimentRunner/exporting.py ; version: 3
 """Bounded safe presentation and exclusive, manifest-last offline report publication."""
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def csvBytes(value):
     require(value["contentPolicy"] == "summary-only" and not value["content"])
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\r\n")
-    if value["schemaId"] == fmt.PREFIX + "report@1":
+    if value["schemaId"] in (fmt.PREFIX + "report@1", fmt.PREFIX + "report@2"):
         require(len(value["rows"]) <= 256)
         columns = ("schemaId", "manifestSha256", "committedSequence", "commitSha256", "archiveStatus", "suiteOutcome",
                    "unitId", "configurationIndex", "repetition", "turnId", "turnStatus", "jobOutcome",
@@ -80,12 +80,23 @@ def csvBytes(value):
                      row["metrics"][0]["value"], row["metrics"][1]["value"]]
             writer.writerow([safeCell(item) for item in cells])
             require(output.tell() <= MAX_SUMMARY)
+        if "procedureSteps" in value:
+            writer.writerow(("schemaId", "unitId", "opId", "ordinal", "op", "status", "reason", "processStatus", "exitCode", "postCapture", "durationNs", "stdoutBytes", "stderrBytes"))
+            metrics = {(r["unitId"], r["opId"]): r for r in value["cliMetrics"]}
+            for row in value["procedureSteps"]:
+                metric = metrics.get((row["unitId"], row["opId"]), {})
+                cells = [fmt.PREFIX + "step-summary-csv@1", *[row[k] for k in ("unitId", "opId", "ordinal", "op", "status", "reason", "processStatus", "exitCode")],
+                    json.dumps(row["postCapture"], sort_keys=True), *[metric.get(k) for k in ("durationNs", "stdoutBytes", "stderrBytes")]]
+                writer.writerow([safeCell(item) for item in cells])
+                require(output.tell() <= MAX_SUMMARY)
     else:
-        require(value["schemaId"] == fmt.PREFIX + "comparison@1")
-        writer.writerow(("schemaId", "mode", "result", "reasons", "sourceBindings", "selection", "alignment", "difference"))
+        require(value["schemaId"] in (fmt.PREFIX + "comparison@1", fmt.PREFIX + "comparison@2"))
+        qualified = "procedureQualification" in value
+        writer.writerow(("schemaId", "mode", "result", "reasons", "sourceBindings", "selection", "alignment", "difference",
+                         *(("procedureQualification",) if qualified else ())))
         writer.writerow([safeCell(fmt.PREFIX + "comparison-summary-csv@1"), safeCell(value["mode"]), safeCell(value["result"]),
                          *[safeCell(json.dumps(value[k], ensure_ascii=True, sort_keys=True, separators=(",", ":")))
-                           for k in ("reasons", "sources", "selection", "alignment", "difference")]])
+                           for k in ("reasons", "sources", "selection", "alignment", "difference", *(("procedureQualification",) if qualified else ())) ]])
     require(output.tell() <= MAX_SUMMARY)
     return output.getvalue().encode("utf-8")
 
@@ -93,7 +104,7 @@ def csvBytes(value):
 def table(value):
     """Show qualified outcomes, selection and measurements within one escaped summary budget."""
     reporting.reportSchema.validate(value)
-    if value["schemaId"] == fmt.PREFIX + "comparison@1":
+    if value["schemaId"] in (fmt.PREFIX + "comparison@1", fmt.PREFIX + "comparison@2"):
         # The validated comparison is already summary-only, including its qualifiers.
         return jsonBytes(value).decode("ascii")
     lines, total = [], 0
@@ -110,6 +121,14 @@ def table(value):
         # Row schemas allow only identifiers, outcome/availability facts and typed metrics.
         append(row)
     append(dict(aggregates=value["metrics"]))
+    if "procedureSteps" in value:
+        append(dict(procedureIdentity=value["procedureIdentity"]))
+        for row in value["procedureSteps"]:
+            append(row)
+        for row in value["cliMetrics"]:
+            append(dict(cliMetric=row, durationUnit="nanoseconds", streamUnit="retained-bytes"))
+        module = importlib.import_module("first-party.applications.experimentRunner.procedureReporting")
+        append(dict(cliAggregates=module.aggregates(value["cliMetrics"])))
     return "\n".join(lines)
 
 
@@ -136,7 +155,7 @@ def publish(value, root, name, *, kind, format, sourceDirectories):
     reporting.reportSchema.validate(value)
     require(type(name) is str and re.fullmatch("[A-Za-z0-9_-]{1,64}", name) is not None)
     require(kind in ("report", "compare") and format in ("json", "csv"))
-    require(value["schemaId"] == fmt.PREFIX + ("report@1" if kind == "report" else "comparison@1"))
+    require(value["schemaId"] in tuple(fmt.PREFIX + ("report@" if kind == "report" else "comparison@") + str(i) for i in (1, 2)))
     data = jsonBytes(value) if format == "json" else csvBytes(value)
     filename = "report." + format
     manifest = dict(schemaId=fmt.PREFIX + "report-export@1", kind=kind, format=format, generator=value["generator"],
@@ -158,6 +177,6 @@ def publish(value, root, name, *, kind, format, sourceDirectories):
 
 def exitCode(value):
     """Separate comparison inequality/unavailability from original run outcomes."""
-    if value["schemaId"] == fmt.PREFIX + "comparison@1":
+    if value["schemaId"] in (fmt.PREFIX + "comparison@1", fmt.PREFIX + "comparison@2"):
         return {"Equal": 0, "NotEqual": 1, "NotComparable": 2}[value["result"]]
     return 2 if value["scopeCompleteness"] == "invalid-prefix" else 0

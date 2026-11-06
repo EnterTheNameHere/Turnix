@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/observations.py ; version: 1
+# file: first-party/applications/experimentRunner/observations.py ; version: 2
 """Explicit optional PM/G composition with in-flight source retention and private handoff."""
 from __future__ import annotations
 
@@ -45,9 +45,12 @@ def validate(value, definition=None):
         fmt.require(live["call"] is None and live["allowedOrigin"] is None)
     if definition is not None:
         valueDefinition = definition.value()
+        turnIds = ([s["id"] for s in valueDefinition["procedure"] if s["op"] == "inference"]
+            if valueDefinition["schemaId"] == "actant.experiment.definition@3"
+            else [t["id"] for t in valueDefinition["conversation"]["turns"]])
         for config, repetition, turn in calls:
             fmt.require(config <= len(valueDefinition["configurations"]) and repetition <= valueDefinition["repetitions"]
-                        and turn in [t["id"] for t in valueDefinition["conversation"]["turns"]])
+                        and turn in turnIds)
 
 
 def archivePolicy(value, effective):
