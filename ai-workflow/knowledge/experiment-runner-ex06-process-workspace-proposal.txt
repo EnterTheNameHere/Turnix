@@ -1,0 +1,313 @@
+EX-06 - CONCRETE SHARED PROCESS / WORKSPACE CONTRACT
+====================================================
+Date:2026-11-06. Proposer: experiment-runner implementer.
+Status: CONTRACT PROPOSAL; NO PRODUCTION CODE AUTHORIZED OR CREATED.
+Canonical parent:c3cbc0a425ae9024af843273b300982aaf9ae6c0.
+Application inspected:0d84010bc64095c1080dc44842247c92945b48b8.
+Platform source:b958470b2e2d63182bb0bda7d2f760c1492edff9, identical to current
+Integration backend/reusable source/tests. Binding input: ex06-plan-review.txt.
+Companion: experiment-runner-ex06-contract-addendum.txt in this directory.
+
+01. PUBLIC API / COMPATIBILITY
+--------------------------------
+Proposed additions (names here are exact review candidates):
+ ctx.process.prepare(toolName: str, arguments: Sequence[str]=(), *,
+   workingDirectory: str|Path, timeoutSeconds: float=30.0,
+   stdoutBytes: int=262144, stderrBytes: int=262144,
+   cleanupSeconds: float=2.0) -> PreparedProcess
+ ctx.process.execute(prepared: PreparedProcess, *,
+   beforeLaunch: Callable[[ProcessRequest], bool]) -> ProcessOutcome
+ ctx.workspace.readBytes(relativePath: str|Path, *, maxBytes: int) -> WorkspaceRead
+
+PreparedProcess is opaque, non-copyable, non-serializable, safe repr, one-use;
+property request:ProcessRequest exposes immutable data, not execution authority.
+It is bound internally to exact facade/Context generation and cancellation signal;
+only that facade can execute it. prepare/execute denied after invalidation.
+ApplicationRuntime.runJob installs a runtime-private scoped binding of actual
+jobId and the SAME cancellationSignal passed to invokeCapability/createContext;
+Context gets a new opaque invocationId. Helper calls inherit binding only when
+their cancellation signal is identical. Public caller payload cannot set jobId;
+non-Job contexts have null jobId. Supervisor receives immutable identity values
+and signal/Event only, never the live Job or Context. Direct low-level Context
+construction defaults to no Job binding, preserving test/initialization use.
+One pending prepared ticket per facade; new prepare while it exists fails busy.
+Unused ticket is discarded on invalidation; prepare has no spawn/thread/pipe.
+Reentrant execute/prepare from beforeLaunch fails busy; execute consumes ticket
+BEFORE callback even when callback fails. Tickets expire30 monotonic seconds
+after prepare; execute checks expiry both before and after callback. No retry
+or reusable acknowledgement. No explicit ticket cleanup method is necessary.
+
+Reject bool/nan/inf, timeout outside(0,120], cleanup outside(0,5], per-stream
+bytes outside[1,1048576], >64 argv elements or >8192 combined UTF-8 argv bytes,
+invalid Unicode/NUL. Strings/tool/cwd inputs bounded <=32768 UTF-8 bytes total.
+Always finite deadline. Registry executable absolute; cwd existing directory.
+prepare resolves paths and freezes exact argv, registry/environment binding and
+policy; later registry/caller/env mutation cannot retarget execution. Environment
+values are frozen privately, never serialized. Ordinary environment inherited
+from host plus configured overrides; no new hermeticity guarantee.
+
+Existing ProcessFacade.run/ProcessRunner.run signatures, successful snapshot keys,
+text decoding/newline behavior and normal nonzero exit semantics stay unchanged.
+Legacy unbounded capture is NOT advertised as bounded. Fix legacy exception text
+to constant safe categories as part of this patch, with no raw chained exception;
+legacy errors remain ProcessExecutionError. Actual Context cancellation admission
+check also applies to legacy facade run; active legacy process cancellation is
+explicitly unsupported, rather than silently replacing its result contract.
+Existing callers keep their ordinary success behavior; old raw error-message
+assertions may be replaced only to assert stronger privacy, not weaken tests.
+
+02. IMMUTABLE DATA CONTRACTS
+------------------------------
+Objects frozen dataclasses/tuples/exact bytes; all repr strings fixed/type-only.
+request.snapshot() returns a detached JSON object with EXACT keys:
+ {schemaId,requestId,applicationRunId,codeEntryInstanceId,invocationId,jobId,
+  toolName,configuredExecutable,resolvedExecutable,arguments,workingDirectory,
+  timeoutSeconds,stdoutBytes,stderrBytes,cleanupSeconds,environmentPolicy,
+  preparedTimeNs,executableObservation}
+schemaId='actant.process.request@1'; IDs opaque32hex except actual runtime identity
+strings (bounded128); jobId null only for a non-Job invocation. invocationId new
+runtime-minted Context generation, never inferred from thread. arguments list[str].
+environmentPolicy='inherited-host-plus-configured-overrides-frozen'; no values.
+executableObservation EXACT {status,bytes,sha256,observedTimeNs}:
+status='not-hashed' in shared API, bytes/sha256=null; timestamp is resolution
+observation. App can separately record approved preflight binary hashes/version.
+No loaded-image identity is asserted. OS executable replacement races remain.
+
+ProcessOutcome exact attributes:
+ request:ProcessRequest, status:str, phase:str, launchState:str,
+ startedTimeNs:int|None, endedTimeNs:int, durationNs:int,
+ exitCode:int|None, stopReason:str|None,
+ stdout:CapturedStream, stderr:CapturedStream, cleanup:ProcessCleanup,
+ failureCategory:str|None.
+schema in .snapshot() is actant.process.outcome@1 plus those same keys; request
+expanded using its snapshot. stdout/stderr snapshot replaces data bytes by
+dataBase64 ASCII, preserving every retained raw byte. No implicit decoder on run.
+App archiving MUST use attributes/raw byte blobs, not large inline base64 copies.
+status: completed|cancelled|timeout|output-limit|failed.
+phase: admission|ack|spawn|capture|cleanup|completed.
+launchState: not-attempted|attempted|started. attempted means spawn was entered
+but no owned Popen handle was registered by observation time; not proof of no child.
+exitCode null unless exact owned child reaped; startedTimeNs null until Popen handle
+registered, not actual native creation time; duration measured from execute entry.
+stopReason: null|cancelled|timeout|stdout-limit|stderr-limit|execution-failed|
+interrupted. failureCategory:null|resolution|expired|ack-rejected|ack-failed|
+spawn-failed|capture-failed|cleanup-unknown|interrupted. Invalid caller API use
+(wrong ticket/type/reuse) raises safe TypeError/ValueError/RuntimeError without
+ProcessOutcome; no effects permitted on such misuse.
+
+CapturedStream exact attributes/snapshot keys:
+ {data,observedBytes,eof,limitExceeded,readFailure}; data bytes (dataBase64 in
+snapshot), observedBytes counts bytes actually read by owned reader, not bytes
+child wrote. data <= request stream cap; observedBytes <= cap+1. eof bool,
+limitExceeded bool, readFailure bool. Capture stops reading on cap+1; total output
+is UNKNOWN unless eof=true and no failure/limit. Exact total then observedBytes.
+No fabricated total count or complete=true after stop/reader failure. Empty EOF
+stream differs from absent stream. Before readers exist: empty bytes,0,false,
+false,false; outcome phase/launchState disambiguate not-started.
+UTF-8 text only an App-derived view: strict decode if possible, otherwise
+errors=replace with decoding='utf8-replaced'; raw bytes remain authoritative.
+Never normalize CRLF. Complete stream requires eof and !readFailure/!limitExceeded.
+
+ProcessCleanup exact keys:
+ {scope,childReaped,readersJoined,pipesClosed,spawnResolved,ackResolved,stopAttempted,
+  disposition,retentionId,workspaceDisposition}
+scope='owned-child-and-capture-workers'; childReaped/readersJoined/pipesClosed/
+spawnResolved/ackResolved are booleans; childReaped=true for provably not-attempted (no child
+obligation), not for attempted without resolved spawn. stopAttempted bool.
+disposition=confirmed|unknown; retentionId null or opaque32hex;
+workspaceDisposition=unaffected|released-pin|retained.
+confirmed iff all five boolean obligations true. It NEVER implies process-tree
+quiescence. retentionId present iff disposition unknown, workspace retained if
+the operation held a Context workspace pin (including absolute cwd invocations).
+completed requires started, reaped exitCode, complete streams, confirmed cleanup,
+no stopReason/failureCategory. Nonzero code still completed. Failed cleanup may
+coexist with a known child exit: retain exit fact; no completed status in that case.
+
+Normal completed returns ProcessOutcome. Every operational failure raises
+ProcessOperationError(ProcessExecutionError) with immutable .evidence:ProcessOutcome;
+cancellation raises ProcessCancelled(ExecutionCancelled) with same .evidence.
+Acknowledgement callback BaseException/non-Exception interruption is re-raised as
+the SAME primary with safe .processEvidence attached best effort, no spawn;
+on ordinary callback exception do not wrap original text or retain it as cause.
+For a non-Exception primary during execution/cleanup, re-raise identical primary
+after bounded owned cleanup, attaching immutable evidence best effort; secondary
+errors do not replace it. Exception categories remain fixed and private evidence
+available even when the enclosing Job fails/rolls back.
+
+03. EXACT PRE-LAUNCH BARRIER / CANCELLATION RACES
+-------------------------------------------------
+prepare first checks Context valid, runner not quarantined, actual Job signal;
+resolve/freeze request and privately prepared environment. If resolution fails,
+safe error evidence has launchState not-attempted; request can be unavailable on
+prepare error: .evidence is None and .category='resolution'. No made-up resolved
+request. App records logical step failure without process-admitted record.
+Pre-cancel during prepare raises ProcessCancelled with evidence=None and
+category='cancelled', no spawn. Structured request/outcome exists only once enough
+facts exist to construct it; no placeholder executable/path is manufactured.
+
+execute consumes bound ticket under short ticket lock; registers no-fail stop
+callback on actual Job signal BEFORE callback/spawn. Callback ONLY sets monotonic
+Event, never closes a pipe/kills/waits or invokes client code. Registering against
+already cancelled signal invokes it immediately. Release locks, check cancellation,
+then dispatch beforeLaunch(request) on the owned supervisor thread, never the Job
+thread which holds the runtime capability lane. No callback executes with a
+signal/ticket/runner/runtime lock held by that callback's thread. Return must be
+EXACT True; all other values fail closed. App callback ACKs exact private request
+in its archive through its typed host port; it MUST NOT capture/use a Context or
+invoke runtime (Job thread is synchronously waiting and retains admission lane).
+Workspace pin and owner registry root exist before dispatch. Caller waits no longer
+than ticket expiry for ACK, followed by cleanupSeconds; a stuck callback is retained
+unknown, ackResolved=false, no spawn, runner disabled. Callback uses App's shorter
+writer ACK deadline normally. Supervisor rechecks expiry/cancel/Context generation
+after callback; a late ACK can never launch. Failure/cancellation/expiry before
+launch consumes ticket and launches nothing. This does not promise that arbitrary
+callback code itself returns finitely or undo a committed but unobserved ACK.
+
+At final admission, atomically mark ticket launch-admitted iff stop flag not set;
+continue on the already owned supervisor, with workspace pin rooted BEFORE exposure.
+Supervisor checks stop again before entering Popen, records attempted under short lock,
+releases lock, then Popen exact frozen request with shell=False, stdin=DEVNULL,
+binary stdout/stderr pipes. Race after attempted can still launch: evidence says
+attempted/started and supervisor stops/reaps when it obtains handle. Do not promise
+atomic cancellation versus native process creation. Worker registers exact handle
+before starting readers; stop arriving before registration remains latched. No
+stop lost and no child PID lookup outside that exact handle.
+
+Two concurrent bounded binary readers; read request <=remaining+1 and <=8192;
+lock only when publishing bounded bytes/counters, not during read/close/OS wait.
+One supervisor owns ACK/Popen/wait/termination; no multiple owners closing same pipe.
+No reader calls client/archive callbacks. Cancellation callback is withdrawn after
+operation ownership handed back or retained; it may already be in-flight after
+unregister, but Event remains rooted and harmless. Repeated stop is idempotent.
+EOF+normal exit observed before any stop condition commits completed; subsequent
+Job cancellation may still classify enclosing Job Cancelled independently. If
+stop observed before completion commit, cancellation/timeout/limit remains primary
+even if child later exits0. First stop reason is latched under ticket lock; later
+reasons cannot rewrite it. Existing first BaseException outranks ordinary failures.
+
+04. DEADLINE / UNKNOWN CLEANUP / WORKSPACE OWNERSHIP
+----------------------------------------------------
+Execution timeout starts immediately after successful ACK, before worker launch;
+monotonic deadline spans spawn+capture. On stop, supervisor attempts terminate
+once on exact owned child then kill that SAME child if still live after min(.25s,
+remaining cleanup budget). Stop escalation is owned-child disposition, not a
+process-name kill or arbitrary descendant termination. Native OS waits can stall;
+the caller waits at most cleanupSeconds after stop, then snapshots unknown.
+Concurrent readers drain within same cleanup deadline; if EOF never arrives due
+to descendants, do NOT close a handle being read from another thread to pretend
+it joined. Unknown owner retains child, pipe handles, worker/reader objects and
+workspace pin. A stalled spawn worker is also retained; late handle registration
+still observes latched stop and goes through owned disposition.
+
+Execution timeout is finite policy, not a guaranteed hard wall for all native
+operations/thread scheduling. Synchronous request resolution/ACK can also block;
+no universal latency guarantee. Bounded wait returning unknown uses a platform
+owned PendingProcess record (no Context or Application callbacks retained) rooted
+both in ProcessRunner and a module-private pending registry until resolved.
+At most one active/pending operation per runner; no growth through retries.
+Pending supervisor/reader threads are daemon workers with exact-resource ownership;
+interpreter termination has no physical cleanup guarantee. While alive, supervisor
+periodically attempts owned wait/join and releases workspace pin ONLY when spawn
+resolved, owned child reaped, both readers ended and pipes closed. It never reopens
+or reruns tool. If descendants keep pipes open, retention may be indefinite; no
+claim that inherited pipe EOF proves those descendants no longer exist.
+
+Context receives an internal workspace lease for every admitted process; even a
+tool with another cwd may access the workspace via argv. invalidate FIRST makes
+Context invalid and requests workspace close; deletion deferred while lease held.
+Other Context cleanup (memory/observation/executionAccess) independently attempted
+with existing primary precedence. No new caller-accessible workspace use after
+invalidation. A returned unknown never releases the pin/deletes the workspace.
+No App-side cleanup, .close bypass or retry takes that ownership away.
+Removal remains best effort and separately observable; released-pin is not a
+workspace-deletion receipt or process-tree guarantee.
+
+Unknown permanently latches runner execution-disabled for that ApplicationRun.
+New user runJob and capability invocation admission reject before calling any
+CodeEntry (including another unit/LLM helper); safe diagnostics already retained
+outside runtime remain readable. Existing runtime-owned lifecycle cleanup scopes
+can still invoke registered teardown under cleanup-only authority; process prepare/
+execute remains disabled there, and no new inference is admitted. No automatic
+clearing if background cleanup later resolves. close/stop
+still attempt independent owned cleanup; report fixed ProcessCleanupPendingError
+if unresolved, without revoking the pending registry root. Resource cleanup can
+outlive closed runtime. No global pending registry control/recovery API assigned.
+This bounded failure path does not rewrite original Job result to success.
+Host must not claim complete closure when child/capture obligations remain unknown.
+
+05. ERROR / TRACE PRIVACY
+---------------------------
+str/repr of ProcessOperationError/ProcessCancelled/ProcessCleanupPendingError,
+PreparedProcess/ProcessRequest/ProcessOutcome use only fixed safe type/category
+text. Never interpolate caller tool name, arguments, cwd, executable, output,
+environment, OS exception or beforeLaunch exception. Raise safe ordinary errors
+outside raw exception handler (or otherwise remove/suppress raw cause/context)
+so default formatted traceback does not print a raw exception chain. No args/path
+in cleanup ExceptionGroup child messages. Original non-Exception primary is kept;
+framework does not fabricate a safe replacement, and Application must not throw
+private callback content in arbitrary user-created BaseExceptions.
+ApplicationRuntime currently traces str(error); test actual capability failure
+tracing with timeout/launch/ACK private sentinels and grouped cleanup failure.
+Structured .evidence is opt-in private data; generic tracer must not serialize
+exception attributes. No broad tracer redesign proposed.
+
+06. BOUNDED WORKSPACE READ
+-----------------------------
+WorkspaceRead frozen dataclass, repr='<WorkspaceRead>', exact attributes:
+ data:bytes, relativePath:str, bytes:int, sha256:str, observedTimeNs:int,
+ identity:WorkspaceFileIdentity.
+identity exact {device,inode,size,mtimeNs,ctimeNs}; integer fstat observations,
+not portable authority or universally unique IDs. snapshot() exact schemaId
+'actant.workspace.read@1' plus relativePath,bytes,sha256,observedTimeNs,identity;
+data is deliberately excluded, accessed separately as exact immutable bytes.
+bytes=len(data)<=maxBytes; sha256 of EXACT data, not a second file read.
+maxBytes exact int in[1,1048576]. Context lifetime check on entry and before return;
+no use after close. Relative path contains only child components, no empty/dot/
+parent/drive/ADS/UNC; reject links/reparse at root/each component and destination.
+Open regular file, fstat before, actual read at most maxBytes+1 even if size grows,
+fstat after and revalidate path identity/containment. Reject oversized, detected
+identity/size/mtime/ctime changes, nonregular file or mismatched path/open identity;
+do not retry into a later revision. Same-size hostile rewrite with restored metadata
+is NOT excluded. This is observed snapshot evidence, not filesystem immutability.
+New WorkspaceReadError(WorkspaceError) with .category in
+invalid-path|not-found|not-regular|reparse|over-limit|changed|read-failed|inactive;
+constant safe messages and suppressed raw chains, no partial data returned on error.
+Existing materialize API signatures unchanged. Raw CodeEntry file opens unnecessary.
+
+07. IMPLEMENTATION BOUNDARY / TEST PLAN / OPEN REVIEW
+-----------------------------------------------------
+Candidate later platform branch actant-ex06-process-workspace from latest
+actant-integration, NOT App branch. No branch created at this checkpoint.
+Minimal files: backend/process/{runtime,context,api,__init__}.py;
+backend/workspace/{runtime,context,__init__}.py;
+backend/context/codeEntryContext.py; backend/application/applicationRuntime.py.
+If runtime.py becomes unwieldy, internal backend/process/capture.py owns worker
+state; no scheduler/persistent Workspace/process-tree subsystem. Existing signal
+API suffices. New platform tests under tests/backend/process, workspace and
+application; no Application-only source/tests imported upstream.
+
+Deterministic barriers BEFORE/AFTER ACK, final admission, Popen entered/returned,
+registration, completion commit, callback unregister and reader EOF. Tests must
+pair pre-cancel no-spawn with spawn-race attempted/late-owned cleanup; callback
+under-lock reentry detection, failed/late ACK, cross-Context/job ticket misuse,
+reused/expired tickets, cancelled admission normal Job classification, no callback
+leak, no child/reader leak at every confirmed boundary, immutable earlier evidence.
+Real synthetic owned Python children: concurrent both streams, overflow cap+1,
+nonUTF8/raw CRLF, normal7, timeout, Job cancellation while running, child exit
+racing stop, descendant-held pipe -> bounded unknown/pin retained/no next Job;
+test controls exact test-owned descendants' natural completion and joins afterwards.
+Inject stuck spawn/reader/wait, close failure and paired first BaseException;
+unknown owner remains rooted past runtime close, no forced release or claim of
+confirmed cleanup. Test safe trace formatted cause/context, not wrapper type only.
+Bounded read tests maxBytes+1 request size, exact bytes/hash/identity, symlink/
+reparse/traversal/removal/growth/replacement, invalidation while reading and cleanup
+pin retention, no full allocation before cap, no metadata immutability overclaim.
+Run existing24 unchanged plus all applicable platform tests; actual tests only
+after code authorization. Platform acceptance independent before complete App sync.
+
+This checkpoint only re-inspected source/cancellation/PM-G paths and corrected
+example counting. Existing prior24-pass and Integration's independent probes remain
+at their original exact refs. No new bounded API execution is claimed.
+Integration decisions requested: accept API/fields, one-use callback ACK, failure
+enums, sticky unknown/retained-owner/Context lease policy, safe legacy error change,
+and minimal platform scope; explicitly authorize implementation separately.
