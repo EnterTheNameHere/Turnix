@@ -1,4 +1,4 @@
-# file: backend/process/capture.py ; version: 1
+# file: backend/process/capture.py ; version: 2
 """Bounded configured-child ownership, outside runtime lanes and client callbacks."""
 from __future__ import annotations
 
@@ -285,6 +285,31 @@ class _Operation:
                 self.reason = reason
             self.stop.set()
 
+    def recordCritical(self, error):
+        """Arbitrate the first critical object across every owner thread exactly once.
+
+        Observation order is the order this short shared lock accepts objects,
+        independent of exception truth value or the thread that finally raises.
+        Ordinary failures never replace the original non-Exception primary.
+        """
+        if isinstance(error, Exception):
+            return
+        with self.lane:
+            if self.primary is None:
+                self.primary = error
+
+    def retain(self):
+        """Keep exact unknown ownership and close admission before publishing it."""
+        with self.lane:
+            self.abandoned = True
+            self.stop.set()
+        self.runner._quarantined.set()
+        with _pendingLane:
+            _pending[self.request.requestId] = self
+        with self.runner._processLane:
+            if self.runner._active is None:
+                self.runner._active = self
+
     def _read(self, index, pipe, cap):
         """Read concurrent raw streams with at most cap+1 observed bytes each."""
         data, observed, eof, overflow, failed = bytearray(), 0, False, False, False
@@ -303,19 +328,15 @@ class _Operation:
                 with self.lane:
                     self.streams[index] = CapturedStream(bytes(data), observed, False, False, False)
         except BaseException as error:
+            self.recordCritical(error)
             failed = True
-            if not isinstance(error, Exception):
-                with self.lane:
-                    self.primary = self.primary or error
             self.requestStop("execution-failed")
         finally:
             try:
                 pipe.close()
             except BaseException as error:
+                self.recordCritical(error)
                 failed = True
-                if not isinstance(error, Exception):
-                    with self.lane:
-                        self.primary = self.primary or error
                 self.requestStop("execution-failed")
             with self.lane:
                 self.streams[index] = CapturedStream(bytes(data), observed, eof, overflow, failed)
@@ -372,11 +393,11 @@ class _Operation:
             for worker in self.readers:
                 worker.join()
         except BaseException as error:
+            self.recordCritical(error)
             with self.lane:
                 if self.phase == "spawn" and isinstance(error, OSError):
                     self.spawnResolved = True
                 if not isinstance(error, Exception):
-                    self.primary = self.primary or error
                     self.reason = self.reason or "interrupted"
                 self.failure = self.failure or ("ack-failed" if not self.ack else
                     "spawn-failed" if self.launch != "started" else "capture-failed")
@@ -408,6 +429,14 @@ class _Operation:
 
     def reap(self):
         """Retain unknown ownership; late completion never changes returned evidence."""
+        try:
+            self._reap()
+        except BaseException as error:
+            self.recordCritical(error)
+            self.retain()
+
+    def _reap(self):
+        """Dispose exact resources without letting a secondary exit lose ownership."""
         self.worker.join()
         # If the supervisor itself failed after owning a child, retain exact handles
         # and attempt disposition here; no client callback is called again.
@@ -506,17 +535,16 @@ def execute(runner, state, prepared, beforeLaunch):
         _pending[operation.request.requestId] = operation
     unregister = (state.signal.registerCallback(lambda: operation.requestStop("cancelled"))
                   if state.signal is not None else lambda: None)
-    primary, stopDeadline, started = None, None, False
+    stopDeadline, started = None, False
     try:
         try:
             operation.worker.start()
             started = True
         except BaseException as error:
+            operation.recordCritical(error)
             started = operation.worker.is_alive()
             operation.ack = not started
             operation.failure, operation.phase = "capture-failed", "admission"
-            if not isinstance(error, Exception):
-                primary = error
             if started:
                 operation.requestStop("interrupted")
         while started:
@@ -534,8 +562,8 @@ def execute(runner, state, prepared, beforeLaunch):
                     if time.monotonic() >= stopDeadline:
                         break
             except BaseException as error:
+                operation.recordCritical(error)
                 if not isinstance(error, Exception):
-                    primary = primary or error
                     operation.requestStop("interrupted")
                 else:
                     operation.failure = operation.failure or "capture-failed"
@@ -547,27 +575,28 @@ def execute(runner, state, prepared, beforeLaunch):
         try:
             unregister()
         except BaseException as error:
+            operation.recordCritical(error)
             operation.failure = operation.failure or "capture-failed"
-            if not isinstance(error, Exception):
-                primary = primary or error
     confirmed = operation.settled()
     if not confirmed:
-        with operation.lane:
-            operation.abandoned = True
-            operation.stop.set()
-        runner._quarantined.set()
+        operation.retain()
     value = operation.outcome(confirmed)
-    primary = primary or operation.primary
     if confirmed:
-        operation.release()
+        try:
+            operation.release()
+        except BaseException as error:
+            operation.recordCritical(error)
+            operation.retain()
+            value = operation.outcome(False)
     else:
         try:
             Thread(target=operation.reap, name="actant-process-retained-owner", daemon=True,
                    context=Context()).start()
         except BaseException as error:
             # Exact roots/pin remain retained if the OS cannot schedule cleanup.
-            if not isinstance(error, Exception):
-                primary = primary or error
+            operation.recordCritical(error)
+    with operation.lane:
+        primary = operation.primary
     if primary is not None:
         try:
             primary.processEvidence = value
