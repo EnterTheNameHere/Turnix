@@ -1,7 +1,10 @@
 EX-06 - CONCRETE SHARED PROCESS / WORKSPACE CONTRACT
 ====================================================
 Date:2026-11-06. Proposer: experiment-runner implementer.
-Status: CONTRACT PROPOSAL; NO PRODUCTION CODE AUTHORIZED OR CREATED.
+Status: reviewed proposal, shared implementation now delivered for independent review.
+Original checkpoint96afd57 was contract-only; authorization533fe5f and delivered
+source4430418 supersede that restriction for SHARED code only. Current evidence:
+experiment-runner-ex06-process-workspace-implementation.txt. App code still gated.
 Canonical parent:c3cbc0a425ae9024af843273b300982aaf9ae6c0.
 Application inspected:0d84010bc64095c1080dc44842247c92945b48b8.
 Platform source:b958470b2e2d63182bb0bda7d2f760c1492edff9, identical to current
@@ -109,14 +112,16 @@ errors=replace with decoding='utf8-replaced'; raw bytes remain authoritative.
 Never normalize CRLF. Complete stream requires eof and !readFailure/!limitExceeded.
 
 ProcessCleanup exact keys:
- {scope,childReaped,readersJoined,pipesClosed,spawnResolved,ackResolved,stopAttempted,
+ {scope,childReaped,readersJoined,pipesClosed,spawnResolved,ackResolved,workersSettled,stopAttempted,
   disposition,retentionId,workspaceDisposition}
-scope='owned-child-and-capture-workers'; childReaped/readersJoined/pipesClosed/
-spawnResolved/ackResolved are booleans; childReaped=true for provably not-attempted (no child
+scope='owned-child-ack-spawn-supervisor-and-capture-workers'; childReaped/readersJoined/pipesClosed/
+spawnResolved/ackResolved/workersSettled are booleans; childReaped=true for provably not-attempted (no child
 obligation), not for attempted without resolved spawn. stopAttempted bool.
 disposition=confirmed|unknown; retentionId null or opaque32hex;
 workspaceDisposition=unaffected|released-pin|retained.
-confirmed iff all five boolean obligations true. It NEVER implies process-tree
+confirmed requires all six obligations including supervisor/ownership handoff.
+workersSettled remains false for retained ownership even if other observations
+resolve before unknown publication. It NEVER implies process-tree
 quiescence. retentionId present iff disposition unknown, workspace retained if
 the operation held a Context workspace pin (including absolute cwd invocations).
 completed requires started, reaped exitCode, complete streams, confirmed cleanup,
@@ -202,13 +207,18 @@ still observes latched stop and goes through owned disposition.
 Execution timeout is finite policy, not a guaranteed hard wall for all native
 operations/thread scheduling. Synchronous request resolution/ACK can also block;
 no universal latency guarantee. Bounded wait returning unknown uses a platform
-owned PendingProcess record (no Context or Application callbacks retained) rooted
+owned operation record (no live Context/Job retained) rooted
 both in ProcessRunner and a module-private pending registry until resolved.
+An unresolved ACK necessarily retains its callback frame/closure and bounded archive
+port; those exact roots are retained until callback returns, then cleared. Platform
+workers use empty contextvars.Context. No callback invokes runtime. A blocked ACK
+cannot simultaneously perform its supervisor cleanup loop; caller can publish
+unknown while the exact callback/worker/pin remain rooted.
 At most one active/pending operation per runner; no growth through retries.
 Pending supervisor/reader threads are daemon workers with exact-resource ownership;
-interpreter termination has no physical cleanup guarantee. While alive, supervisor
-periodically attempts owned wait/join and releases workspace pin ONLY when spawn
-resolved, owned child reaped, both readers ended and pipes closed. It never reopens
+interpreter termination has no physical cleanup guarantee. A retained owner waits
+for actual ACK/supervisor resolution and releases workspace pin ONLY when ACK and
+spawn resolve, owned child is reaped, all workers ended and pipes closed. It never reopens
 or reruns tool. If descendants keep pipes open, retention may be indefinite; no
 claim that inherited pipe EOF proves those descendants no longer exist.
 
@@ -248,8 +258,10 @@ framework does not fabricate a safe replacement, and Application must not throw
 private callback content in arbitrary user-created BaseExceptions.
 ApplicationRuntime currently traces str(error); test actual capability failure
 tracing with timeout/launch/ACK private sentinels and grouped cleanup failure.
-Structured .evidence is opt-in private data; generic tracer must not serialize
-exception attributes. No broad tracer redesign proposed.
+Structured .evidence is an opaque immutable safe-repr object, with explicit private
+snapshot() opt-in. Existing generic tracer DOES inspect/freeze custom attributes,
+falling back to repr; that contract is unchanged. Every attached process field
+is safe under that existing snapshotter. No tracer redesign.
 
 06. BOUNDED WORKSPACE READ
 -----------------------------
@@ -266,7 +278,10 @@ no use after close. Relative path contains only child components, no empty/dot/
 parent/drive/ADS/UNC; reject links/reparse at root/each component and destination.
 Open regular file, fstat before, actual read at most maxBytes+1 even if size grows,
 fstat after and revalidate path identity/containment. Reject oversized, detected
-identity/size/mtime/ctime changes, nonregular file or mismatched path/open identity;
+descriptor identity/size/mtime/ctime changes, nonregular file or mismatched path/open
+device/inode/size/mtime; Windows path/descriptor ctime semantics differ and are not
+cross-compared (both descriptor ctime observations still checked). See actual
+200-file probe and regression in implementation report;
 do not retry into a later revision. Same-size hostile rewrite with restored metadata
 is NOT excluded. This is observed snapshot evidence, not filesystem immutability.
 New WorkspaceReadError(WorkspaceError) with .category in
