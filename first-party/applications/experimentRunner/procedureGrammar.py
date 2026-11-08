@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/procedureGrammar.py ; version: 1
+# file: first-party/applications/experimentRunner/procedureGrammar.py ; version: 2
 """Offline archive3 semantics; no Context, backend, parser dependency or active IO."""
 from __future__ import annotations
 
@@ -403,7 +403,7 @@ def apply(grammar, data, blob, document):
             fmt.require(tool["version"] is None)
         pf.host(dict(procedureLimits=grammar.procPolicy["procedureLimits"],
             processTools={t["toolName"]: t["configuredExecutable"] for t in grammar.procTools["tools"]},
-            approvedCommands=grammar.procTools["commands"], archive=grammar.caps))
+            approvedCommands=grammar.procTools["commands"], archive=grammar.caps), archived=True)
         observationFormat = importlib.import_module("first-party.applications.experimentRunner.observationFormat")
         grammar.observationPolicy = fmt.decode(blob(payload["observationPolicyRef"]))
         observationFormat.policy(grammar.observationPolicy)

@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveReader.py ; version: 3
+# file: first-party/applications/experimentRunner/archiveReader.py ; version: 4
 """Bounded read-only committed-prefix recovery, independent of backend and assets."""
 from __future__ import annotations
 
@@ -210,6 +210,10 @@ def _inspectArchive(root, unitId, turnId, includeContent):
         view["procedureIdentity"] = dict(procedureSha256=None if not grammar.started else
             fmt.digest(fmt.canonical(grammar.procDefinition["procedure"])),
             inputsSha256=getattr(grammar, "procInputsSha", None))
+        tools = getattr(grammar, "procTools", None)
+        ty = None if tools is None else tools["commands"].get("ty-check")
+        view["recipeProvenance"] = {} if ty is None else {"ty-check":
+            "historical-isolated-unverified" if "--isolated" in ty["arguments"] else "windows-empty-config"}
     fmt.require(unitId is None or unitId in grammar.planned)
     fmt.require(turnId is None or any(turnId in unit["turnIds"] for key, unit in grammar.planned.items() if unitId is None or key == unitId))
     fmt.require(len(fmt.canonical(view)) <= caps["inspectBytes"])

@@ -519,10 +519,40 @@ Python is neither imported nor executed.
 
 Use `host5.example.json` with authorized local server/model/Ruff/ty paths. Its paths
 are placeholders. Install the Application authoring dependency from this directory's
-`requirements.txt` in your chosen environment (`json5==0.17.3`); no installation or
-actual tool/model launch is performed by this change. Definitions default to strict
+`requirements.txt` in your chosen environment (`json5==0.17.3`). Validation itself
+does not install packages or launch a tool/model. Definitions default to strict
 JSON; JSON5 requires explicit `--definition-format json5` and definition@3. Host@5
 requires definition@3; older definition@2/host@3/@4 behavior remains available.
+
+The current fixed ty recipe is Windows-only:
+`check --config-file NUL --output-format concise ARTIFACT`. `NUL` is a host-owned
+empty configuration source, fixed by the recipe; authored artifact/device names
+remain forbidden. The recipe was verified on Windows amd64 with ty 0.0.99
+(`9b48f40c9 2026-11-06`): valid source exits 0, a real type diagnostic exits 1, and
+invalid ambient project settings are ignored. Usage exit 2 remains a failed step.
+Ruff safe-fix/format/diagnostic recipes were verified with Ruff 0.17.4. Different
+tool versions need their own compatibility evidence. No POSIX ty variant is enabled
+or claimed by this gate; portable offline reading remains supported.
+
+Earlier archive3 records with `ty check --isolated` remain historical evidence.
+That flag fails before type checking on ty 0.0.99 and is rejected for new host5
+runs. The offline reader accepts only that exact historical recipe or the current
+exact recipe, preserves recorded argv/exits and never opens a config/device path
+or reruns a tool. Archive views label `recipeProvenance.ty-check` as
+`historical-isolated-unverified` or `windows-empty-config`; this identifies the
+recorded recipe family and does not attest the recorded executable's version.
+Tool-policy version stays unavailable unless actually observed; validation does
+not probe tool versions or infer them from a recipe name. Old archive1/2 behavior
+is unchanged.
+
+The explicit native verification test is
+`tests/first_party/experimentRunner/verify_procedureR2_native.py`. It uses the
+existing digest-verified isolated Windows copies and fails if they are unavailable;
+it does not install tools or alter PATH. Run it explicitly with pytest when those
+copies are authorized. Committed `ex06_r2_native_evidence.json` records actual
+versions, hashes, flags, valid/diagnostic/usage exits and a four-tool shared-facade
+pass with synthetic model transport. This is native tool evidence, not a model
+quality gate. Ordinary tests use synthetic configured CLI IO.
 
 ```powershell
 .\python-embedded\python.exe first-party/applications/experimentRunner/run.py validate --definition first-party/applications/experimentRunner/example.procedure.json5 --definition-format json5 --host-config first-party/applications/experimentRunner/host5.example.json

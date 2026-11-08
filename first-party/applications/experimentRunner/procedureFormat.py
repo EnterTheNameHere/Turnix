@@ -1,9 +1,10 @@
-# file: first-party/applications/experimentRunner/procedureFormat.py ; version: 1
+# file: first-party/applications/experimentRunner/procedureFormat.py ; version: 2
 """Closed Classic procedure contracts and conservative budgets, safe for offline use."""
 from __future__ import annotations
 
 import importlib
 import re
+import sys
 
 schema = importlib.import_module("first-party.applications.experimentRunner.definition")
 PREFIX = "actant.experiment."
@@ -15,9 +16,10 @@ RECIPES = {
     "ruff-safe-fix": ("ruff", ["check", "--isolated", "--no-cache", "--fix", "--no-unsafe-fixes",
         "--select", "E4,E7,E9,F", {"artifact": True}], [0, 1], True),
     "ruff-format": ("ruff", ["format", "--isolated", "--no-cache", {"artifact": True}], [0], True),
-    "ty-check": ("ty", ["check", "--isolated", "--output-format", "concise", {"artifact": True}], [0, 1], False),
+    "ty-check": ("ty", ["check", "--config-file", "NUL", "--output-format", "concise", {"artifact": True}], [0, 1], False),
     "ruff-check": ("ruff", ["check", "--isolated", "--no-cache", "--select", "E4,E7,E9,F",
         {"artifact": True}], [0, 1], False)}
+HISTORICAL_TY_ARGUMENTS = ["check", "--isolated", "--output-format", "concise", {"artifact": True}]
 
 
 def isProcedure(value):
@@ -74,8 +76,9 @@ def path(value):
             and part.split(".")[0].upper() not in reserved, "Invalid artifact path.")
 
 
-def host(value):
-    """Validate host-owned command recipes/caps without resolving or launching tools."""
+def host(value, *, archived=False):
+    """Validate current host recipes or exact historical evidence without active device/config IO."""
+    schema.require(type(archived) is bool, "Invalid archive validation mode.")
     limits = value["procedureLimits"]
     schema.fields(limits, MAXIMA)
     for key, maximum in MAXIMA.items():
@@ -93,9 +96,13 @@ def host(value):
         schema.fields(command, ("tool", "arguments", "timeoutSeconds", "stdoutBytes", "stderrBytes",
                                "cleanupSeconds", "allowedExitCodes", "mutates"))
         tool, arguments, exits, mutates = RECIPES[name]
-        schema.require(command["tool"] == tool and command["arguments"] == arguments
+        matches = command["arguments"] == arguments or (archived and name == "ty-check"
+            and command["arguments"] == HISTORICAL_TY_ARGUMENTS)
+        schema.require(command["tool"] == tool and matches
             and command["allowedExitCodes"] == exits and type(command["mutates"]) is bool
             and command["mutates"] == mutates and tool in tools, "Invalid command recipe.")
+        if name == "ty-check" and not archived:
+            schema.require(sys.platform == "win32", "The current ty empty-config recipe requires Windows.")
         for key in ("stdoutBytes", "stderrBytes"):
             schema.number(command[key], 1, limits["streamBytes"], integer=True)
         schema.number(command["timeoutSeconds"], 0, 30, exclusive=True)
