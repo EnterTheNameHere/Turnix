@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archive.py ; version: 3
+# file: first-party/applications/experimentRunner/archive.py ; version: 4
 """Launcher-owned bounded archive worker, outside invocation rollback/IO scope."""
 from __future__ import annotations
 
@@ -98,6 +98,7 @@ class ArchiveWriter:
         self.knownRefs = {}
         self.partialFlightBytes = 0
         self.failure = self.primary = None
+        self.operationPrimary = None
         self.stopping = self.closed = False
         self.sequence = self.bytes = 0
         self.acknowledgedSequence = 0
@@ -109,22 +110,29 @@ class ArchiveWriter:
         """Start after ownership is retained; no directory is overwritten on collision."""
         self.thread.start()
 
+    def rememberPrimary(self, error):
+        """Retain an App operation's first exit without poisoning best-effort evidence ACKs."""
+        with self.lane:
+            if self.operationPrimary is None:
+                self.operationPrimary = error
+
     def fail(self, error):
         """Latch fixed failure and invoke exact-Job cancellation outside queue locks."""
         first = False
         with self.lane:
+            selected = error if self.operationPrimary is None else self.operationPrimary
             if self.failure is None:
                 self.failure = fmt.ArchiveError("Required archive checkpoint failed.")
                 first = True
-            if not isinstance(error, Exception) and self.primary is None:
-                self.primary = error
+            if not isinstance(selected, Exception) and self.primary is None:
+                self.primary = selected
             self.lane.notify_all()
         if first:
             try:
                 self.cancel()
             except BaseException as secondary:
                 with self.lane:
-                    if not isinstance(secondary, Exception) and self.primary is None:
+                    if self.operationPrimary is None and not isinstance(secondary, Exception) and self.primary is None:
                         self.primary = secondary
 
     def check(self):

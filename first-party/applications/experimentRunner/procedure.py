@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/procedure.py ; version: 1
+# file: first-party/applications/experimentRunner/procedure.py ; version: 2
 """Linear procedures using only invocation-mediated model/process/workspace authority."""
 from __future__ import annotations
 
@@ -16,6 +16,19 @@ from backend.orchestration.cancellation import ExecutionCancelled
 entry = importlib.import_module("first-party.applications.experimentRunner.codeEntry")
 pf = importlib.import_module("first-party.applications.experimentRunner.procedureFormat")
 fmt = importlib.import_module("first-party.applications.experimentRunner.archiveFormat")
+
+
+def archiveFailure(port, error, primary):
+    """Poison required evidence independently, preserving the first exact operation exit."""
+    first = error if primary is None else primary
+    try:
+        port.writer.rememberPrimary(first)
+        # A secondary critical diagnostic must not become the writer's first exit.
+        # The writer retains its own fixed, content-free failure independently.
+        port.writer.fail(first)
+    except BaseException:
+        raise first
+    return first
 
 
 def message(port, step, revisions, cli):
@@ -107,23 +120,31 @@ def inference(recorder, ctx, session, selector, result, current, history, option
             raise RuntimeError("Execution cleanup is not confirmed.")
         current["status"] = "succeeded"
     except BaseException as error:
-        evidence = getattr(error, "llmCleanup", None)
-        if evidence is not None:
-            current["executionEvidence"] = entry.evidenceSnapshot(evidence)
-            current["cleanup"] = entry.cleanupSnapshot(current["executionEvidence"])
-        current.update(status="cancelled" if isinstance(error, ExecutionCancelled) else "failed", error=entry.safeError(error, stage))
+        port.writer.rememberPrimary(error)
+        try:
+            evidence = getattr(error, "llmCleanup", None)
+            if evidence is not None:
+                current["executionEvidence"] = entry.evidenceSnapshot(evidence)
+                current["cleanup"] = entry.cleanupSnapshot(current["executionEvidence"])
+            current.update(status="cancelled" if isinstance(error, ExecutionCancelled) else "failed", error=entry.safeError(error, stage))
+        except BaseException as secondary:
+            archiveFailure(port, secondary, error)
         raise
     finally:
         primary = sys.exception()
-        current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - started)
-        if began:
-            try:
+        failure = primary
+        try:
+            current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - started)
+            if began:
                 port.completed(current)
-            except BaseException as error:
-                port.writer.fail(error)
-                if primary is None:
-                    raise
-        recorder.publish(result)
+        except BaseException as error:
+            failure = archiveFailure(port, error, failure)
+        try:
+            recorder.publish(result)
+        except BaseException as error:
+            failure = archiveFailure(port, error, failure)
+        if primary is None and failure is not None:
+            raise failure
 
 
 def cliStep(ctx, port, step, saved, command, maximum):
@@ -132,6 +153,7 @@ def cliStep(ctx, port, step, saved, command, maximum):
     refs, evidence, primary = [], None, None
     reason, capture = "execution-failed", dict(status="unavailable", reason="not-started")
     rendered = None
+    stage, archiveFailed = "prepare", False
     try:
         before = ctx.workspace.readBytes(saved["value"]["relativePath"], maxBytes=maximum)
         if before.data != saved["raw"]:
@@ -143,13 +165,18 @@ def cliStep(ctx, port, step, saved, command, maximum):
                           "Expanded argv exceeds bound.")
         ticket = ctx.process.prepare(command["tool"], arguments, workingDirectory=cwd,
             **{k: command[k] for k in ("timeoutSeconds", "stdoutBytes", "stderrBytes", "cleanupSeconds")})
+        stage = "archive"
         requestRef = port.put(fmt.canonical(ticket.request.snapshot()), json=True)
         try:
             evidence = ctx.process.execute(ticket, beforeLaunch=partial(port.admitted, step["id"]))
         except BaseException as error:
             primary = error
-            evidence = getattr(error, "evidence", None) or getattr(error, "processEvidence", None)
+            port.writer.rememberPrimary(error)
+            evidence = getattr(error, "evidence", None)
+            if evidence is None:
+                evidence = getattr(error, "processEvidence", None)
         if evidence is not None:
+            stage = "archive"
             values = evidence.snapshot()
             values.pop("schemaId", None)
             values.pop("request", None)
@@ -175,29 +202,47 @@ def cliStep(ctx, port, step, saved, command, maximum):
             if evidence.cleanup.disposition != "confirmed":
                 reason, capture = "unknown-cleanup", dict(status="unavailable", reason="cleanup-unknown")
             elif evidence.launchState != "not-attempted":
+                stage = "post-file"
                 try:
                     observed = ctx.workspace.readBytes(saved["value"]["relativePath"], maxBytes=maximum)
-                    post = revision(port, step, observed, saved)
-                    post["path"] = saved["path"]
-                    capture = dict(status="available", reason="observed")
-                    refs.extend((post["ref"], post["value"]["contentRef"]))
-                except Exception as error:
+                    pf.text(observed.data.decode("utf-8", errors="strict"), maximum)
+                except BaseException as error:
                     category = getattr(error, "category", None)
                     capture = dict(status="unavailable", reason="invalid-utf8" if isinstance(error, UnicodeError) else
                         category if category in ("missing", "over-limit", "changed") else "read-failed")
                     reason = "post-file-unavailable"
+                    if not isinstance(error, Exception) and primary is None:
+                        primary = error
+                        port.writer.rememberPrimary(error)
+                else:
+                    stage = "archive"
+                    post = revision(port, step, observed, saved)
+                    post["path"] = saved["path"]
+                    capture = dict(status="available", reason="observed")
+                    refs.extend((post["ref"], post["value"]["contentRef"]))
             if reason == "completed" and evidence.exitCode not in command["allowedExitCodes"]:
                 reason = "unexpected-exit"
             if reason == "completed" and not command["mutates"] and post["raw"] != saved["raw"]:
                 reason = "execution-failed"
         if primary is not None and reason == "completed":
-            reason = "execution-failed"
+            reason = "cancelled" if isinstance(primary, ExecutionCancelled) else "execution-failed"
     except BaseException as error:
-        primary = error
-        reason = "cancelled" if isinstance(error, ExecutionCancelled) else "execution-failed"
-    output = port.doc("cli-output@1", processRequestRef=requestRef, processOutcomeRef=outcomeRef,
-        postRevisionRef=None if post is None else post["ref"], postCapture=capture)
-    return dict(output=output, refs=[output, requestRef, outcomeRef, *refs], evidence=evidence,
+        if primary is None:
+            primary = error
+        port.writer.rememberPrimary(primary)
+        if stage == "archive":
+            archiveFailed = True
+            primary = archiveFailure(port, error, primary)
+        reason = "cancelled" if isinstance(primary, ExecutionCancelled) else "execution-failed"
+    output = None
+    if not archiveFailed:
+        try:
+            output = port.doc("cli-output@1", processRequestRef=requestRef, processOutcomeRef=outcomeRef,
+                postRevisionRef=None if post is None else post["ref"], postCapture=capture)
+        except BaseException as error:
+            primary = archiveFailure(port, error, primary)
+            reason = "cancelled" if isinstance(primary, ExecutionCancelled) else "execution-failed"
+    return dict(output=output, refs=[] if output is None else [output, requestRef, outcomeRef, *refs], evidence=evidence,
         post=post, reason=reason, primary=primary, rendered=rendered)
 
 
@@ -256,11 +301,17 @@ def execute(recorder, ctx, runId):
                 elif stage == "inference":
                     try:
                         inference(recorder, ctx, session, selector, result, turns[step["id"]], history, options, port)
-                    finally:
+                    except BaseException as error:
+                        primary = error
+                        reason = "cancelled" if isinstance(error, ExecutionCancelled) else "execution-failed"
+                    try:
                         if step["id"] in port.turnMap:
                             turnRef = port.turnMap[step["id"]]
                             output = port.doc("inference-output@1", turnResultRef=turnRef)
                             refs = [output, turnRef, queryRef, optionsRef]
+                    except BaseException as error:
+                        primary = archiveFailure(port, error, primary)
+                        reason = "cancelled" if isinstance(primary, ExecutionCancelled) else "execution-failed"
                 elif stage == "save":
                     raw = pf.extract(answers[step["inference"]], step["extract"], policy["procedureLimits"]["artifactBytes"])
                     extractedRef = port.put(raw)
@@ -285,18 +336,18 @@ def execute(recorder, ctx, runId):
                     elif step["id"] in port.admissions:
                         result.update(processBoundary="unknown", workspaceDisposition="unknown")
             except BaseException as error:
-                primary = error
-                reason = "cancelled" if isinstance(error, ExecutionCancelled) else "execution-failed"
+                if primary is None:
+                    primary = error
+                port.writer.rememberPrimary(primary)
+                reason = "cancelled" if isinstance(primary, ExecutionCancelled) else "execution-failed"
             if diagnostic["requestRef"] is not None:
-                terminal = dict(status="succeeded" if reason == "completed" else "cancelled" if reason == "cancelled" else "failed",
-                    reason=reason, startedTimeNs=started, endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startNs,
-                    outputRef=output, error=None if reason == "completed" else dict(category=reason, stage=stage if stage != "cli" else "cli-execute"))
                 try:
+                    terminal = dict(status="succeeded" if reason == "completed" else "cancelled" if reason == "cancelled" else "failed",
+                        reason=reason, startedTimeNs=started, endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startNs,
+                        outputRef=output, error=None if reason == "completed" else dict(category=reason, stage=stage if stage != "cli" else "cli-execute"))
                     diagnostic.update(outcomeRef=port.terminal(step, terminal, refs), status=terminal["status"])
                 except BaseException as error:
-                    port.writer.fail(error)
-                    if primary is None:
-                        primary = error
+                    primary = archiveFailure(port, error, primary)
             if primary is not None:
                 raise primary
             if reason != "completed":
@@ -315,9 +366,13 @@ def execute(recorder, ctx, runId):
         ctx.cancellation.raiseIfRequested()
         result["applicationOutcome"] = "completed"
     except BaseException as error:
-        if stage == "reservation" and session is None:
-            result["reservation"]["acquisition"] = "failed"
-        result.update(applicationOutcome="cancelled" if isinstance(error, ExecutionCancelled) else "failed", error=entry.safeError(error, stage))
+        try:
+            if stage == "reservation" and session is None:
+                result["reservation"]["acquisition"] = "failed"
+            result.update(applicationOutcome="cancelled" if isinstance(error, ExecutionCancelled) else "failed", error=entry.safeError(error, stage))
+        except BaseException as secondary:
+            archiveFailure(port, secondary, error)
+            raise error
         if not isinstance(error, Exception):
             raise
         if isinstance(error, ExecutionCancelled):
@@ -335,8 +390,13 @@ def execute(recorder, ctx, runId):
                 result["applicationOutcome"] = "failed"
                 if result["error"] is None:
                     result["error"] = entry.safeError(error, "reservation-close")
-        result.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - recorder.startedNs)
-        recorder.publish(result)
+        try:
+            result.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - recorder.startedNs)
+            recorder.publish(result)
+        except BaseException as error:
+            archiveFailure(port, error, primary if primary is not None else closeError)
+            if primary is None and closeError is None:
+                raise
         if closeError is not None and primary is None:
             if not isinstance(closeError, Exception):
                 raise closeError
