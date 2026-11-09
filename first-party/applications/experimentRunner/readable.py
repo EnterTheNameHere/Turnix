@@ -1,10 +1,11 @@
-# file: first-party/applications/experimentRunner/readable.py ; version: 1
+# file: first-party/applications/experimentRunner/readable.py ; version: 2
 """Explicit private, chronological text export using the validated offline archive API."""
 from __future__ import annotations
 
 import importlib
 import json
 from pathlib import Path
+import re
 
 reporting = importlib.import_module("first-party.applications.experimentRunner.reporting")
 
@@ -19,7 +20,7 @@ def exportText(directory, unitId, outputRoot, name):
     model/tool loading, source mutation or implicit final-response save occurs.
     """
     fmt = reporting.fmt
-    fmt.identifier(name)
+    reporting.require(type(name) is str and re.fullmatch("[A-Za-z0-9_-]{1,64}", name) is not None)
     source = reporting.Sources().open(directory)
     reporting.require(source.view["status"] != "corrupt")
     reporting.require(unitId in {unit["unitId"] for unit in source.view["units"]})
@@ -50,6 +51,18 @@ def exportText(directory, unitId, outputRoot, name):
                 seen[key] = filename
                 artifacts.append((filename, text, ref, encoding))
             row["files"].append(seen[key])
+        if record["kind"] == "turn-completed":
+            selected = source.selected(unitId, record["turnId"])
+            result = selected["result"]
+            if result is not None:
+                for field in ("answer", "reasoning"):
+                    text = result[field]
+                    if type(text) is str:
+                        total += len(text.encode("utf-8"))
+                        reporting.require(total <= 24 * reporting.MIB)
+                        filename = f"{len(artifacts) + 1:04d}-{field}.txt"
+                        artifacts.append((filename, text, record["payload"]["resultRef"], field + "-utf8"))
+                        row["files"].append(filename)
         records.append(row)
     # All source reads and validation precede output creation.
     output.parent.mkdir(parents=True, exist_ok=True)

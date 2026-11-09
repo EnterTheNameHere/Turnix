@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_usability.py ; version: 1
+# file: tests/first_party/experimentRunner/test_usability.py ; version: 2
 """Protect private setup, maintained preflight, real Windows launch and offline text output."""
 import importlib
 import json
@@ -136,11 +136,12 @@ def testStandaloneSetupMissingRootDoesNotInstallIt(tmp_path, runtimePresent):
     assert (checkout / "python-embedded").exists() is runtimePresent
 
 
-def testReadableArchiveStagesArePrivateInertAndNeverOverwrite(rig, monkeypatch):
+@pytest.mark.parametrize("failedExtract", [False, True])
+def testReadableArchiveStagesArePrivateInertAndNeverOverwrite(rig, monkeypatch, failedExtract):
     """Actual synthetic runtime retains byte-changing source and all fixed CLI feedback."""
     state, assets, results = rig
     syntheticCli(monkeypatch, state)
-    state["streams"] = [stream("```python\nimport os\nx=1\n```"), stream("```python\nx = 2\n```")]
+    state["streams"] = [stream("no Python fence" if failedExtract else "```python\nimport os\nx=1\n```"), stream("```python\nx = 2\n```")]
     snapshot, _ = launcher.execute(launcher.prepare(definition(), host5(assets)), results)
     value = snapshot.value()
     archive = Path(value["archive"]["path"])
@@ -149,15 +150,21 @@ def testReadableArchiveStagesArePrivateInertAndNeverOverwrite(rig, monkeypatch):
     output = readable.exportText(archive, unit, results / "exports", "readable-01")
     directory = Path(output["path"])
     manifest = json.loads((directory / "manifest.json").read_text())
-    assert [r["payload"]["opId"] for r in manifest["records"] if r["kind"] == "step-planned"] == [s["id"] for s in definition()["procedure"]]
+    expected = definition()["procedure"][:3] if failedExtract else definition()["procedure"]
+    assert [r["payload"]["opId"] for r in manifest["records"] if r["kind"] == "step-planned"] == [s["id"] for s in expected]
     texts = [(directory / a["file"]).read_text(encoding="utf-8") for a in manifest["artifacts"]]
-    assert any(text == "x = 1\n" for text in texts)
-    assert any("diagnostic" in text for text in texts)
+    assert any(text == ("no Python fence" if failedExtract else "```python\nx = 2\n```") for text in texts)
+    if not failedExtract:
+        assert any(text == "x = 1\n" for text in texts)
+        assert any("diagnostic" in text for text in texts)
     assert all(p.suffix in (".txt", ".json") for p in directory.iterdir())
-    assert "final" in (directory / "index.txt").read_text()
+    assert ("final" in (directory / "index.txt").read_text()) is not failedExtract
     assert manifest["contentPolicy"] == "selected-private"
     with pytest.raises(FileExistsError):
         readable.exportText(archive, unit, results / "exports", "readable-01")
+    for name in ("../escape", "C:/escape", "..", "a/b", ""):
+        with pytest.raises(readable.reporting.ReportError):
+            readable.exportText(archive, unit, results / "exports", name)
     for root, name in ((archive, "inside"), (archive.parent.parent, archive.parent.name)):
         with pytest.raises(readable.reporting.ReportError):
             readable.exportText(archive, unit, root, name)

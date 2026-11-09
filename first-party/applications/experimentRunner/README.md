@@ -1,5 +1,13 @@
 # Experiment Runner
 
+Current usability delivery awaits Integration review. Fresh-clone verification
+found a shared Pack-discovery blocker: archives/exports named `manifest.json`
+under this App's `local/results/` are recursively read as Pack manifests. The
+default local-results run fails at activation before inference. The platform
+owner must resolve that boundary before the workflow below can be accepted.
+External-results smoke verification is recorded separately in canonical
+`ai-workflow/knowledge/experiment-runner-usability-implementation.txt`.
+
 For first use on Windows, clone branch `actant-experiment-runner`. Run the
 repository **root** `setup.bat` (or `setup.ps1`) for the embedded Python and
 shared Ruff/ty tools. Then run **this Application's** `setup.bat` (or `setup.ps1`)
@@ -54,7 +62,8 @@ command using its commented samples:
 3. `export-text --archive "ARCHIVE_PATH" --unit UNIT_ID --output-root
    "PRIVATE_OUTPUT" --name readable-01` explicitly reveals the selected unit's
    private content. Open `readable-01/index.txt` in an editor, then the numbered
-   `.txt` files in chronological order. JSON documents are indented; source,
+   `.txt` files in chronological order. Answers/reasoning also have plain text
+   files marked `-answer.txt`/`-reasoning.txt`. JSON documents are indented; source,
    answers, requests and diagnostics are inert text. The manifest maps original
    digest-bound references to rendered files. Existing export names are rejected.
 

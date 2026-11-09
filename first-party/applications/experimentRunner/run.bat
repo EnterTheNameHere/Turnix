@@ -25,7 +25,8 @@ rem Always use "%PYTHON%" -X frozen_modules=off "%RUNNER%" before each command b
 rem Quote paths containing spaces. ROOT, APP, LOCAL, EXAMPLES are absolute.
 rem Results, host configs, prompts, generated artifacts and content exports are private.
 rem Exit codes: run/validate/inspect/recover 0 success or valid prefix, 1 failure.
-rem report/compare/export: 0 complete/comparable, 1 unavailable/incomplete, 2 invalid.
+rem report/export report: 0 valid sealed/prefix report, 2 invalid/corrupt.
+rem compare/export compare: 0 Equal, 1 NotEqual, 2 NotComparable/invalid.
 rem export-text: 0 published, 1 rejected/failed. No command executes generated code.
 rem
 rem RUN: --definition PATH --host-config PATH --results DIRECTORY
@@ -70,7 +71,8 @@ rem EXPORT: --kind report or compare, same selection options as that command,
 rem   --output-root DIRECTORY --name NEW_NAME [--format json or csv, default json].
 rem   Writes new directory/manifest last; existing exports are never overwritten.
 rem   Private content/observations require report JSON with one unit and turn.
-rem "%PYTHON%" -X frozen_modules=off "%RUNNER%" export --kind report --archive "PASTE_ARCHIVE_PATH" --format csv --output-root "%LOCAL%\results\exports" --name summary-01
+rem Output root must already exist (local/results is created by App setup).
+rem "%PYTHON%" -X frozen_modules=off "%RUNNER%" export --kind report --archive "PASTE_ARCHIVE_PATH" --format csv --output-root "%LOCAL%\results" --name summary-01
 rem
 rem EXPORT-TEXT: --archive DIRECTORY --unit ID --output-root DIRECTORY --name NEW_NAME.
 rem   Explicit private content export for one unit, all committed stages in order.

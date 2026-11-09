@@ -18,8 +18,14 @@ were unfulfilled.
 `host.template.json` is structurally valid but contains explicit EDIT_ME paths.
 Application setup creates private `local/host.json` with actual root-managed
 Ruff/ty paths. Edit authorized server/model paths. The CPU-first template selects
-context 16384, token limit 4096, response cap 9216 characters, source cap 16384
-bytes, stdout 1024/stderr 256 bytes per CLI. Observation is off. These are
+context 16384, token limit 4096, response cap 6000 characters, source cap 16384
+bytes, stdout 1536/stderr 128 bytes per CLI. Streaming archive buffers use
+pendingBytes 65536, partialEvents 128, partialCharacters 4096, partialRecords 256.
+Observation is off. The maintained example trades response length for more stdout
+than the original trial's 9216/1024/256 configuration, within the existing 8 MiB
+worst-case request bound. Larger diagnostics or answers can still stop a run;
+inspect its retained prefix. Do not increase one limit without revalidating the
+whole definition/host. These are
 bounded rejection limits, not truncation instructions or a speed guarantee.
 For a compatible GPU build and sufficient VRAM, explicitly select appropriate
 gpuLayers/kvOffload/flashAttention in the private host; the original trial used
