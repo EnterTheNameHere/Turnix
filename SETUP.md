@@ -1,6 +1,13 @@
 # Repository-local Windows setup
 
-Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1` from a checkout.
+Double-click root `setup.bat`, or run it from a terminal. It calls the adjacent
+root `setup.ps1` using Windows PowerShell, works from any working directory and
+returns the PowerShell exit code. Setup parameters can be passed through, for
+example `setup.bat -Requirements requirements.txt`. On failure it prints the exit
+code and waits for a key so a double-click console remains visible. Automation
+can set `ACTANT_SETUP_NO_PAUSE=1` to suppress that failure-only wait.
+
+You can also run `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1`.
 Python 3.15.0b4 remains the primary runtime. Setup verifies the tracked vendor ZIP,
 configures the embedded standard library/site-packages, installs requirements and
 the Git pre-commit trampoline, then installs and verifies shared Ruff and ty.
@@ -39,7 +46,9 @@ an alternate destination does not change that hook contract. An explicit fallbac
 into the default destination replaces that environment as before; there is no
 automatic downgrade. Applications must use the selected runtime/tool paths.
 
-Optional Application-local bootstrap discovery is proposed in canonical workflow
-mail and awaits agreement with the Application owner. This tooling delivery does
-not implement or promise creation of an Application's `local/run.bat` yet. Platform
-checkouts need no Application source to provision tools.
+Root setup provisions only Actant internals. It never discovers Applications or
+invokes their setup scripts. For Application-local initialization, run that
+Application's own `setup.bat` or `setup.ps1` separately after root setup. Those
+scripts own local templates and user-file preservation and should check existing
+platform prerequisites; they do not invoke root setup. Platform checkouts need
+no Application source to provision tools.
