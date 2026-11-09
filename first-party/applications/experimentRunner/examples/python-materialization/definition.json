@@ -1,0 +1,107 @@
+{
+  "schemaId": "actant.experiment.definition@3",
+  "experimentId": "event-log-materialization",
+  "mode": "classic",
+  "configurations": [
+    {
+      "name": "baseline",
+      "profile": "qwen-demo",
+      "defaults": {
+        "temperature": 0,
+        "maxTokens": 4096,
+        "timeoutSeconds": 120,
+        "chatTemplateKwargs": {
+          "enable_thinking": false
+        }
+      },
+      "allowedOverrides": [
+        "maxTokens"
+      ]
+    }
+  ],
+  "repetitions": 1,
+  "errorPolicy": "stop",
+  "contextPolicy": "fresh-best-effort",
+  "inputs": {
+    "priming": "priming.txt",
+    "task": "task.txt"
+  },
+  "procedure": [
+    {
+      "id": "request",
+      "op": "message",
+      "role": "user",
+      "parts": [
+        {
+          "input": "priming"
+        },
+        {
+          "input": "task"
+        },
+        {
+          "literal": "Return exactly one fenced Python block.\n"
+        }
+      ]
+    },
+    {
+      "id": "draft",
+      "op": "inference"
+    },
+    {
+      "id": "save",
+      "op": "save",
+      "inference": "draft",
+      "extract": "one-python-fence",
+      "artifact": "source",
+      "path": "source.py"
+    },
+    {
+      "id": "ruff-safe-fix",
+      "op": "cli",
+      "command": "ruff-safe-fix",
+      "artifact": "source"
+    },
+    {
+      "id": "ruff-format",
+      "op": "cli",
+      "command": "ruff-format",
+      "artifact": "source"
+    },
+    {
+      "id": "ty-check",
+      "op": "cli",
+      "command": "ty-check",
+      "artifact": "source"
+    },
+    {
+      "id": "ruff-check",
+      "op": "cli",
+      "command": "ruff-check",
+      "artifact": "source"
+    },
+    {
+      "id": "feedback",
+      "op": "message",
+      "role": "user",
+      "parts": [
+        {
+          "literal": "Review this current source and the tool diagnostics. Return the corrected Python:\n"
+        },
+        {
+          "artifact": "source",
+          "revision": "current"
+        },
+        {
+          "cli": "ty-check"
+        },
+        {
+          "cli": "ruff-check"
+        }
+      ]
+    },
+    {
+      "id": "corrected",
+      "op": "inference"
+    }
+  ]
+}

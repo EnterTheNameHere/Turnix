@@ -1,0 +1,48 @@
+Implement a typed event-log parser and deterministic summary in one module.
+
+Each record has four fields: TIMESTAMP|SEVERITY|SOURCE|MESSAGE.
+TIMESTAMP is exactly YYYY-MM-DDTHH:MM:SSZ with zero padding and literal Z.
+Validate calendar dates and times. Reject leap seconds, fractional seconds,
+UTC offset spellings and missing timezone. Store an aware datetime using
+datetime.timezone.utc. SEVERITY is case-sensitive: DEBUG, INFO, WARNING or ERROR.
+Trim SOURCE and reject an empty source. Timestamp, severity and source contain
+neither backslashes nor pipes. MESSAGE retains whitespace and may be empty.
+
+Split the RAW record at unescaped pipe separators into exactly four fields,
+then unescape MESSAGE. In MESSAGE only, \| represents a pipe and \\ represents
+a backslash. Reject every other escape (including \n and \x), a dangling
+backslash, and extra unescaped separators. Splitting after unescaping, or plain
+split("|"), does not implement this grammar. parseLine may strip one terminal
+LF or CRLF; reject any remaining CR or LF.
+
+Required public API:
+- Immutable, typed Event with timestamp, severity, source and message fields.
+- parseLine(line: str) -> Event. Malformed records raise ValueError identifying
+  the invalid field or escape with useful record context; access no external data.
+- parseLines(lines: Iterable[str]) -> list[Event]. Consume once, retain input
+  order, never skip blank or malformed lines. Raise ValueError with the one-based
+  line number and original error context when a line fails.
+- summarize(events: Iterable[Event]). Consume a one-shot iterable exactly once.
+  Return a typed summary of total count, all four severity counts including zeros
+  in DEBUG/INFO/WARNING/ERROR order, and source counts sorted lexicographically by
+  the exact trimmed source. Do not mutate events. Choose the summary type/name.
+- formatSummary(summary) -> str, fully annotated with that summary type. Produce
+  the following text with exactly TWO spaces before each count, and no terminal
+  newline (sourceA and sourceB stand for the actual sorted source names):
+total: N
+severity:
+  DEBUG: N
+  INFO: N
+  WARNING: N
+  ERROR: N
+sources:
+  sourceA: N
+  sourceB: N
+  For empty input, use total 0, four zero severity counts, and end at sources:
+  with no source entries.
+
+Consider valid leap day, February 30, missing Z, lowercase severity, empty source,
+escaped pipe/backslash, unsupported or dangling escape, excess separator, CRLF,
+a generator of events, sorted sources and empty input while designing. Do not
+generate tests. Return the entire module in one python fence, with no dependencies
+outside the standard library, filesystem/network access or process execution.

@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/run.py ; version: 5
+# file: first-party/applications/experimentRunner/run.py ; version: 6
 """Terminal entry point; only explicit inspect displays private experiment content."""
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ def main(argv=None):
     """Validate without launch, run through managed Actant, or explicitly inspect a private result."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    textExport = commands.add_parser("export-text", help="Explicitly export one unit's private artifacts as inert text.")
+    textExport.add_argument("--archive", required=True)
+    textExport.add_argument("--unit", required=True)
+    textExport.add_argument("--output-root", required=True)
+    textExport.add_argument("--name", required=True)
     for command in ("validate", "run"):
         child = commands.add_parser(command)
         child.add_argument("--definition", required=True)
@@ -54,6 +59,10 @@ def main(argv=None):
         child.add_argument("--allow-input-differences", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.command == "export-text":
+            readable = importlib.import_module("first-party.applications.experimentRunner.readable")
+            print(json.dumps(readable.exportText(args.archive, args.unit, args.output_root, args.name)))
+            return 0
         if args.command in ("report", "compare", "export"):
             reporting = importlib.import_module("first-party.applications.experimentRunner.reporting")
             exporting = importlib.import_module("first-party.applications.experimentRunner.exporting")
@@ -99,13 +108,17 @@ def main(argv=None):
         snapshot, path = launcher.execute(prepared, args.results)
         value = snapshot.value()
         suite = value["suite"]
-        print(json.dumps({"suiteId": suite["suiteId"], "status": suite["status"],
+        print(json.dumps({"experimentId": prepared[0].value()["experimentId"],
+                          "suiteId": suite["suiteId"], "status": suite["status"],
                           "unitsSucceeded": sum(unit["status"] == "succeeded" for unit in suite["units"]),
                           "turnsSucceeded": sum(turn["status"] == "succeeded" for unit in suite["units"] for turn in unit["run"]["turns"]),
                           "path": None if path is None else str(path), "launcherFailure": value["launcherFailure"],
                           "archivePath": value["archive"]["path"], "archiveId": value["archive"]["archiveId"],
                           "archiveFailure": value["archive"]["failure"], "archiveClose": value["archive"]["close"],
-                          "resultWriteFailure": value["resultWriteFailure"], "hostCleanup": value["hostCleanup"]}))
+                          "resultWriteFailure": value["resultWriteFailure"], "hostCleanup": value["hostCleanup"],
+                          "nextCommands": ["inspect --archive ARCHIVE_PATH", "report --archive ARCHIVE_PATH",
+                              "export-text --archive ARCHIVE_PATH --unit UNIT_ID --output-root PRIVATE_OUTPUT --name NEW_NAME"],
+                          "inspectionHelp": "Replace ARCHIVE_PATH with archivePath above; inspect lists unit IDs. See run.bat."}))
         return launcher.exitCode(value)
     except Exception:
         print("Experiment input or launcher failed; private content was not printed.", file=sys.stderr)

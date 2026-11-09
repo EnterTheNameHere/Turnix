@@ -1,4 +1,78 @@
-# Experiment Runner (EX-01/02/03 and EX-04)
+# Experiment Runner
+
+For first use on Windows, clone branch `actant-experiment-runner`. Run the
+repository **root** `setup.bat` (or `setup.ps1`) for the embedded Python and
+shared Ruff/ty tools. Then run **this Application's** `setup.bat` (or `setup.ps1`)
+in `first-party/applications/experimentRunner/`. These are separate steps: App
+setup checks existing runtime/imports/tools and never calls root setup. Setup
+does not download models or start a server. Failures print a message and return
+nonzero; use a terminal to retain diagnostics after a double-click failure.
+
+App setup initializes these ignored files/directories only when absent:
+
+- `local/run.bat`: private editable copy of tracked `run.bat`.
+- `local/host.basic.json`: conversation host template.
+- `local/host.json`: materialization host template with root-managed tool paths.
+- `local/experiments/` and `local/results/`: your definitions/inputs and outputs.
+
+Edit `local/host.basic.json` with your explicitly authorized absolute llama-server
+and Qwen-compatible GGUF paths, using JSON forward slashes or escaped backslashes.
+Pick an unused port; no existing server is taken over. These EDIT_ME templates
+are **not executable-ready model configurations**. Both models are user supplied.
+Edit the clearly marked last command in `local/run.bat`, save, then launch it.
+The default small two-turn conversation checks your host configuration before
+the longer materialization. The BAT documents every command and useful option;
+it asks no questions and takes no required arguments. It uses only the repository
+embedded Python, including from a checkout with spaces or an unrelated working
+directory. Normal CLI output and exit status are preserved; it never pauses.
+
+For the maintained event-log task, edit `local/host.json` server/model paths and
+resource controls, then replace the BAT's final command with the commented
+materialization validation/run example. See
+[the materialization fixture](examples/python-materialization/README.md) for
+limits and provenance. The CPU-first template has context 16384 and can be slow;
+select GPU offload explicitly for your approved build/resources if desired.
+`validate` checks inputs, tool files and catalog paths without inference; run it
+after edits. Do not use the old tiny `host5.example.json` ceilings for this task.
+Both examples use strict JSON; authored JSON5 works with `--definition-format json5`.
+User definitions can live in `local/experiments/` or at an absolute external path;
+their input files resolve relative to the definition, under the accepted path rules.
+
+Repeated App setup preserves all existing local files, including edited BAT/host,
+experiments and results. It does not refresh stale private copies automatically.
+After updates compare your copy with tracked `run.bat` and merge changes manually.
+Editing tracked `run.bat` is also possible but creates a Git change. Root setup
+does not create or update the App's local area. No global Python/PATH is required
+for App setup or run; root provisioning retains its documented Git prerequisites.
+
+Runs print the selected experiment ID, outcome, private result path, `archivePath`,
+cleanup facts and next command templates. For inspection, edit the BAT's last
+command using its commented samples:
+
+1. `inspect --archive "ARCHIVE_PATH"` lists unit/turn IDs without content.
+2. `report --archive "ARCHIVE_PATH"` shows inference and procedure outcomes.
+3. `export-text --archive "ARCHIVE_PATH" --unit UNIT_ID --output-root
+   "PRIVATE_OUTPUT" --name readable-01` explicitly reveals the selected unit's
+   private content. Open `readable-01/index.txt` in an editor, then the numbered
+   `.txt` files in chronological order. JSON documents are indented; source,
+   answers, requests and diagnostics are inert text. The manifest maps original
+   digest-bound references to rendered files. Existing export names are rejected.
+
+For Classic runs, `save` records the extracted draft, each CLI step retains
+pre/post source and stdout/stderr, `feedback` retains the actual correction
+message, and `turn-completed corrected` retains the final answer. The final
+answer is separate from workspace source; it is never implicitly saved or
+rechecked. JSON strings in metadata show escapes; open the corresponding raw
+source `.txt` for normal multiline text. Other machine-readable report/compare/
+export options remain available. Default reports hide content; private exports
+must be protected like the archive. A valid failed/incomplete committed prefix
+remains inspectable/exportable; missing evidence is not invented. Exports leave
+archives unchanged and never import or execute generated code. Publication writes
+the manifest last; a failed export may leave a folder without a complete manifest.
+The reviewed November 9 trial failed generated-program requirements by inspection;
+neither a successful Runner outcome nor clean static diagnostics proves correctness.
+
+The sections below describe the accepted execution, schema and archive contracts.
 
 This Application runs ordered configurations and repetitions through the managed
 Actant llama.cpp provider. Each conversation execution is one actual Job with its
