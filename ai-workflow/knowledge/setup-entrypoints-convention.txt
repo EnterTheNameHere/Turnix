@@ -1,0 +1,72 @@
+ACTANT SETUP AND WINDOWS ENTRYPOINT CONVENTION
+==============================================
+Date: 2026-11-09
+Status: user-agreed working implementation convention; not new platform runtime
+architecture or a universal Application setup protocol.
+Owners: Integration for root/internal setup; each Application for its own setup
+and run entry points.
+
+ROOT / INTERNALS
+----------------
+Repository root setup.ps1 exclusively provisions Actant internals/shared runtime,
+dependencies, tooling (including centrally pinned Ruff/ty), and related root
+configuration. Root setup MUST NOT scan Applications or invoke their setup.
+Integration should provide a tracked root setup.bat as a thin Windows
+double-click convenience wrapper for root setup.ps1. Both belong to the
+platform/Integration branch. BAT wrapper must preserve setup exit status, operate
+from arbitrary working directory (including spaces), and make failures visible.
+PowerShell contains the setup logic; batch must not duplicate it.
+Existing root setup script and its verified Ruff/ty work remain intact.
+
+APPLICATIONS
+------------
+An Application MAY supply its own setup.ps1 and setup.bat if local setup is needed,
+and MAY supply run.bat for launching the Application. This is a convention, not
+a requirement for every Application, nor an Application discovery protocol.
+An Application's setup.bat is a thin double-click wrapper for that Application's
+setup.ps1; its run.bat is independent and may be a documented editable user-facing
+example. Application setup remains Application-owned, does not call root
+setup.ps1/setup.bat, and does not modify internals or other Applications.
+
+APPLICATION PLATFORM READINESS
+------------------------------
+Application setup should check required platform prerequisites and fail clearly
+with guidance to run the ROOT setup separately. For Experiment Runner on Windows:
+1. Check exact repository-local python-embedded/python.exe exists.
+2. Invoke this exact selected runtime with -X frozen_modules=off for a small
+   non-destructive startup/import check of the actual required Actant modules,
+   rather than trusting existence of the executable alone.
+3. Check required shared tool executables/versions via the root environment as
+   applicable; no global PATH fallback or private installer.
+4. Distinguish unavailable prerequisites from an Application-local setup error.
+5. Do not imply a universal readiness probe/host health or model readiness.
+   Local model paths and assets are separately configured by Application/user.
+No mandatory cross-Application readiness protocol is introduced at this stage.
+
+EXPERIMENT RUNNER LOCAL SETUP
+-----------------------------
+In first-party/applications/experimentRunner/:
+ - tracked setup.ps1 and thin setup.bat if setup needed;
+ - tracked documented run.bat (editable last execution line);
+ - ignored local/run.bat initialized only when absent, never overwritten;
+ - ignored local/host.json, local/experiments/, local/results/;
+ - examples remain tracked; user experiments and output remain private.
+Root setup does none of these Application-local operations. User runs root setup
+once for internals, then runs Application setup, edits local/run.bat, launches.
+App setup is idempotent, preserves local user files and never takes over a server,
+downloads a GGUF, performs inference, or requests input after run begins.
+
+COORDINATION AND EVIDENCE
+-------------------------
+This direction supersedes the earlier proposed optional root Application hook
+(first-party/applications/<app>/setup-local.py) in Integration proposal mail
+2026-11-09-setup-bootstrap-contract-proposal.txt. That proposal is REJECTED /
+WITHDRAWN for current work; no hook was implemented. Likewise supersedes the
+cross-layer root-to-App hook passages in the two user usability assignments.
+Do NOT implement that proposal based on historical inbox mail.
+Shared Ruff/ty tooling is already implemented/verified at eb4358d; preserve
+the verified work and separately add root setup.bat and acceptance evidence.
+Application owns its own standalone setup, and eventual combined-checkout
+verification should include separate root and Application setup, not an assumed
+single root setup doing both. The Application source sync still follows complete
+accepted Integration platform and independent review.

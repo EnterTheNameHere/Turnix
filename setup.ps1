@@ -40,8 +40,20 @@ function Invoke-NativeChecked(
 ) {
   Write-Host "Running: $label"
 
-  $output = & $exe @arguments 2>&1
-  $exitCode = $LASTEXITCODE
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    throw "$label executable does not exist: $exe"
+  }
+
+  # Windows PowerShell wraps native stderr as ErrorRecord. A warning on stderr
+  # must not terminate setup before the native exit status can be inspected.
+  $savedErrorAction = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = & $exe @arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $savedErrorAction
+  }
 
   $outputText = ($output | Out-String).TrimEnd()
 
@@ -412,7 +424,7 @@ import json
 import pathlib
 import ssl
 
-print("embedded standard library OK")
+print('embedded standard library OK')
 '@
     ) |
     Out-Null
@@ -504,6 +516,23 @@ function Install-Requirements([string] $pythonExe) {
     Out-Null
 }
 
+function Ensure-SharedTools([string] $pythonExe) {
+  Section "Shared Ruff / ty tooling"
+
+  # Required even when the caller selects a different application requirements file.
+  Invoke-EmbeddedPythonChecked `
+    -label "install pinned shared tools" `
+    -pythonExe $pythonExe `
+    -arguments @("-m", "pip", "install", "-r", (Join-Path $root "requirements-tools.txt")) |
+    Out-Null
+
+  Invoke-EmbeddedPythonChecked `
+    -label "verify local tool versions and isolated native invocations" `
+    -pythonExe $pythonExe `
+    -arguments @((Join-Path $root "scripts/verify_tools.py")) |
+    Out-Null
+}
+
 Ensure-GitHooks
 
 $pythonExe = Ensure-EmbeddedPython
@@ -517,13 +546,16 @@ Ensure-Pip `
 Install-Requirements `
   -pythonExe $pythonExe
 
+Ensure-SharedTools `
+  -pythonExe $pythonExe
+
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host ""
 
 Write-Host "Python:" -ForegroundColor Green
-Write-Host "  .\python-embedded\python.exe -X frozen_modules=off"
+Write-Host "  & `"$pythonExe`" -X frozen_modules=off"
 Write-Host ""
 
 Write-Host "pip:" -ForegroundColor Green
-Write-Host "  .\python-embedded\python.exe -X frozen_modules=off -m pip --version"
+Write-Host "  & `"$pythonExe`" -X frozen_modules=off -m pip --version"
