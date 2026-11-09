@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 4
+# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 5
 """Strict, standard-library-only archive grammar; no execution or runtime imports."""
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import importlib
 import copy
 
 PREFIX = "actant.experiment."
+MANIFEST_NAME = "archive-manifest.json"
 DEFAULTS = dict(archiveBytes=256 * 1024 * 1024, logicalRecords=8192,
     frameBytes=65536, artifactBytes=8 * 1024 * 1024, requestBytes=2 * 1024 * 1024,
     pendingBytes=65536, inspectBytes=16 * 1024 * 1024, turnEvents=65536,

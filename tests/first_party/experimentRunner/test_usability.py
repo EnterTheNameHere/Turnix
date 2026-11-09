@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_usability.py ; version: 2
+# file: tests/first_party/experimentRunner/test_usability.py ; version: 3
 """Protect private setup, maintained preflight, real Windows launch and offline text output."""
 import importlib
 import json
@@ -7,10 +7,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
-from tests.first_party.experimentRunner.test_experimentRunner import rig, stream
+from tests.first_party.experimentRunner.test_experimentRunner import rig, stream, definition as conversation
 from tests.first_party.experimentRunner.test_procedure import definition, host5, syntheticCli
 
 setup = importlib.import_module("first-party.applications.experimentRunner.setupLocal")
@@ -149,7 +150,7 @@ def testReadableArchiveStagesArePrivateInertAndNeverOverwrite(rig, monkeypatch, 
     unit = value["suite"]["units"][0]["unitId"]
     output = readable.exportText(archive, unit, results / "exports", "readable-01")
     directory = Path(output["path"])
-    manifest = json.loads((directory / "manifest.json").read_text())
+    manifest = json.loads((directory / "archive-manifest.json").read_text())
     expected = definition()["procedure"][:3] if failedExtract else definition()["procedure"]
     assert [r["payload"]["opId"] for r in manifest["records"] if r["kind"] == "step-planned"] == [s["id"] for s in expected]
     texts = [(directory / a["file"]).read_text(encoding="utf-8") for a in manifest["artifacts"]]
@@ -169,3 +170,70 @@ def testReadableArchiveStagesArePrivateInertAndNeverOverwrite(rig, monkeypatch, 
         with pytest.raises(readable.reporting.ReportError):
             readable.exportText(archive, unit, root, name)
     assert before == {p.relative_to(archive): p.read_bytes() for p in archive.rglob("*") if p.is_file()}
+
+
+@pytest.fixture
+def privateAppTree():
+    """Retain repository-relative provenance while isolating private results from the real App."""
+    with tempfile.TemporaryDirectory(prefix="runner-manifest-test-", dir=ROOT / "python-embedded") as temporary:
+        app = Path(temporary).resolve()
+        assert app.is_relative_to((ROOT / "python-embedded").resolve())
+        shutil.copytree(APP, app, dirs_exist_ok=True, ignore=shutil.ignore_patterns("local", "__pycache__"))
+        yield app
+
+
+def testLocalResultsAndBothExportKindsDoNotBecomePacks(rig, monkeypatch, privateAppTree):
+    """A second actual synthetic run activates with existing local archives and exports."""
+    state, assets, _ = rig
+    app = privateAppTree
+    monkeypatch.setattr(launcher, "APP", app)
+    results = app / "local/results"
+    state["streams"] *= 2
+    for attempt in range(2):
+        snapshot, _ = launcher.execute(launcher.prepare(conversation(), assets), results)
+        value = snapshot.value()
+        assert launcher.exitCode(value) == 0, value
+        archive = Path(value["archive"]["path"])
+        assert (archive / "archive-manifest.json").is_file()
+        assert not (archive / "manifest.json").exists()
+        unit = value["suite"]["units"][0]["unitId"]
+        readable.exportText(archive, unit, results, "text-" + str(attempt))
+        exporting = importlib.import_module("first-party.applications.experimentRunner.exporting")
+        exporting.publish(readable.reporting.report(archive), results, "report-" + str(attempt),
+                          kind="report", format="json", sourceDirectories=[archive])
+    assert state["calls"] == 4
+    assert not list((app / "local").rglob("manifest.json"))
+    assert len(list((app / "local").rglob("archive-manifest.json"))) == 6
+    assert launcher.PackResolver(roots=(app,)).requireSingle("applications.experimentRunner").root == app
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+def testLegacyArchiveNamesStayReadOnlyAndBadCurrentHeaderCannotFallback(rig, monkeypatch, version):
+    """Both offline entry paths retain old evidence, but never hide an invalid new header."""
+    state, assets, results = rig
+    authored = conversation()
+    if version == 2:
+        assets.update(schemaId="actant.experiment.host@4", observation=launcher.observations.defaults())
+    if version == 3:
+        state["streams"] = [stream("```python\nx=1\n```"), stream("```python\nx=2\n```")]
+        syntheticCli(monkeypatch, state)
+        assets, authored = host5(assets), definition()
+    snapshot, _ = launcher.execute(launcher.prepare(authored, assets), results)
+    value = snapshot.value()
+    assert launcher.exitCode(value) == 0
+    archive = Path(value["archive"]["path"])
+    current, legacy = archive / "archive-manifest.json", archive / "manifest.json"
+    current.rename(legacy)
+    before = {p.relative_to(archive): p.read_bytes() for p in archive.rglob("*") if p.is_file()}
+    source = readable.reporting.Sources().open(archive)
+    assert source.header["schemaId"] == "actant.experiment.archive@" + str(version)
+    assert source.view["status"] == "sealed"
+    assert readable.reporting.report(archive)["sources"][0]["validation"] == "validated-prefix"
+    assert before == {p.relative_to(archive): p.read_bytes() for p in archive.rglob("*") if p.is_file()}
+    for invalid in (b"invalid", b"{}", b"x" * 65537):
+        current.write_bytes(invalid)
+        with pytest.raises(readable.reporting.fmt.ArchiveError):
+            readable.reporting.reader.inspectArchive(archive)
+        with pytest.raises((readable.reporting.fmt.ArchiveError, readable.reporting.SourceFailure)):
+            readable.reporting.Sources().open(archive)
+    assert legacy.read_bytes() == before[Path("manifest.json")]

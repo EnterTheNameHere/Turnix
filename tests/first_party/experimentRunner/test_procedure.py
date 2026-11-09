@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_procedure.py ; version: 1
+# file: tests/first_party/experimentRunner/test_procedure.py ; version: 2
 """EX-06 actual runtime with explicitly synthetic model transport and configured CLI IO."""
 import copy
 import importlib
@@ -339,7 +339,7 @@ def test_ack_visible_but_not_returned_prevents_cli(rig, monkeypatch):
 def rewrite3(path, records):
     """Rehash a synthetic semantic corruption without hiding it behind broken framing."""
     fmt = launcher.archive.fmt
-    previous, lines = fmt.digest((path / "manifest.json").read_bytes()), []
+    previous, lines = fmt.digest((path / "archive-manifest.json").read_bytes()), []
     for sequence, record in enumerate(records, 1):
         record.update(sequence=sequence, previousCommitHash=previous)
         record["dataSha256"] = fmt.hashWithout(record, "dataSha256")

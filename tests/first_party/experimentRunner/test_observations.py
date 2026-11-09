@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_observations.py ; version: 1
+# file: tests/first_party/experimentRunner/test_observations.py ; version: 2
 """Actual App/PM/G ownership with synthetic provider IO and deterministic expiry boundaries."""
 import importlib
 import json
@@ -216,7 +216,7 @@ def test_stuck_handoff_is_pending_with_source_and_endpoint_revoked(rig):
 def rewriteV2(path, records):
     """Rehash intentionally malformed version2 streams without weakening original raw v1 tests."""
     fmt = ofmt.fmt
-    previous = fmt.digest((path / 'manifest.json').read_bytes())
+    previous = fmt.digest((path / 'archive-manifest.json').read_bytes())
     lines, terminal = [], None
     for sequence, record in enumerate(records, 1):
         if record['kind'] == 'suite-outcome':

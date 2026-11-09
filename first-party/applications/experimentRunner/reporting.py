@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/reporting.py ; version: 3
+# file: first-party/applications/experimentRunner/reporting.py ; version: 4
 """Offline, bounded comparisons and descriptive reports over validated archives."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ reportSchema = importlib.import_module("first-party.applications.experimentRunne
 fmt = reader.fmt
 MIB = 1024 * 1024
 BASE_REF = "f7e95c536944e25abf3ff79652cbb18d9e8cce44"
-GENERATOR = dict(implementationId="applications.experimentRunner.reporting", sourceVersion=3,
+GENERATOR = dict(implementationId="applications.experimentRunner.reporting", sourceVersion=4,
                  applicationBaseRef=BASE_REF)
 MODES = tuple(fmt.PREFIX + item + "@1" for item in ("answer-text", "reasoning-text", "request-body"))
 METRICS = (("application.turn-duration-ns@1", "nanoseconds"),
@@ -62,7 +62,7 @@ class Sources:
         require(self.count <= 2)
         root = Path(directory)
         reader.regular(root, directory=True)
-        raw = reader.readBytes(root / "manifest.json", 65536)
+        raw = reader.readManifest(root)
         header = fmt.decode(raw)
         if type(header) is dict and header.get("schemaId") not in tuple(fmt.PREFIX + "archive@" + str(i) for i in (1, 2, 3)):
             raise SourceFailure("unsupported-version")

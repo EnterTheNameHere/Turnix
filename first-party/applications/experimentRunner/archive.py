@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archive.py ; version: 4
+# file: first-party/applications/experimentRunner/archive.py ; version: 5
 """Launcher-owned bounded archive worker, outside invocation rollback/IO scope."""
 from __future__ import annotations
 
@@ -285,7 +285,7 @@ class ArchiveWriter:
         self.path.mkdir(exist_ok=False)
         (self.path / "artifacts").mkdir(exist_ok=False)
         raw = fmt.canonical(self.header)
-        with (self.path / "manifest.json").open("xb", buffering=0) as target:
+        with (self.path / fmt.MANIFEST_NAME).open("xb", buffering=0) as target:
             writeAll(target, raw)
         self.bytes = len(raw)
         self.previous = fmt.digest(raw)

@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/exporting.py ; version: 3
+# file: first-party/applications/experimentRunner/exporting.py ; version: 4
 """Bounded safe presentation and exclusive, manifest-last offline report publication."""
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ def publish(value, root, name, *, kind, format, sourceDirectories):
     reporting.reader.regular(Path(root), directory=True)
     directory.mkdir()
     stage(directory, filename, data)
-    stage(directory, "manifest.json", marker)
+    stage(directory, fmt.MANIFEST_NAME, marker)
     return manifest
 
 

@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_archive.py ; version: 2
+# file: tests/first_party/experimentRunner/test_archive.py ; version: 3
 """Actual disk checkpoints, fresh process death/recovery and managed archive failure gates."""
 import importlib
 import json
@@ -446,7 +446,7 @@ def test_rehashed_complete_frames_still_require_typed_payloads(rig, mutation):
     value, _ = execute(rig)
     path = archivePath(value) / 'records.log'
     lines = path.read_bytes().splitlines()
-    previous = fmt.digest((archivePath(value) / 'manifest.json').read_bytes())
+    previous = fmt.digest((archivePath(value) / 'archive-manifest.json').read_bytes())
     rebuilt = []
     for index in range(0, len(lines), 2):
         data = json.loads(lines[index])

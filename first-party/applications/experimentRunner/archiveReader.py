@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveReader.py ; version: 4
+# file: first-party/applications/experimentRunner/archiveReader.py ; version: 5
 """Bounded read-only committed-prefix recovery, independent of backend and assets."""
 from __future__ import annotations
 
@@ -35,6 +35,19 @@ def readBytes(path, limit):
         raw = source.read(limit + 1)
     fmt.require(len(raw) <= limit)
     return raw
+
+
+def readManifest(root):
+    """Read the current fixed header name, or a legacy header only when absent.
+
+    Existing archive1/2/3 evidence remains read-only. A present invalid current
+    header, including a link or an over-limit file, never falls back to legacy
+    bytes. New writers and exports exclusively use archive-manifest.json.
+    """
+    try:
+        return readBytes(root / fmt.MANIFEST_NAME, 65536)
+    except FileNotFoundError:
+        return readBytes(root / "manifest.json", 65536)
 
 
 class BlobReader:
@@ -82,7 +95,7 @@ def inspectArchive(directory, *, unitId=None, turnId=None, includeContent=False)
 def _inspectArchive(root, unitId, turnId, includeContent):
     """Perform bounded fixed-path reads without backend imports or mutation."""
     regular(root, directory=True)
-    rawHeader = readBytes(root / "manifest.json", 65536)
+    rawHeader = readManifest(root)
     header = fmt.decode(rawHeader)
     fmt.require(rawHeader == fmt.canonical(header))
     fmt.manifest(header)

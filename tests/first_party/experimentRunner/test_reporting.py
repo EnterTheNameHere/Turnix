@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_reporting.py ; version: 1
+# file: tests/first_party/experimentRunner/test_reporting.py ; version: 2
 """Actual managed archives, offline field comparisons, presentation and publication faults."""
 import importlib
 import json
@@ -102,14 +102,14 @@ def test_failed_marker_publication_leaves_no_completed_export(rig, tmp_path, mon
     original = exporting.stage
     def fail(directory, filename, raw):
         """Fail exactly the manifest stage after the actual data-file publication."""
-        if filename == 'manifest.json':
+        if filename == 'archive-manifest.json':
             raise OSError('private-error-sentinel')
         original(directory, filename, raw)
     monkeypatch.setattr(exporting, 'stage', fail)
     with pytest.raises(OSError):
         exporting.publish(reporting.report(archivePath(value)), tmp_path, 'failed', kind='report', format='json', sourceDirectories=[archivePath(value)])
     assert (tmp_path / 'failed' / 'report.json').is_file()
-    assert not (tmp_path / 'failed' / 'manifest.json').exists()
+    assert not (tmp_path / 'failed' / 'archive-manifest.json').exists()
 
 
 def test_csv_formula_and_terminal_controls_are_escaped():
@@ -210,7 +210,7 @@ def test_report_caps_reject_before_full_reader_and_export_cannot_modify_source(r
     with pytest.raises(reporting.ReportError):
         exporting.publish(result, path, 'export', kind='report', format='json', sourceDirectories=[path])
     assert not (path / 'export').exists()
-    headerPath = path / 'manifest.json'
+    headerPath = path / 'archive-manifest.json'
     header = reporting.fmt.decode(headerPath.read_bytes())
     header['limits']['archiveBytes'] = 513 * reporting.MIB
     headerPath.write_bytes(reporting.fmt.canonical(header))

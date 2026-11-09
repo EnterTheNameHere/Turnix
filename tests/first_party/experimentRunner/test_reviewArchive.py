@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_reviewArchive.py ; version: 1
+# file: tests/first_party/experimentRunner/test_reviewArchive.py ; version: 2
 """Independent exact-provenance and typed recovery checks for delivered archives."""
 import json
 import pytest
@@ -7,7 +7,7 @@ from tests.first_party.experimentRunner.test_archive import rig, execute, archiv
 
 def rewrite(path, records):
     """Rehash an intentionally inconsistent record stream to test semantic validation."""
-    previous = fmt.digest((path / 'manifest.json').read_bytes())
+    previous = fmt.digest((path / 'archive-manifest.json').read_bytes())
     lines = []
     terminalSequence = None
     for sequence, record in enumerate(records, 1):

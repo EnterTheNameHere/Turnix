@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/readable.py ; version: 2
+# file: first-party/applications/experimentRunner/readable.py ; version: 3
 """Explicit private, chronological text export using the validated offline archive API."""
 from __future__ import annotations
 
@@ -81,5 +81,5 @@ def exportText(directory, unitId, outputRoot, name):
                     contentPolicy="selected-private", records=records,
                     artifacts=[dict(file=filename, artifactRef=ref, rendering=encoding)
                                for filename, text, ref, encoding in artifacts])
-    (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    (output / fmt.MANIFEST_NAME).write_text(json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     return dict(path=str(output), files=len(artifacts), source=source.binding)

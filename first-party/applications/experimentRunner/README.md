@@ -1,12 +1,12 @@
 # Experiment Runner
 
-Current usability delivery awaits Integration review. Fresh-clone verification
-found a shared Pack-discovery blocker: archives/exports named `manifest.json`
-under this App's `local/results/` are recursively read as Pack manifests. The
-default local-results run fails at activation before inference. The platform
-owner must resolve that boundary before the workflow below can be accepted.
-External-results smoke verification is recorded separately in canonical
-`ai-workflow/knowledge/experiment-runner-usability-implementation.txt`.
+Archives and Runner exports use `archive-manifest.json`, reserving `manifest.json`
+for Pack manifests. This avoids Pack-discovery collisions in `local/results/`.
+Offline readers also accept the old archive filename when the new one is absent;
+they never rewrite existing evidence. Keep historical archives/exports that still
+contain `manifest.json` outside the App tree, where Pack discovery cannot scan
+them. A malformed current header never falls back to an older header.
+The usability package awaits independent Integration review.
 
 For first use on Windows, clone branch `actant-experiment-runner`. Run the
 repository **root** `setup.bat` (or `setup.ps1`) for the embedded Python and
@@ -302,7 +302,7 @@ checkpoints. Host schema 3 requires the explicit `archive` object in
 `host.example.json`. No host@2 migration or legacy-result relabeling is performed.
 
 ```
-<archiveId>/manifest.json
+<archiveId>/archive-manifest.json
 <archiveId>/records.log
 <archiveId>/artifacts/<sha256>.blob
 ```

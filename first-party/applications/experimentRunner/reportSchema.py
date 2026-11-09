@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/reportSchema.py ; version: 3
+# file: first-party/applications/experimentRunner/reportSchema.py ; version: 4
 """Closed typed offline report values; generated diagnostics carry no live authority."""
 import importlib
 import base64
@@ -117,7 +117,7 @@ def validate(value):
         fmt.fields(value, (*common, "mode", "result", "reasons", "alignment", "fieldAvailability", "difference", "sourceOutcomes"))
     fmt.fields(value["generator"], ("implementationId", "sourceVersion", "applicationBaseRef"))
     fmt.require(value["generator"]["implementationId"] == "applications.experimentRunner.reporting")
-    fmt.integer(value["generator"]["sourceVersion"], 1, 3)
+    fmt.integer(value["generator"]["sourceVersion"], 1, 4)
     fmt.require(type(value["generator"]["applicationBaseRef"]) is str and re.fullmatch("[0-9a-f]{40}", value["generator"]["applicationBaseRef"]))
     fmt.require(type(value["sources"]) is list and len(value["sources"]) <= 2)
     for item in value["sources"]:
