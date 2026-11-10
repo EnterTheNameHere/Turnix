@@ -1,5 +1,13 @@
 # Experiment Runner
 
+This branch contains Experiment Runner and its shared Actant platform dependencies.
+Other Applications' exclusive files are excluded. Future platform imports must
+preserve the exclusions for `first-party/applications/evilBirthdayAnalysis/`,
+`tests/first_party/evilBirthdayAnalysis/`, `ai-workflow/mail/evil-analysis/` and
+`ai-workflow/state/evil-analysis.txt`. Shared platform code, reusable Packs and
+their tests remain included. Cross-Application coordination lives on canonical
+branch `actant-integration`; its registry retains the other workstreams.
+
 Archives and Runner exports use `archive-manifest.json`, reserving `manifest.json`
 for Pack manifests. This avoids Pack-discovery collisions in `local/results/`.
 Offline readers also accept the old archive filename when the new one is absent;
