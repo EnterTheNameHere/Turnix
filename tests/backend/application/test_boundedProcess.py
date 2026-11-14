@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_boundedProcess.py ; version: 1
+# file: tests/backend/application/test_boundedProcess.py ; version: 2
 """Actual Job/child ownership and deterministic ACK/cancellation/privacy regressions."""
 from __future__ import annotations
 
@@ -593,7 +593,7 @@ def test_supervisor_start_failure_clears_exact_roots_and_keeps_errors_safe(runti
     actual = Thread.start
     def failedStart(self):
         """Reject only the owned supervisor, leaving test/runtime infrastructure intact."""
-        if self.name == "actant-process-supervisor":
+        if self.name == "tertalis-process-supervisor":
             raise RuntimeError("PRIVATE_THREAD_CREATION_144")
         return actual(self)
     monkeypatch.setattr(Thread, "start", failedStart)

@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_architecture.py ; version: 1
+# file: tests/backend/tracing/test_architecture.py ; version: 2
 from __future__ import annotations
 
 import inspect
@@ -29,7 +29,7 @@ def testTracerRequiresExplicitDestination() -> None:
 
 def testExplicitSinkMakesIntentionalDiscardValid() -> None:
     tracer = Tracer(destinations=(TraceSinkDestination(),))
-    tracer.emitEvent(origin="actant.test")
+    tracer.emitEvent(origin="tertalis.test")
     tracer.close()
 
 
@@ -59,12 +59,12 @@ def testSharedRuntimeContextDoesNotShareProducerStructure() -> None:
     runtimeContext = TraceRuntimeContext()
     first = Tracer(
         destinations=(TraceSinkDestination(),),
-        origin="actant.first",
+        origin="tertalis.first",
         runtimeContext=runtimeContext,
     )
     second = Tracer(
         destinations=(TraceSinkDestination(),),
-        origin="actant.second",
+        origin="tertalis.second",
         runtimeContext=runtimeContext,
     )
 

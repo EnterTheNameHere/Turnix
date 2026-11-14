@@ -1,4 +1,4 @@
-# file: tests/backend/llm/test_structuredMessageEvidence.py ; version: 1
+# file: tests/backend/llm/test_structuredMessageEvidence.py ; version: 2
 from __future__ import annotations
 
 import base64
@@ -19,7 +19,7 @@ def test_processing_query_evidence_retains_exact_structured_payload() -> None:
 
     evidence = LlmProcessingPipeline._queryEvidence(query)
 
-    assert evidence["formatId"] == "actant.llm.messages@1"
+    assert evidence["formatId"] == "tertalis.llm.messages@1"
     assert evidence["payloadType"] == "bytes"
     encoded = evidence["payloadBase64"]
     assert isinstance(encoded, str)

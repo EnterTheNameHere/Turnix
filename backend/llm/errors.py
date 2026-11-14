@@ -1,7 +1,7 @@
-# file: backend/llm/errors.py ; version: 10
+# file: backend/llm/errors.py ; version: 11
 from __future__ import annotations
 
-from backend.core.errors import ActantError
+from backend.core.errors import PlatformError
 
 __all__: list[str] = [
     "LlmError",
@@ -17,8 +17,8 @@ __all__: list[str] = [
 ]
 
 
-class LlmError(ActantError):
-    """Base class for current Actant LLM-domain runtime failures."""
+class LlmError(PlatformError):
+    """Base class for current Tertalis LLM-domain runtime failures."""
 
 
 class LlmProviderError(LlmError):
@@ -42,7 +42,7 @@ class LlmProviderUnavailableError(LlmProviderError):
 
 
 class LlmProviderConnectionError(LlmProviderError):
-    """Raised when Actant cannot connect to an LLM provider."""
+    """Raised when Tertalis cannot connect to an LLM provider."""
 
 
 class LlmProviderProtocolError(LlmProviderError):

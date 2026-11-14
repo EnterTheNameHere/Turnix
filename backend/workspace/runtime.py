@@ -1,5 +1,5 @@
-# file: backend/workspace/runtime.py ; version: 2
-"""Actant-owned ephemeral filesystem workspaces for invocation-local tool inputs."""
+# file: backend/workspace/runtime.py ; version: 3
+"""Tertalis-owned ephemeral filesystem workspaces for invocation-local tool inputs."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ from dataclasses import dataclass
 from threading import RLock
 from pathlib import Path, PurePath
 
-from backend.core.errors import ActantError
+from backend.core.errors import PlatformError
 
 __all__ = ["EphemeralWorkspace", "WorkspaceError", "WorkspacePathError", "WorkspaceWriteError",
            "WorkspaceRead", "WorkspaceReadError", "WorkspaceFileIdentity"]
 
 
-class WorkspaceError(ActantError, RuntimeError):
-    """Base error for Actant-mediated ephemeral-workspace failures."""
+class WorkspaceError(PlatformError, RuntimeError):
+    """Base error for Tertalis-mediated ephemeral-workspace failures."""
 
 
 class WorkspacePathError(WorkspaceError):
@@ -28,7 +28,7 @@ class WorkspacePathError(WorkspaceError):
 
 
 class WorkspaceWriteError(WorkspaceError):
-    """Raised when Actant cannot materialize an ephemeral workspace artifact."""
+    """Raised when Tertalis cannot materialize an ephemeral workspace artifact."""
 
 
 class WorkspaceReadError(WorkspaceError):
@@ -85,7 +85,7 @@ class WorkspaceRead:
 
     def snapshot(self):
         """Export detached metadata; private data remains explicitly separate."""
-        return dict(schemaId="actant.workspace.read@1", relativePath=self.relativePath,
+        return dict(schemaId="tertalis.workspace.read@1", relativePath=self.relativePath,
                     bytes=self.bytes, sha256=self.sha256, observedTimeNs=self.observedTimeNs,
                     identity=self.identity.snapshot())
 
@@ -111,14 +111,14 @@ class EphemeralWorkspace:
     __slots__ = ("_closed", "_root", "_lane", "_pins")
 
     def __init__(self) -> None:
-        """Creates a private Actant-owned temporary directory.
+        """Creates a private Tertalis-owned temporary directory.
 
         Raises:
             WorkspaceWriteError: If the operating system cannot create the
                 workspace directory.
         """
         try:
-            self._root = Path(tempfile.mkdtemp(prefix="actant-work-"))
+            self._root = Path(tempfile.mkdtemp(prefix="tertalis-work-"))
         except OSError as err:
             raise WorkspaceWriteError(f"Failed to create ephemeral workspace: {err}.") from err
         self._closed = False
@@ -154,7 +154,7 @@ class EphemeralWorkspace:
         if type(payload) is not bytes:
             raise TypeError("payload must be exact built-in bytes.")
         destination = self._resolveRelative(relativePath)
-        temporary = destination.with_name(f".{destination.name}.actant.tmp")
+        temporary = destination.with_name(f".{destination.name}.tertalis.tmp")
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_bytes(payload)

@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 29
+# file: backend/context/codeEntryContext.py ; version: 30
 from __future__ import annotations
 
 from contextlib import suppress
@@ -39,7 +39,7 @@ __all__ = ["CodeEntryContext", "CodeEntryIdentity"]
 
 
 class _IoFacade:
-    """Invocation-bound facade over Actant-mediated filesystem I/O."""
+    """Invocation-bound facade over Tertalis-mediated filesystem I/O."""
 
     def __init__(self, *, io: ManagedIo | ManagedIoTransaction, requireValid: Callable[[], None]) -> None:
         """Binds one managed-I/O view to the owning invocation lifetime."""
@@ -47,7 +47,7 @@ class _IoFacade:
         self._requireValid = requireValid
 
     def observeFile(self, path: str | Path, *, contentHash: bool = False) -> dict[str, object]:
-        """Returns JSON-compatible Actant source-observation evidence."""
+        """Returns JSON-compatible Tertalis source-observation evidence."""
         self._requireValid()
         return self._io.observeFile(path, contentHash=contentHash).snapshot()
 
@@ -64,7 +64,7 @@ class _IoFacade:
         return {"value": value, "observation": observation.snapshot()}
 
     def readObservedJson(self, path: str | Path) -> dict[str, object]:
-        """Returns JSON together with its Actant source observation."""
+        """Returns JSON together with its Tertalis source observation."""
         self._requireValid()
         value, observation = self._io.readObservedJson(path)
         return {"value": value, "observation": observation.snapshot()}
@@ -118,7 +118,7 @@ class _MemoryTransactionFacade:
         return self._transaction.state(address)
 
     def metadata(self, address: str) -> dict[str, object] | None:
-        """Returns generic Actant metadata visible through this transaction."""
+        """Returns generic Tertalis metadata visible through this transaction."""
         self._requireValid()
         return self._transaction.metadata(address)
 
@@ -142,7 +142,7 @@ class _MemoryTransactionFacade:
         if self._transaction.state(address) is not expectedState:
             return False
         metadata = self._transaction.metadata(address)
-        return isinstance(metadata, dict) and metadata.get("formatId") == "actant.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
+        return isinstance(metadata, dict) and metadata.get("formatId") == "tertalis.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether PRESENT state matches producer and validity."""
@@ -169,7 +169,7 @@ class _MemoryTransactionFacade:
             raise TypeError("Value validity metadata must be an object or null.")
         if provenance is not None and not isinstance(provenance, dict):
             raise TypeError("Value provenance metadata must be an object or null.")
-        return {"formatId": "actant.derived-value-metadata@1", "producer": deepcopy(self._producer), "validity": {} if validity is None else deepcopy(validity), "provenance": {} if provenance is None else deepcopy(provenance)}
+        return {"formatId": "tertalis.derived-value-metadata@1", "producer": deepcopy(self._producer), "validity": {} if validity is None else deepcopy(validity), "provenance": {} if provenance is None else deepcopy(provenance)}
 
     def openTransaction(self) -> "_MemoryTransactionFacade":
         """Opens a nested invocation-owned speculative transaction."""
@@ -217,7 +217,7 @@ class _MemoryFacade:
         return self._state.revisionId(address)
 
     def metadata(self, address: str) -> dict[str, object] | None:
-        """Returns generic Actant metadata for the visible revision."""
+        """Returns generic Tertalis metadata for the visible revision."""
         self._requireValid()
         return self._state.metadata(address)
 
@@ -241,7 +241,7 @@ class _MemoryFacade:
         if self._state.state(address) is not expectedState:
             return False
         metadata = self._state.metadata(address)
-        return isinstance(metadata, dict) and metadata.get("formatId") == "actant.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
+        return isinstance(metadata, dict) and metadata.get("formatId") == "tertalis.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether PRESENT state matches producer and validity."""
@@ -455,7 +455,7 @@ class CodeEntryContext:
         self.process._runner.requireReady()
 
     def requireValid(self) -> None:
-        """Rejects use after Actant has ended this invocation turn."""
+        """Rejects use after Tertalis has ended this invocation turn."""
         if not self._valid:
             raise RuntimeError("CodeEntryContext is no longer valid.")
 

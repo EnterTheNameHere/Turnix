@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 9
+# file: backend/io/managedIo.py ; version: 10
 from __future__ import annotations
 
 import contextlib
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from backend.core.errors import ActantError
+from backend.core.errors import PlatformError
 from backend.core.runtimeIds import newRuntimeId
 
 __all__ = [
@@ -28,8 +28,8 @@ __all__ = [
 ]
 
 
-class IoError(ActantError, RuntimeError):
-    """Base error for declared Actant-mediated file-operation failures."""
+class IoError(PlatformError, RuntimeError):
+    """Base error for declared Tertalis-mediated file-operation failures."""
 
 
 class IoPathError(IoError):
@@ -41,7 +41,7 @@ class IoNotFoundError(IoError):
 
 
 class IoPermissionError(IoError):
-    """Raised when the operating system denies an Actant-mediated file operation."""
+    """Raised when the operating system denies an Tertalis-mediated file operation."""
 
 
 class IoDecodeError(IoError):
@@ -76,7 +76,7 @@ class SourceObservation:
 
     SourceObservation is evidence about the source at one observation point,
     not an automatically maintained subscription. The representation is
-    deliberately suitable for persistence inside Actant-managed values so a
+    deliberately suitable for persistence inside Tertalis-managed values so a
     producer can later compare the basis of a derived result with a fresh
     observation.
 
@@ -84,7 +84,7 @@ class SourceObservation:
     contentSha256 is present only when strong content identity was requested.
     A future watcher/event service can reuse this same representation when it
     reports source transitions; Pack-facing source identity therefore does not
-    need to change when Actant gains continual observation.
+    need to change when Tertalis gains continual observation.
 
     This contract is design-significant and should be promoted into the I/O /
     source-observation design specification when design documents are updated.
@@ -271,7 +271,7 @@ class ManagedIoTransaction:
 
 
 class ManagedIo:
-    """Central Actant file-I/O service used by Pack-facing Context facades.
+    """Central Tertalis file-I/O service used by Pack-facing Context facades.
 
     Language-facing Pack code receives only Context facades around this object.
     All filesystem exceptions are translated here so Pack implementations do
@@ -289,7 +289,7 @@ class ManagedIo:
         restating the path around a separate read. The SHA-256 identity is
         calculated from exactly the bytes returned to the caller.
 
-        If the opened file changes materially while being read, Actant retries.
+        If the opened file changes materially while being read, Tertalis retries.
         Path replacement after opening does not rewrite the identity of the
         bytes actually consumed; future observations of the path will naturally
         report the replacement as a different source.
@@ -382,12 +382,12 @@ class ManagedIo:
         part of their derivation provenance.
 
         Strong observation verifies size and modification time again after
-        hashing. If the source changes while being read, Actant retries rather
+        hashing. If the source changes while being read, Tertalis retries rather
         than publishing an internally inconsistent observation.
 
         This method performs one observation only. Scheduling, polling,
         subscriptions, and source-change event publication belong to future
-        Actant services layered over this primitive.
+        Tertalis services layered over this primitive.
         """
         if type(contentHash) is not bool:
             raise TypeError("contentHash must be an exact bool.")

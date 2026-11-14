@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_traceValidation.py ; version: 1
+# file: tests/backend/tracing/test_traceValidation.py ; version: 2
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -134,10 +134,10 @@ def testRequireTraceRecordKindRejectsNonCanonicalKind(value: str) -> None:
 
 
 def testRequireOriginUsesTracingNameSyntax() -> None:
-    assert requireOrigin("actant.runtime.worker") == "actant.runtime.worker"
+    assert requireOrigin("tertalis.runtime.worker") == "tertalis.runtime.worker"
 
     with pytest.raises(ValueError):  # noqa: PT011
-        requireOrigin("Actant Runtime")
+        requireOrigin("Tertalis Runtime")
 
 
 @pytest.mark.parametrize(

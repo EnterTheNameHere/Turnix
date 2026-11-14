@@ -1,4 +1,4 @@
-# file: backend/tracing/publisher.py ; version: 4
+# file: backend/tracing/publisher.py ; version: 5
 from __future__ import annotations
 
 import contextvars
@@ -164,7 +164,7 @@ class TracePublisher:
         self._publicationState: contextvars.ContextVar[
             _TracePublicationState | None
         ] = contextvars.ContextVar(
-            f"actantTracePublicationState_{id(self)}",
+            f"tertalisTracePublicationState_{id(self)}",
             default=None,
         )
 

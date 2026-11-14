@@ -1,4 +1,4 @@
-# file: backend/tracing/ids.py ; version: 3
+# file: backend/tracing/ids.py ; version: 4
 from __future__ import annotations
 
 import hashlib
@@ -24,7 +24,7 @@ class TraceDestinationRegistrationId(Uuid7Id):
 
 
 class TraceEventId(Uuid7Id):
-    """Identifies one immutable trace record within Actant tracing."""
+    """Identifies one immutable trace record within Tertalis tracing."""
 
     __slots__ = ()
 

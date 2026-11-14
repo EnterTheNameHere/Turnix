@@ -1,5 +1,5 @@
-# file: backend/process/context.py ; version: 2
-"""Invocation-bound CodeEntry facade for Actant process execution."""
+# file: backend/process/context.py ; version: 3
+"""Invocation-bound CodeEntry facade for Tertalis process execution."""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ class ProcessFacade:
 
         Raises:
             RuntimeError: If the owning CodeEntryContext is no longer valid.
-            ProcessExecutionError: If Actant cannot resolve or execute the tool
+            ProcessExecutionError: If Tertalis cannot resolve or execute the tool
                 through its configured process authority.
             TypeError: If arguments or timeout have invalid types.
             ValueError: If the working directory or timeout value is invalid.

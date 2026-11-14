@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 13
+# file: backend/runtime/runtimeHost.py ; version: 14
 from __future__ import annotations
 
 from contextlib import suppress
@@ -36,7 +36,7 @@ class RuntimeHostState(StrEnum):
 
 class RuntimeHost:
     """
-    Host-level Actant runtime boundary owning zero or more ApplicationRuntimes.
+    Host-level Tertalis runtime boundary owning zero or more ApplicationRuntimes.
 
     RuntimeHost is not an Application or ApplicationRun. It coordinates shared
     host-facing services and owns the lifetime registry for live
@@ -82,7 +82,7 @@ class RuntimeHost:
         self._observations = ObservationService(telemetryService)
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(
-            origin="actant.runtime-host",
+            origin="tertalis.runtime-host",
             destinations=(TraceSinkDestination(),),
         )
 

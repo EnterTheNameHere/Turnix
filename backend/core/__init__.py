@@ -1,6 +1,6 @@
 # file: backend/core/__init__.py
 """
-Small shared Actant backend/platform helpers.
+Small shared Tertalis backend/platform helpers.
 
 This package should stay boring. Domain-specific concepts belong in their
 owning backend packages when those packages exist.

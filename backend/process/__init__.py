@@ -1,5 +1,5 @@
-# file: backend/process/__init__.py ; version: 2
-"""Actant-mediated external process execution."""
+# file: backend/process/__init__.py ; version: 3
+"""Tertalis-mediated external process execution."""
 
 from backend.process.runtime import (
     ProcessExecutionError,

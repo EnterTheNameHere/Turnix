@@ -1,5 +1,5 @@
-# file: backend/process/runtime.py ; version: 2
-"""Actant-owned execution boundary for configured external tools."""
+# file: backend/process/runtime.py ; version: 3
+"""Tertalis-owned execution boundary for configured external tools."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class ProcessToolDefinition:
 
     The executable is runtime configuration rather than CodeEntry authority.
     Optional environment entries override the host environment inherited from
-    the Actant process for invocations of this tool only.
+    the Tertalis process for invocations of this tool only.
     """
 
     name: str
@@ -147,7 +147,7 @@ class ProcessRunner:
 
         A nonzero tool exit is a normal completed invocation and is returned in
         ``ProcessResult``. Failure to resolve, launch, communicate with, or wait
-        for the process is an Actant infrastructure failure.
+        for the process is an Tertalis infrastructure failure.
 
         Args:
             toolName: Logical host-configured tool identity.

@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 5
+# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 6
 """Trusted llama.cpp adoption of ER-01 residency and ER-02 invocation sessions.
 
 Stock HTTP cannot require physical cache reuse. Retention and required freshness
@@ -29,7 +29,7 @@ from backend.runtime.executionResources import (
 
 def _implementation():
     """Use the same substrate authority/table across dynamically loaded facades."""
-    name = "actantFirstPartyLlamaCppImplementation"
+    name = "tertalisFirstPartyLlamaCppImplementation"
     if name not in sys.modules:
         spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("codeEntry.py"))
         module = importlib.util.module_from_spec(spec)
@@ -43,7 +43,7 @@ def _implementation():
 
 
 _impl = _implementation()
-_transportName = "actantFirstPartyLlamaCppOwnedTransport"
+_transportName = "tertalisFirstPartyLlamaCppOwnedTransport"
 if _transportName not in sys.modules:
     _transportSpec = importlib.util.spec_from_file_location(
         _transportName, Path(__file__).with_name("ownedTransport.py"))
@@ -55,7 +55,7 @@ if _transportName not in sys.modules:
         sys.modules.pop(_transportName, None)
         raise
 _transport = sys.modules[_transportName]
-_evidenceName = "actantFirstPartyLlamaCppRequestEvidence"
+_evidenceName = "tertalisFirstPartyLlamaCppRequestEvidence"
 if _evidenceName not in sys.modules:
     _evidenceSpec = importlib.util.spec_from_file_location(
         _evidenceName, Path(__file__).with_name("requestEvidence.py"))
@@ -142,7 +142,7 @@ class LlamaCppCatalog:
             raise ValueError("A controlled llama.cpp catalog requires managed mode.")
         self.values = self.prepared.values
         self.envelope = bytes.fromhex(_impl._configuration.identity({
-            "adapter": "actant.llamaCpp.execution@1", "source": _impl._configuration.SOURCE_COMMIT,
+            "adapter": "tertalis.llamaCpp.execution@1", "source": _impl._configuration.SOURCE_COMMIT,
             "executable": str(driver.executable), "host": driver.host, "port": driver.port,
             "baseUrl": driver.baseUrl}))
         profiles = {}

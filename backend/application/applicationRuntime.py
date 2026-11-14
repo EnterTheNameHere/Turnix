@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 23
+# file: backend/application/applicationRuntime.py ; version: 24
 from __future__ import annotations
 
 from contextlib import suppress
@@ -37,7 +37,7 @@ __all__ = ["ApplicationRuntime"]
 
 class ApplicationRuntime:
     """
-    Live Actant execution environment for exactly one ApplicationRun.
+    Live Tertalis execution environment for exactly one ApplicationRun.
 
     Tracing is evidence only. Trace publication or tracer-close failures are
     deliberately isolated here so loss of observability cannot alter runtime
@@ -139,7 +139,7 @@ class ApplicationRuntime:
         self._ownsTracer = tracer is None
         self._tracerClosed = False
         self._closed = False
-        self.tracer = tracer or Tracer(origin="actant.runtime", destinations=(TraceSinkDestination(),))
+        self.tracer = tracer or Tracer(origin="tertalis.runtime", destinations=(TraceSinkDestination(),))
         self.llmPipeline = LlmProcessingPipeline(
             providers=self.llmProviders,
             state=self.applicationRun.application.committedState,

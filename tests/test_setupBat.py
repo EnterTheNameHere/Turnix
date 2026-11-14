@@ -1,4 +1,4 @@
-# file: tests/test_setupBat.py ; version: 1
+# file: tests/test_setupBat.py ; version: 2
 """Exercise the actual Windows batch/PowerShell boundary without installing packages."""
 import os
 from pathlib import Path
@@ -35,9 +35,9 @@ def testWrapperForwardsArgumentsAndExitFromUnrelatedDirectory(tmp_path, exitCode
         'exit /b %ERRORLEVEL%\n', encoding="utf-8",
     )
     environment = dict(os.environ)
-    environment.pop("ACTANT_SETUP_NO_PAUSE", None)
+    environment.pop("TERTALIS_SETUP_NO_PAUSE", None)
     if not pauseOnFailure:
-        environment["ACTANT_SETUP_NO_PAUSE"] = "1"
+        environment["TERTALIS_SETUP_NO_PAUSE"] = "1"
     result = subprocess.run(
         [str(Path(os.environ["SystemRoot"]) / "System32/cmd.exe"), "/d", "/c", str(harness)],
         cwd=caller, env=environment, input="\n", capture_output=True,
@@ -48,6 +48,6 @@ def testWrapperForwardsArgumentsAndExitFromUnrelatedDirectory(tmp_path, exitCode
     assert "REQUIREMENTS=custom requirements.txt" in result.stdout
     assert f"CALLER={caller}" in result.stdout
     if exitCode:
-        assert f"Actant internal setup failed with exit code {exitCode}." in result.stdout
+        assert f"Tertalis internal setup failed with exit code {exitCode}." in result.stdout
     else:
         assert "setup failed" not in result.stdout

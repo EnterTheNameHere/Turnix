@@ -1,4 +1,4 @@
-"""Reusable Actant processing-pipeline contracts."""
+"""Reusable Tertalis processing-pipeline contracts."""
 
 from backend.processing.runtime import ProcessingRun, ProcessingRunOutcome, ProcessingStage, QueryItem
 

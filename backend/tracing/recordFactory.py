@@ -1,4 +1,4 @@
-# file: backend/tracing/recordFactory.py ; version: 3
+# file: backend/tracing/recordFactory.py ; version: 4
 from __future__ import annotations
 
 import threading
@@ -277,7 +277,7 @@ class TraceRecordFactory:
                 ),
                 origin=origin,
                 causedBy=causedBy,
-                actantRunId=cleanCorrelations.actantRunId,
+                tertalisRunId=cleanCorrelations.tertalisRunId,
                 applicationId=cleanCorrelations.applicationId,
                 applicationRunId=cleanCorrelations.applicationRunId,
             )
@@ -392,7 +392,7 @@ class TraceRecordFactory:
                 spanFamily=spanFamily,
                 origin=origin,
                 causedBy=causedBy,
-                actantRunId=cleanCorrelations.actantRunId,
+                tertalisRunId=cleanCorrelations.tertalisRunId,
                 applicationId=cleanCorrelations.applicationId,
                 applicationRunId=cleanCorrelations.applicationRunId,
             )
@@ -520,7 +520,7 @@ class TraceRecordFactory:
                 outcome=outcome,
                 durationNs=durationNs,
                 causedBy=causedBy,
-                actantRunId=cleanCorrelations.actantRunId,
+                tertalisRunId=cleanCorrelations.tertalisRunId,
                 applicationId=cleanCorrelations.applicationId,
                 applicationRunId=cleanCorrelations.applicationRunId,
             )

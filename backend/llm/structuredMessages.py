@@ -1,4 +1,4 @@
-# file: backend/llm/structuredMessages.py ; version: 2
+# file: backend/llm/structuredMessages.py ; version: 3
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 
-LLM_MESSAGES_FORMAT_ID = "actant.llm.messages@1"
+LLM_MESSAGES_FORMAT_ID = "tertalis.llm.messages@1"
 
 type LlmMessageRole = Literal["user", "assistant"]
 

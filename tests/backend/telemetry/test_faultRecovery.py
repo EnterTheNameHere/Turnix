@@ -1,4 +1,4 @@
-# file: tests/backend/telemetry/test_faultRecovery.py ; version: 1
+# file: tests/backend/telemetry/test_faultRecovery.py ; version: 2
 """Deterministic acquisition rollback and actual polling-worker fault/recovery tests."""
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class Clock:
 
     def monotonic(self) -> int:
         """Raises once at the configured real acquisition or polling clock boundary."""
-        if current_thread().name == "actant-telemetry":
+        if current_thread().name == "tertalis-telemetry":
             self.workerRead += 1
             if self.workerRead == self.workerFailAt:
                 raise self.error
@@ -45,7 +45,7 @@ class Clock:
 
     def wall(self) -> int:
         """Can fail inside actual background collection, distinct from deadline handling."""
-        if self.failWall and current_thread().name == "actant-telemetry":
+        if self.failWall and current_thread().name == "tertalis-telemetry":
             self.failWall = False
             raise self.error
         return 500 * SECOND

@@ -1,4 +1,4 @@
-# file: tests/tools/observationViewer/smoke.py ; version: 1
+# file: tests/tools/observationViewer/smoke.py ; version: 2
 """Explicit synthetic verification harness: real G-01 activation, CORS and local browser polling."""
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ class ManualTelemetry(TelemetryService):
 
 def run(args) -> dict:
     """Runs the actual Pack/browser smoke using a private stdin/stdout test-control protocol."""
-    with tempfile.TemporaryDirectory(prefix="actant-g02-") as folder, ViewerServer(0) as viewer:
+    with tempfile.TemporaryDirectory(prefix="tertalis-g02-") as folder, ViewerServer(0) as viewer:
         viewerWorker = Thread(target=viewer.serve_forever, kwargs={"poll_interval": 0.05})
         viewerWorker.start()
         app = Path(folder) / "app"

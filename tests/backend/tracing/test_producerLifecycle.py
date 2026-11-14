@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_producerLifecycle.py ; version: 1
+# file: tests/backend/tracing/test_producerLifecycle.py ; version: 2
 from __future__ import annotations
 
 from backend.tracing import TraceProducerStartContext, Tracer
@@ -11,7 +11,7 @@ def _recordTypes(destination: CollectingDestination) -> list[str]:
 
 def testProducerInitializationPublishesDestinationThenReadyEvidence() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
 
     assert _recordTypes(collector)[:2] == [
         "trace.destination-added",
@@ -27,14 +27,14 @@ def testProducerInitializationPublishesDestinationThenReadyEvidence() -> None:
 
 def testProducerReadyCarriesOwnerSuppliedPredecessorContext() -> None:
     firstCollector = CollectingDestination()
-    first = Tracer(destinations=(firstCollector,), origin="actant.test")
+    first = Tracer(destinations=(firstCollector,), origin="tertalis.test")
     predecessor = first.getTraceProducerId()
     first.close()
 
     secondCollector = CollectingDestination()
     second = Tracer(
         destinations=(secondCollector,),
-        origin="actant.test",
+        origin="tertalis.test",
         startContext=TraceProducerStartContext(
             predecessorProducerId=predecessor,
             reason="recovery",
@@ -58,7 +58,7 @@ def testProducerReadyCarriesOwnerSuppliedPredecessorContext() -> None:
 
 def testClosePublishesStoppingAbandonmentAndStoppedInOrder() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
     tracer.span().start()
 
     tracer.close()
@@ -74,7 +74,7 @@ def testClosePublishesStoppingAbandonmentAndStoppedInOrder() -> None:
 
 def testRepeatedCloseDoesNotDuplicateProducerTerminalEvidence() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
 
     tracer.close()
     tracer.close()

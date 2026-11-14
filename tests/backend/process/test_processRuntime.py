@@ -1,5 +1,5 @@
-# file: tests/backend/process/test_processRuntime.py ; version: 2
-"""Tests for Actant-mediated configured external-tool execution."""
+# file: tests/backend/process/test_processRuntime.py ; version: 3
+"""Tests for Tertalis-mediated configured external-tool execution."""
 
 from __future__ import annotations
 
@@ -40,13 +40,13 @@ def test_runAppliesConfiguredEnvironmentWithoutCodeEntryExecutableAuthority(tmp_
     definition = ProcessToolDefinition(
         name="python-test",
         executable=Path(sys.executable).resolve(),
-        environment={"ACTANT_PROCESS_TEST": "configured"},
+        environment={"TERTALIS_PROCESS_TEST": "configured"},
     )
     runner = ProcessRunner(ProcessToolRegistry((definition,)))
 
     result = runner.run(
         "python-test",
-        ("-c", "import os; print(os.environ['ACTANT_PROCESS_TEST'])"),
+        ("-c", "import os; print(os.environ['TERTALIS_PROCESS_TEST'])"),
         workingDirectory=tmp_path,
     )
 

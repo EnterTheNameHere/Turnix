@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_asyncAndConcurrency.py ; version: 3
+# file: tests/backend/tracing/test_asyncAndConcurrency.py ; version: 4
 from __future__ import annotations
 
 import asyncio
@@ -65,7 +65,7 @@ class NewTypeRecursiveDestination:
 def testCopiedAsyncContextDoesNotStayPermanentlyMarkedAsPublishing() -> None:
     async def run() -> None:
         collector = CollectingDestination()
-        tracer = Tracer(origin="actant.test", destinations=(collector,))
+        tracer = Tracer(origin="tertalis.test", destinations=(collector,))
         delayed = OneShotDelayedDestination(tracer)
         tracer.addDestination(delayed)
 
@@ -91,7 +91,7 @@ def testRecursiveDestinationCannotRegisterTypeOrConsumeSequence() -> None:
     emergencyStream = StringIO()
     collector = CollectingDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
@@ -129,7 +129,7 @@ def testRecursiveDestinationCannotRegisterTypeOrConsumeSequence() -> None:
 def testInheritedSpanContextCanEmitAndCreateChildInAnotherTask() -> None:
     async def run() -> None:
         collector = CollectingDestination()
-        tracer = Tracer(origin="actant.test", destinations=(collector,))
+        tracer = Tracer(origin="tertalis.test", destinations=(collector,))
         checkpoint = checkpointDestination(collector)
 
         parent = tracer.span().start()
@@ -159,7 +159,7 @@ def testCloseUnwindsNestedAmbientSpansInReverseOrder() -> None:
     collector = CollectingDestination()
     runtimeContext = TraceRuntimeContext()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector,),
         runtimeContext=runtimeContext,
     )
@@ -200,7 +200,7 @@ def testDestinationProcessControlBaseExceptionPropagates() -> None:
 
     destination = InterruptionDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(destination,),
     )
 
@@ -212,7 +212,7 @@ def testDestinationProcessControlBaseExceptionPropagates() -> None:
 
 def testConcurrentEmissionsHaveUniqueContiguousProducerSequence() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     threadCount = 8
     recordsPerThread = 50

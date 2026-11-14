@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_regressions.py ; version: 1
+# file: tests/backend/tracing/test_regressions.py ; version: 2
 from __future__ import annotations
 
 import threading
@@ -51,7 +51,7 @@ def _ordinaryRecords(destination: CollectingDestination) -> list[TraceRecord]:
 
 def testNestedSpanRelationshipsRemainStructurallyCorrect() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
 
     parent = tracer.span().start()
     tracer.event().message("inside parent").emit()
@@ -74,7 +74,7 @@ def testRecursiveDestinationStillCannotTraceThroughOwningTracer() -> None:
     collector = CollectingDestination()
     tracer = Tracer(
         destinations=(collector,),
-        origin="actant.test",
+        origin="tertalis.test",
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
     recursive = RecursiveDestination(tracer)
@@ -96,7 +96,7 @@ def testRecursiveDestinationStillCannotTraceThroughOwningTracer() -> None:
 
 def testConcurrentEmissionKeepsWholeProducerSequenceContiguous() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
     threadCount = 4
     recordsPerThread = 25
     barrier = threading.Barrier(threadCount)
@@ -127,7 +127,7 @@ def testConcurrentEmissionKeepsWholeProducerSequenceContiguous() -> None:
 
 def testEveryPublishedRecordStillHasDefinitionDeliveredFirst() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
     customType = TraceEventType(name="pipeline.decision", domain="pipeline")
 
     tracer.emitEvent(traceType=customType, message="yes")

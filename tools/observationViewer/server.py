@@ -1,5 +1,5 @@
-# file: tools/observationViewer/server.py ; version: 1
-"""Fixed-asset local viewer launcher; imports no Actant runtime and proxies no observations."""
+# file: tools/observationViewer/server.py ; version: 2
+"""Fixed-asset local viewer launcher; imports no Tertalis runtime and proxies no observations."""
 from __future__ import annotations
 
 import argparse
