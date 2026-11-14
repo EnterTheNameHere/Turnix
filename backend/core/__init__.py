@@ -1,4 +1,4 @@
-# file: backend/core/__init__.py
+# file: backend/core/__init__.py ; version: 1
 """
 Small shared Tertalis backend/platform helpers.
 
