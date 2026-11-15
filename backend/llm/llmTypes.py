@@ -1,4 +1,4 @@
-# file: backend/llm/llmTypes.py ; version: 4
+# file: backend/llm/llmTypes.py ; version: 5
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,6 +12,7 @@ from backend.core.validation import (
     requirePositiveInteger,
     requireString,
 )
+from backend.orchestration.cancellation import CancellationSignal
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -186,6 +187,7 @@ class LlmCallRequest:
     query: LlmQuery
     model: str | None = None
     providerOptions: Mapping[str, ImmutableValue] = field(default_factory=dict)
+    cancellationSignal: CancellationSignal | None = None
 
     def __post_init__(self) -> None:
         """Validates and freezes the provider-facing call request."""
@@ -199,6 +201,12 @@ class LlmCallRequest:
             "providerOptions",
         )
         object.__setattr__(self, "providerOptions", frozenProviderOptions)
+
+        if self.cancellationSignal is not None and not isinstance(
+            self.cancellationSignal,
+            CancellationSignal,
+        ):
+            raise TypeError("cancellationSignal must be a CancellationSignal or None.")
 
 
 @dataclass(frozen=True, slots=True)

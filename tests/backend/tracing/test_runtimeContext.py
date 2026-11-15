@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_runtimeContext.py ; version: 2
+# file: tests/backend/tracing/test_runtimeContext.py ; version: 3
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +20,7 @@ from backend.tracing import (
 from tests.backend.tracing.helpers import CollectingDestination
 
 
-class ActantRunId(Uuid7Id):
+class TertalisRunId(Uuid7Id):
     __slots__ = ()
 
 
@@ -38,12 +38,12 @@ def testSharedRuntimeContextCorrelationsAreObservedByMultipleTracers() -> None:
     secondCollector = CollectingDestination()
 
     firstTracer = Tracer(
-        origin="actant.first",
+        origin="tertalis.first",
         runtimeContext=runtimeContext,
         destinations=(firstCollector,),
     )
     secondTracer = Tracer(
-        origin="actant.second",
+        origin="tertalis.second",
         runtimeContext=runtimeContext,
         destinations=(secondCollector,),
     )
@@ -62,14 +62,14 @@ def testCorrelationScopeRemainsUsableAfterCreatingTracerCloses() -> None:
     sink = TraceSinkDestination()
     emergencyStream = StringIO()
     firstTracer = Tracer(
-        origin="actant.first",
+        origin="tertalis.first",
         destinations=(sink,),
         runtimeContext=runtimeContext,
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
     collector = CollectingDestination()
     secondTracer = Tracer(
-        origin="actant.second",
+        origin="tertalis.second",
         runtimeContext=runtimeContext,
         destinations=(collector,),
     )
@@ -88,12 +88,12 @@ def testSharedRuntimeContextDoesNotMakeAmbientSpanCrossProducer() -> None:
     runtimeContext = TraceRuntimeContext()
     sink = TraceSinkDestination()
     firstTracer = Tracer(
-        origin="actant.first",
+        origin="tertalis.first",
         destinations=(sink,),
         runtimeContext=runtimeContext,
     )
     secondTracer = Tracer(
-        origin="actant.second",
+        origin="tertalis.second",
         destinations=(sink,),
         runtimeContext=runtimeContext,
     )
@@ -108,20 +108,20 @@ def testSharedRuntimeContextDoesNotMakeAmbientSpanCrossProducer() -> None:
 
 def testNestedCorrelationScopesInheritClearAndRestoreExactValues() -> None:
     runtimeContext = TraceRuntimeContext()
-    actantRunId = ActantRunId.new()
+    tertalisRunId = TertalisRunId.new()
     applicationId = ApplicationId.new()
     applicationRunId = ApplicationRunId.new()
 
     outer = TraceCorrelationScope(
         runtimeContext=runtimeContext,
-        actantRunId=actantRunId,
+        tertalisRunId=tertalisRunId,
         applicationId=applicationId,
     )
 
     with outer:
         assert runtimeContext.getCurrentCorrelations() == (
             TraceCorrelationContext(
-                actantRunId=actantRunId,
+                tertalisRunId=tertalisRunId,
                 applicationId=applicationId,
             )
         )
@@ -133,7 +133,7 @@ def testNestedCorrelationScopesInheritClearAndRestoreExactValues() -> None:
         ):
             assert runtimeContext.getCurrentCorrelations() == (
                 TraceCorrelationContext(
-                    actantRunId=actantRunId,
+                    tertalisRunId=tertalisRunId,
                     applicationId=None,
                     applicationRunId=applicationRunId,
                 )
@@ -141,7 +141,7 @@ def testNestedCorrelationScopesInheritClearAndRestoreExactValues() -> None:
 
         assert runtimeContext.getCurrentCorrelations() == (
             TraceCorrelationContext(
-                actantRunId=actantRunId,
+                tertalisRunId=tertalisRunId,
                 applicationId=applicationId,
             )
         )

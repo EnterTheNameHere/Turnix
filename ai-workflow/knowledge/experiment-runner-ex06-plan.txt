@@ -1,0 +1,429 @@
+EX-06 - CLASSIC PROCEDURE DESIGN CHECKPOINT
+==========================================
+Owner: experiment-runner Application implementer. Date: 2026-11-06.
+Status: PROPOSAL FOR INTEGRATION REVIEW; NOT IMPLEMENTATION AUTHORIZATION.
+Canonical coordination parent: 14cdc9bdd323228ce52083c0e1d188ccfcb3c607.
+Application inspected: actant-experiment-runner
+0d84010bc64095c1080dc44842247c92945b48b8.
+Complete imported platform: b958470b2e2d63182bb0bda7d2f760c1492edff9.
+Current Integration backend/reusable source/tests equal that imported platform.
+No synchronization/source change is needed for this planning checkpoint.
+The sibling experiment-runner directory is a separate older clone at121f30f;
+it was not used as the source baseline or changed.
+
+01. RECOMMENDATION / DECISIONS REQUESTED
+---------------------------------------
+Approve a small linear definition@3 interpreter, keeping definition@2 unchanged.
+Use explicit message/inference/save/cli steps and existing Classic structured
+messages, one actual Job and one exclusive LLM session per configuration/repetition.
+First example has exactly two inferences and four configured CLI calls.
+Preserve EX-03 first-exit/stop semantics, EX-04 ACK/partial recovery, EX-05 offline
+report/comparison/export and optional per-inference PM/G capture.
+
+Current argv execution is usable through an actual Job; bounded cancellable
+execution and bounded mediated reads of transformed files are missing. Request a
+separately scoped platform dependency BEFORE Application implementation/adoption:
+  A. bounded process output with cancellation and structured failure/cleanup facts;
+  B. bounded workspace byte reads through the owning Context.
+No Application subprocess wrapper, polling helper thread around an uncancellable
+call, direct private runner access, or raw CodeEntry filesystem bypass proposed.
+Integration should review the smallest API contract and assign its owner/ref.
+This document proposes requirements, not an accepted platform API/specification.
+
+Specific decisions: approve definition@3/host@5/archive@3 below; approve A/B as
+separate platform scope; approve ephemeral per-Job workspaces for the first slice
+instead of retained run-directory workspaces. If retained child workspaces are
+mandatory, additionally scope host-selected workspace parent/lifetime support;
+do not emulate it with an Application-owned replacement Context/workspace.
+Approve supported roles user/assistant only; system role needs a separate shared
+message contract. No downgrade of cancellation/resource requirements proposed.
+
+02. INSPECTED CONTRACTS AND EVIDENCE
+------------------------------------
+Paths below are repository-relative and read at the exact refs above.
+Application first-party/applications/experimentRunner/:
+- definition.py validate/decode/canonical/unitDefinition: strict JSON@2, duplicate
+  rejection, immutable canonical snapshots, all-config options and product/data
+  preflight. Limits: 1MiB input, 64MiB private result; <=8 configs,10 repetitions,
+  32 units,16 turns/unit,256 inference calls, host-tightened output/options.
+- codeEntry.py Recorder.prepare/execute/finish: user-only turn renderer, answer-only
+  assistant replay; transition, reserveConversation, FreshContext(best effort),
+  exact private capture, per-call confirmed cleanup, ACK before history append,
+  close queued, actual Job outcome observed separately. No implicit tool history.
+- launcher.py hostConfiguration/prepare/policyFor/execute/SuiteControl and signal
+  relay: host@3/4 only, selected catalog/caller grants, config-major unit order,
+  one actual Job per conversation, boundary before next unit, independent first
+  exit/host/archive failures. Runtime config presently omits processTools.
+- results.py: result@2, suite@1 and per-unit identity; aggregate suiteId already
+  identifies the invocation, per-unit runId is historical naming.
+- archive.py ArchiveWriter/ArchiveRun/UnitArchivePort and archiveFormat.py Grammar:
+  version1/2 exact grammar; immutable digest blobs, DATA+COMMIT, sync-before-ACK,
+  sticky writer fatal latch, partial timer/bounds; required request evidence is
+  validated before successful recovery. Working files cannot replace receipts.
+- archiveReader.py: bounded read-only valid-prefix recovery, reparse rejection,
+  fixed digest paths, ACK/close observations unavailable when recovered offline.
+- reporting.py/reportSchema.py/exporting.py/run.py: exact selected evidence modes,
+  content/observation opt-ins, incomplete qualifiers, source-bound comparison,
+  manifest-last export. Readers explicitly accept archive1/2, not future versions.
+
+Platform backend/ (same source at imported/current Integration refs):
+- process/configuration.py processToolDefinitionsFromConfig: processTools maps
+  logical names to absolute executables, no per-definition executable authority.
+- process/runtime.py ProcessRunner.run: exact argv, shell disabled by default,
+  subprocess.run(capture_output=True), UTF-8 errors=replace, optional timeout;
+  nonzero exits returned normally. Unbounded buffering, inherited environment,
+  no cancellation signal, generic ProcessExecutionError discards structured
+  timeout/partial-output/launch-stage evidence. No process-tree quiescence receipt.
+- process/context.py ProcessFacade: checks invocation lifetime before run only.
+- application/applicationRuntime.py __init__/createContext/invokeCapability/runJob:
+  per-ApplicationRun registry; process facade bound to actual Context validity.
+  Configured tools are not governed by LLM grants/allowExecution. Jobs check
+  cancellation before/after handler; process wait does not poll Job cancellation.
+  Trusted runtime config is visible to CodeEntries; this is not a sandbox or
+  per-CodeEntry process allowlist. Grant only ruff/ty in this Application.
+- context/codeEntryContext.py: each invocation creates private EphemeralWorkspace;
+  invalidate closes it. Whole procedure must remain in the SAME run capability
+  invocation, never materialize in prepare and reuse after its Context closes.
+- workspace/runtime.py/context.py: immediate materializeBytes/Text, relative path
+  containment, best-effort recursive removal. No read API, retention or configured
+  run-root parent. Actual temporary path is non-authoritative.
+- io/managedIo.py and Context _IoFacade: observed reads exist but read full bytes;
+  ordinary readText can normalize newlines. Neither is a bounded exact-byte
+  workspace read. Post-read length checks cannot establish an allocation bound.
+- llm/structuredMessages.py LlmMessage supports only user/assistant; no system
+  role. LlmMessages preserves content/order and encodes structured messages.
+
+Legacy comparison: canonical state/materialization-test.txt describes earlier
+configured-tool and workspace precedent and explicitly unverified later managed
+LLM migration. Its Application source is absent from this checkout; no copied
+legacy workflow or claim of its compatibility. DA-28/IS-03 concern durable host
+Workspace ownership, distinct from ephemeral invocation workspace; no new host
+lock/recovery design or interpretation of those documents is needed here.
+
+Executed on unchanged Integration14cdc9b, Python3.15.0b4 / Windows:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q
+ tests/backend/process tests/backend/workspace
+ tests/backend/application/test_processContextIntegration.py
+ tests/backend/application/test_workspaceProcessIntegration.py
+Result:24 passed/1.33s, zero skips. These are existing substrate tests, not EX-06.
+Separate in-memory stdin probe registered a capability on ApplicationRuntime,
+started an actual runJob, materialized candidate.py through ctx.workspace, ran
+host-configured embedded Python reading that cwd file, returned exit7 normally,
+observed Job Succeeded, then confirmed workspace removed on Context invalidation.
+Synthetic test program only; no model or Ruff/ty launch. Initial probe had a wrong
+JobState import and exited before runtime creation; corrected probe passed.
+
+JSON5 local probe: requirements.txt already declares json5; installed0.17.3.
+loads supports allow_duplicate_keys=False, parse_constant/float and full-input
+consumption. Comments/unquoted keys/hex/trailing commas parsed; duplicates rejected
+when requested. Default NaN/Infinity/1e999 parse to nonfinite floats: explicit
+rejection is mandatory. An initial shell-quoted probe failed to parse as Python;
+corrected stdin probe produced these results. No dependency installation.
+Ruff/ty modules and PATH executables absent here. No real assets inspected/launched,
+no browser run, no EX-06 implementation or combined Application regression run.
+Existing embedded Python home-directory warning remains. No new full-suite claim.
+The proposed JSON5 example below was parsed with installed json5:9 distinct
+steps, exactly two inference steps and four CLI steps. This checks example syntax
+and counts only, not an implemented schema validator or tool compatibility.
+Correction2026-11-06 following Integration review: original total10 was a counting
+error; the executed probe checked uniqueness and2/4 counts, not total10. Flow unchanged.
+
+03. PROPOSED AUTHORED DEFINITION
+--------------------------------
+Illustrative complete JSON5 shape (host aliases/config below must be approved):
+{
+  schemaId: 'actant.experiment.definition@3',
+  experimentId: 'python-one-pass', mode: 'classic',
+  configurations: [{name: 'baseline', profile: 'qwen',
+    defaults: {maxTokens: 1024, timeoutSeconds: 120, temperature: 0},
+    allowedOverrides: []}],
+  repetitions: 1, errorPolicy: 'stop', contextPolicy: 'fresh-best-effort',
+  inputs: {priming: 'prompts/priming.txt', task: 'prompts/task.txt'},
+  procedure: [
+    {id: 'prime', op: 'message', role: 'user', parts: [
+      {input: 'priming'}, {literal: '\n\n'}, {input: 'task'},
+      {literal: '\nReturn the complete source in exactly one python fence.'}]},
+    {id: 'draft', op: 'inference'},
+    {id: 'save', op: 'save', inference: 'draft',
+      extract: 'one-python-fence', artifact: 'candidate', path: 'candidate.py'},
+    {id: 'fix', op: 'cli', command: 'ruff-safe-fix', artifact: 'candidate'},
+    {id: 'format', op: 'cli', command: 'ruff-format', artifact: 'candidate'},
+    {id: 'types', op: 'cli', command: 'ty-check', artifact: 'candidate'},
+    {id: 'lint', op: 'cli', command: 'ruff-check', artifact: 'candidate'},
+    {id: 'feedback', op: 'message', role: 'user', parts: [
+      {literal: 'Correct this current source using the diagnostics below.\n'},
+      {artifact: 'candidate', revision: 'current'},
+      {literal: '\nTYPE CHECK\n'}, {cli: 'types'},
+      {literal: '\nLINT\n'}, {cli: 'lint'},
+      {literal: '\nReturn the complete corrected source in one python fence.'}]},
+    {id: 'corrected', op: 'inference'},
+  ],
+}
+
+Exact allowed keys per op; no expression/string interpolation language. All IDs
+unique, references strictly backward and correctly typed. Message parts are tagged
+single-source objects; concatenate in list order with NO implicit separators.
+Input is frozen run input; artifact/current reads current validated workspace
+revision at that step; cli renders the referenced immutable result as canonical
+JSON containing status/exitCode/stdout/stderr. Absent diagnostics are not empty
+success. Parts cannot refer to host paths, environment or future/current running IO.
+Message roles user/assistant only; authored assistant text is explicitly authored,
+not a fabricated model output. Reject unsupported system/tool roles. Priming uses
+user text in this first slice; no silent system-to-user conversion.
+At inference: require nonempty pending message segment ending in user; merge only
+allowed inference overrides with each config's defaults; snapshot exact history,
+then infer and append completed answer after required ACK/cleanup. Reasoning stays
+separate. Two adjacent message steps do not cause two implicit calls. No inference
+without a new user message; no trailing pending messages at successful completion.
+Model draft remains in history after Ruff changes file; correction query contains
+original user+assistant and the explicitly assembled new user message.
+Final corrected answer is archived; no implicit second save/tool pass.
+
+Save supports 'whole-answer' or 'one-python-fence' only, never reasoning/partials.
+Strict fence grammar: exactly one fenced block in the answer, opener exactly
+```python and closer exactly ``` on their own lines (LF or CRLF), nonempty
+body, no nested/unclosed/extra fenced block; exterior prose retained only in full
+answer. Extract exact between-fence characters including their line endings;
+do not dedent, strip or synthesize newline. Reject ambiguity, wrong language,
+oversize, invalid UTF-8 or NUL explicitly. No generated-code execution/import.
+
+04. HOST / CLI CONTRACT AND MINIMAL SHARED DEPENDENCY
+-----------------------------------------------------
+host@5 keeps host4 observation policy and existing required archive/LLM controls,
+adds strict procedure limits, processTools={ruff:absoluteExe,ty:absoluteExe}, and
+approvedCommands. Definition selects a logical command and registered artifact;
+host binds tool/argv/timeout/allowed exit codes/mutation policy. No authored shell,
+cwd, environment, executable, arbitrary switches or arbitrary argv substitution.
+Example host command bindings (artifact token is typed, not shell interpolation):
+ ruff-safe-fix: ruff ['check','--isolated','--no-cache','--fix',
+   '--no-unsafe-fixes','--select','E4,E7,E9,F', ARTIFACT], exits[0,1], mutates=true
+ ruff-format: ruff ['format','--isolated','--no-cache',ARTIFACT], exits[0], mutates=true
+ ty-check: ty ['check','--isolated','--output-format','concise',ARTIFACT],
+   exits[0,1], mutates=false
+ ruff-check: ruff ['check','--isolated','--no-cache','--select','E4,E7,E9,F',
+   ARTIFACT], exits[0,1], mutates=false
+These are proposed command recipes, not verified installed-tool invocations.
+Later gate MUST check actual approved versions' help/exit behavior and pin supported
+recipes; adjust checkpoint if flags differ. No tool installation authorized now.
+Working directory is the artifact's unit workspace. Explicit configuration avoids
+accidental repository/user config discovery. Tools inherit host environment today;
+no hermeticity claim. Shared environment isolation is an alternative separate scope,
+not necessary to prove the first controlled, trusted-tool run. Persist environment
+policy, never full environment values. Tool binary hashes/version evidence are
+observations, not loaded-image attestation or a guarantee of deterministic output.
+
+Dependency A proposed semantics: extend configured process API compatibly (existing
+callers unchanged), add finite byte caps BEFORE buffering, Context Job cancellation
+forwarding, timeout and cancellation termination of only the owned child, bounded
+drain/cleanup evidence. Return/attach structured outcome with exact argv/cwd/tool
+identity, timing, exit availability, partial raw stdout/stderr bytes, encoding/
+replacement/truncation facts, phase and cleanup/quiescence. Define not-attempted,
+launch-attempted, started, completed, timeout, cancelled, output-limit and execution
+failure without claiming all exceptions mean not-started. No automatic retries.
+Limit breach stops unit; truncated diagnostics never pass as complete feedback.
+Preserve first exit during cleanup; no blanket process-name kill, borrowed-process
+takeover, detached execution, or guaranteed process-tree quiescence. If descendants
+or pipe ownership prevent confirmed cleanup, return UNKNOWN and stop suite.
+Cancellation must be deliverable off the runtime lane and cleanup awaited by Job;
+do not leave worker running while invalidating its workspace. Process errors must
+be safe for generic runtime tracing (no raw argv/output/private path in message).
+Structured private evidence goes only through archive port.
+
+Dependency B: workspace.readBytes(relativePath,maxBytes) with lifetime/containment,
+regular-file/reparse checks, maxBytes+1 actual read bound, opened-file identity and
+observed byte length/hash; failure on missing/oversize/changed file, no silent
+retry across potentially different CLI revisions. A returned bytes snapshot is
+evidence of observed content, not filesystem immutability or external execution.
+Use materializeBytes existing API for save and mediated bounded read after every
+CLI (including diagnostics). No read capability for arbitrary absolute paths.
+No generic new persistent workspace manager required by the recommended slice.
+
+05. INPUT FREEZE / WORKSPACES / DATA CAPS
+-----------------------------------------
+Authoring format selected explicitly by --definition-format json|json5, default
+json for legacy compatibility. JSON5 permitted only for definition@3; host remains
+strict JSON. Read definition bytes <=1MiB, strict UTF-8, reject BOM/invalid scalar
+strings, NUL, duplicates at all depths, nonfinite/overflow, trailing material,
+depth>32 and >16384 container/scalar nodes. Same schema checks after parsing;
+canonical sorted compact UTF-8 JSON allow_nan=False; reject non-JSON types.
+JSON5 parse itself needs a lexical bounded-depth/token scan BEFORE recursive
+parsing, aware of strings/comments/escapes; post-parse checks alone are insufficient.
+Pin tested json5 version/range in approved Application setup metadata; readers
+remain stdlib only. No downloading/pinning installed package at this checkpoint.
+Semantically identical JSON5 yields identical normalized definition hash; raw
+definition hash is separate and retains comments/whitespace/numeric spelling.
+
+Resolve all declared input paths relative to definition directory beneath an
+explicit trusted input root (default definition directory). Reject absolute,
+drive/UNC/ADS, traversal, links/reparse points/nonregular inputs. Snapshot each
+declared logical input exactly once BEFORE runtime/model/CLI and before any unit;
+bounded binary read, strict UTF-8, preserve CRLF/BOM policy as above. Retain exact
+bytes plus logical source relationship and observed hash/length once per run.
+Changed/disappeared originals after freeze do not alter later units. No promise
+of a simultaneous multi-file snapshot or hostile concurrent-mutation protection.
+Run invocation itself re-reads/freezes; prior validate command is not a receipt.
+
+Run identity: existing suiteId is top-level runId alias (one UUID, not another
+independently generated ID). archiveId distinct; unitId identifies config/repetition,
+jobId actual runtime Job. New run directory results/<suiteId>/archive/ plus small
+private sidecar; blobs hold shared frozen definition/inputs once. Each unit has
+separate invocation ephemeral workspace, one source named by validated relative
+artifact path. Shared frozen inputs need not be copied there; only CLI-required
+files materialize. Archive snapshots carry unitId/opId/revision/digests.
+Recommended first slice deliberately uses existing OS temp workspace and deletes
+on Context close; run-directory retained workspaces are optional future host
+support, requiring Integration decision. Portable archive holds ALL needed bytes.
+No workspace reconstruction or CLI replay on inspect/recover/export.
+
+Proposed hard ceilings, host may tighten: <=64 steps/unit,16 input files,
+256KiB/input and 1MiB total inputs; <=8 artifacts,256KiB/artifact; <=16 CLI/unit,
+64 argv entries/8192 UTF-8 bytes total per call; <=30s CLI timeout, <=256KiB each
+raw stdout/stderr; <=256KiB assembled message. Retain existing unit/config/repetition/
+inference limits and output character bound. <=512KiB executable provenance total;
+no stored executable binaries. Identifiers <=128; portable artifact segments
+ASCII [A-Za-z0-9_.-], length<=64, full path<=128, <=4 segments, reject dot/parent,
+reserved Windows device names, trailing dot/space, casefold collisions/ADS/links.
+Bound all counts/strings before expansion; worst-case UTF-8 and JSON escaping,
+replayed history, post-tool revisions, captures, partial records, PM/G snapshots,
+tool artifacts and exports must fit existing archive caps and 64MiB sidecar limit.
+Compute exact conservative budget for every config before launching anything;
+allowed shape can still fail budget (not all maxima simultaneously supported).
+No sidecar duplication of every blob; references resolve only in owning archive.
+
+06. OPERATIONS / FAILURE AND CANCELLATION
+-----------------------------------------
+Freeze source and all config/host/command options; ACK run inputs/plan. Execute
+config-major repetitions sequentially; ACK actual Job/unit plan before model
+transition. One run capability owns history, workspace, LLM session and ordered
+steps until terminal exit. Message assembles and archives immutable content;
+inference uses accepted private wire capture and cleanup before result/history ACK.
+Save ACKs original answer reference, extracted bytes and extraction rule, then
+materializes and records observed working revision before downstream CLI.
+
+For each CLI: ACK exact resolved request + pre-file digest BEFORE start; invoke
+once through shared facade; capture process result and bounded post-file snapshot;
+ACK both before next step. Artifact revision increments for each observed snapshot
+(digest may be unchanged). Original extracted revision is never overwritten in
+archive. Read-only diagnostics changing source is a failure, not ignored.
+Every completed mutating call gets post-file observation even for nonzero exits.
+
+normal-completed exit in host allowlist: evidence retained, continue. Thus Ruff
+remaining findings and ty findings enter correction message once; suite success
+describes procedure completion, never code correctness/lint cleanliness.
+Other exit (including CLI usage/internal errors): retain, stop; no correction call.
+Resolution/launch/timeout/cancel/output-limit/read/archive failures: retain available
+original facts, stop subsequent steps/units; actual Job state remains separate.
+Cancellation requested before call prevents admission; during call requires shared
+owned-child disposition; after call before ACK means later steps do not run.
+Post-error file capture is best effort with its own unavailable/failed reason;
+it cannot replace primary failure or establish that tool completed safely.
+On uncertain effects, archive pending/unknown operation, never label it not-sent/
+not-executed based on absence of result/file; no automatic CLI retry after crash.
+No successful procedure projection unless every required step/post-file/CLI outcome
+and actual unit boundary validates, cleanup confirmed as required by dependency.
+Queued LLM session close still not a release receipt. Preserve independent process,
+LLM, Job, workspace, writer, host and signal cleanup facts and first BaseException.
+
+07. VERSIONED PORTABLE ARCHIVE / OFFLINE COMPATIBILITY
+------------------------------------------------------
+Leave definition@2/host@3/4 paths, archive@1/2 grammar and raw regressions unchanged.
+New definition@3 requires host@5, execution@6, result@3, suite@2, archive@3
+(data-commit-json-lines@3). New readers explicitly dispatch all three versions;
+old readers must reject unsupported3, never misread it as2. Reuse accepted blob
+hash/record chain/ACK/fatal latch protocol, not a second journal beside archive.
+Request-evidence semantics remain unchanged; observation extensions retained.
+
+New typed records, exact key sets to freeze in implementation review:
+- run-inputs: originalDefinitionRef, normalizedDefinitionRef, inputsIndexRef,
+  interpreterPolicyRef (parser/version, normalization, caps and source identity).
+- step-planned: opId,ordinal,op,requestRef (exact logical sources/resolved args/
+  cwd/timeout/output policy/tool observation/pre-revision as applicable).
+- step-completed: opId,outcomeRef,artifactsIndexRef. Binds to exact preceding
+  step request, typed terminal status, original/transformed file references,
+  process outcome/stdout/stderr references, encoding/truncation/cleanup facts.
+- inference records reuse turn-planned/request-evidence/partial/turn-completed,
+  with unique turnId equal inference opId; linked required step completion.
+Suite-planned binds procedure index and run-inputs before units. Every unit has
+planned list including unstarted inference/CLI steps. Grammar validates ordered
+predecessors/types, revision links, all referenced blobs, argv/command policy,
+exit status/nullable consistency, exact pre/post digests, invocation identities,
+message assembly against refs, and required completions before unit/suite success.
+Validate candidate state atomically (existing copy-before-apply behavior). Missing
+or contradictory evidence is corrupt at record, retains preceding valid prefix;
+pending step after torn tail is incomplete/unknown, never executed/replayed.
+Detail contract must preserve failure archives: genuine partial/unknown evidence
+is valid diagnostics; only false claims of full success are rejected.
+
+Bounded content-addressed bytes: raw definition/input, full answer, extracted source,
+post-fix/post-format/post-diagnostic source and raw process streams; records mostly
+contain references. Exact argv/cwd/tool identity is private evidence. Bytes written
+by tool are observations; filesystem mutations or COMMIT alone cannot prove
+caller saw ACK/close. Durability remains local-process-death-os-running only.
+
+Offline report@2 adds separate procedureSteps/CLI summaries plus existing inference
+rows, measures/denominators/availability/source bindings. Never include CLI time in
+LLM throughput. Existing report@1/compare@1 semantics on old archives unchanged;
+new comparison@2 includes procedure + frozen input + assembled query identities
+in input qualifications. Explicitly allowed differences remain disclosed. Export
+supports old/new typed reports with existing manifest-last safety; no runtime,
+json5, source file, configured executable, network or backend import needed.
+Default table/JSON/CSV omit raw prompt/source/stdout/stderr/argv/path; explicit
+--include-content exposes private evidence. Content remains data, not tool requests.
+No EX-05 archive rewrite, upgrade-in-place, recovery mutation or replay command.
+
+08. SOURCE OWNERSHIP / ALTERNATIVES / ACCEPTANCE
+------------------------------------------------
+Application-only changes AFTER authorization under
+first-party/applications/experimentRunner/ and tests/first_party/experimentRunner/:
+extend definition/launcher/codeEntry/results/archive*/report*/exporting/run modules;
+add procedure.py (linear dispatch/history), procedureFormat.py (strict contracts),
+inputs.py (launcher-only bounded input freeze), examples/host5/JSON5 docs, focused
+tests and later evidence. Prefer these small modules over a general workflow DSL.
+Python path/version first lines increment per changed file, production docstrings.
+No reusable provider/PM/G/backend edits hidden in Application patch.
+Platform A/B candidate paths: backend/process/{runtime,context}.py,
+backend/application/applicationRuntime.py and Context wiring as needed;
+backend/workspace/{runtime,context}.py; associated platform process/workspace/Job
+tests. Exact shared scope/API/branch needs independent Integration approval and
+acceptance, followed by COMPLETE platform import preserving all App files.
+No Application source or test imported upstream.
+
+Alternatives considered: existing process.run plus post-hoc truncation fails
+allocation/cancellation requirements; raw subprocess/workspace bypass duplicates
+shared authority; tool-generated output files still need capped mediated reads
+and do not solve cancellation. Separate Job per operation closes history/session/
+workspace boundaries and would need a broader ownership redesign. Retained working
+directories are useful but optional; immutable portable artifacts already satisfy
+evidence. System role/loop/condition/MVS/tool selection are outside this slice.
+
+Platform gates: unchanged existing tests plus actual Job cancellation pre/during/
+after start, timeout/overflow/concurrent pipes, raw non-UTF8, spawn-failure stages,
+normal nonzero, primary-versus-cleanup failure, safe trace privacy, no leaked child/
+reader after confirmed cleanup; unknown descendants/cleanup explicitly stops.
+Workspace bounded read exact CRLF/UTF-8/raw bytes, no full-file read before limit,
+links/traversal/changed/removed/oversize, isolation and Context invalidation.
+Application synthetic gates: JSON5 duplicate/nonfinite/depth/trailing/scalar cases;
+all-config/static reference and budget rejection before any active IO; input
+mutation after freeze; roles/history/fence extraction matrix; exact four calls
+once/two inferences and correct post-format correction message; fresh isolated
+config/repetition workspaces; each exit/failure/cancel/uncertain case; crash before/
+after CLI intent/result/ACK, malformed/missing/contradictory artifacts/statuses;
+raw EX-03/04/05 regressions unchanged and full combined Application suite.
+Fresh offline child reads old/new/mixed archives, sources/tools removed, deny
+write/network/process/backend imports; verify recovery/table/JSON/CSV/export and
+comparison qualifiers/content privacy. No missing fields filled with fabricated
+success, zeros or empty diagnostics.
+Later actual acceptance: approved available Qwen + actual approved Ruff/ty versions,
+first one-config/one-repetition two-call example, verify draft/extraction, exact
+four argv requests and exit semantics, transformed bytes and second request's
+growing history against independent transport; then bounded2x2 units for isolation/
+reuse/transition and original inputs retained once. Confirm owned child/session/
+Job/workspace/archive/host boundaries, inspect portable archive in fresh offline
+process and all supported export forms. No execution/import of generated source.
+Tool recipe help/version check required before this gate; normal lint findings
+may remain after final answer. Review independent exact refs/evidence; model
+availability is a later gate, not claimed by these local synthetic checks.
+
+Continuation: Integration reviews proposal and shared requirements/ephemeral choice;
+explicitly assigns/authorizes accepted dependency and Application scope. Implementer
+stops here until authorization, refreshes canonical barriers before new work.

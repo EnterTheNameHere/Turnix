@@ -1,0 +1,129 @@
+ER-02 INTEGRATION API REVIEW / IMPLEMENTATION AUTHORIZATION
+=========================================================
+Owner: Integration. Date: 2026-11-02.
+Reviewed proposal commit: bc70636 (canonical commit containing the proposal).
+Dispatch parent: 178df7b103ee54fcc57513887c3882bc527e6a0f.
+Worker: execution-resource-sessions. Source inputs include accepted ER-01 at
+2ab64eb, approved minimal A/B/C and execution-resource-er02-proposal.txt.
+
+Decision
+--------
+Approve ER-02 implementation with binding clarifications below. No second proposal
+checkpoint or renewed A/B/C approval is needed within these bounds. Refresh canonical
+coordination, synchronize safely to this review and record exact implementation
+parent. ER-02 only; ER-03/04 and Runner remain unassigned. This approves interfaces
+and lifecycle plumbing, not implementation acceptance or safe managed switching.
+
+Accept exact Registration-bound trusted bindings, runtime-issued CodeEntry owners
+and short-lived invocation access, an ER-01-backed call session before provider IO,
+generation-bound profile/estimation/streaming, exclusive conversation wrappers,
+FreshContext/required ReuseContext, explicit retained loss and safe result evidence.
+Accept estimator-free controlled result/preview snapshots and explicit runPreview
+validation; ordinary run(query) makes no implicit preview-provenance guarantee.
+Legacy unbound providers retain behavior and reject explicitly unsupported new
+features; a revoked/failed controlled binding must never become a legacy fallback.
+
+Scope of lifecycle edits explicitly approved
+--------------------------------------------
+Proposed runtimeHost, ApplicationRuntime, CodeEntryContext and PackLoader edits
+are authorized only for new binding/owner/access lifetime, helper cancellation,
+transaction-resource disposition and post-lock cleanup queues. Preserve existing
+registration/Pack unloading and serialized Job/transaction semantics. Do not turn
+this into a general teardown redesign or broadly release the runtime mutation lock
+around arbitrary Pack code. Existing invokeCapability/runJob hold the runtime lane;
+do not claim every legacy callback already runs outside it. New admission must be
+immediate, with no cross-Application waiting or callbacks under host/domain/broker/
+registry locks. Adapters must not need a retained invocation Context to clean up.
+If those constraints require broader locking/transaction changes, report the exact
+conflict before expanding scope. No ER-01 source changes or parallel claim manager.
+
+1. Concrete adapter effects and partial-open ownership
+------------------------------------------------------
+Every installed controlled binding supplies the full adapter contract; validate
+that shape before publication, without treating optional duck typing as authority.
+openExecution failure must leave its ticket with exactly one closeExecution owner.
+Closing iterator/transport, adapter finalization and ER-01 claim.finish have distinct
+roles. An iterator-close exception must not skip adapter cleanup or final disposition.
+Report unknown evidence rather than infer quiescence from EOF, local close or a Job
+terminal outcome. Public session/handle close cannot supply trusted evidence.
+On a primary error/cancellation preserve its classification and attach safe cleanup
+disposition; do not mask it with a cleanup-only success/error. On otherwise successful
+stream with uncertain cleanup, expose an explicit documented cleanup outcome/error,
+never silently return a valid retained handle or advertise safe reuse. Best-effort
+provider effects do not weaken mandatory ER-01 blocking/ownership invariants.
+
+Define required FreshContext narrowly as the adapter's supported owned logical
+context reset/freshness contract; document exact scope in immutable evidence. It
+does not imply all hidden caches, GPU-wide reset or determinism. Unsupported required
+freshness or retention must reject without silently downgrading. No generic contract
+negotiation engine is needed. The real provider implementation remains ER-03.
+
+2. Retained handles and transaction disposition
+-----------------------------------------------
+Use exact operation/context mutation receipts or an equally narrow guard. An abort
+from an earlier processing/Job scope must not invalidate state subsequently updated
+by another admitted call, or publish uncommitted context as committed history.
+Demonstrate existing runtime serialization rules out that interleaving, or keep
+new/mutated handles provisional and unavailable to other scopes until the owning
+Job/transaction disposition is known. Calls within the same authorized Job may
+continue sequentially. This is a context-use guard, not a new transaction engine.
+Touch a retained handle only after admission/provider mutation could occur; a stale,
+foreign or busy pre-admission rejection must not destroy an existing valid handle.
+Cleanup/invalidation remains possible after invocation access closes. Failed open,
+prepare, stream, completion or commit must not leak a newly retained provider object.
+Never put opaque handles into Value persistence/completion payloads or pretend
+resource cleanup rolled back already committed state/IO.
+Test outer Job abort after inner return, completion/commit failure, rejected reuse,
+and stale abort receipt versus later context mutation. Include finally-reset behavior
+for nested/copied scopes; do not retain memory/IO views, transactions or Contexts.
+
+3. Scoped helper estimation must not enlarge authority
+------------------------------------------------------
+Borrowing an existing admitted call for read-only helper estimation requires a live
+borrow scope nonce, actual runtime issuer, exact controlled registration/profile/
+frozen options and helper invocation validity. Require the helper's own grants for
+that profile or an explicit narrowly scoped read-estimation delegation from the
+parent; being in the same runtime/ContextVar is not blanket authority. The delegation
+must convey neither transition/reservation rights nor provider payload/cleanup hooks.
+Copied ContextVars and a saved estimator must fail after borrow/session closure.
+Inference never piggybacks on the parent claim. Nested exclusive-domain inference
+fails Busy, while unrelated controlled domains remain independent. Cancellation
+must propagate through the actual capability-invocation bridge, not just the facade.
+Test another CodeEntry/runtime issuer, stale/copied scope, mismatched options/profile,
+helper exception/cancellation and nested call behavior.
+
+4. Registration revocation and outside-lock cleanup ownership
+-------------------------------------------------------------
+Retain an exact-registration controlled tombstone through withdrawal/unload so that
+an already-resolved registration cannot fall back to legacy methods after revoke.
+Reusing its name/provider object is not reusing that registration's authority.
+The binding retains its owned adapter lifetime through pending operations/context
+pins; registration disappearance or final facade unload must not dispose it early.
+Owner/profile binding tables and queued finalization must outlive runtime removal
+and failed create/load. Only the specific owner/registration may be revoked; closing
+one Application must not revoke a peer's same-domain work.
+
+For direct close, closeApplicationRun, host stop and failed creation/activation,
+perform callback-free revocation under existing locks and drain new callbacks after
+leaving host/runtime/registry/broker locks. Repeated closed/stopped paths must still
+report/advance pending cleanup; early returns cannot silently skip it. Exception
+aggregation must preserve legacy errors and new pending/unknown state. A cleanup
+queue rooted only in the removed ApplicationRuntime is insufficient.
+Use second-thread entry probes for lock-boundary tests, not only same-thread RLock
+reentry. Include late operation completion during legacy Pack teardown, failed
+activation before full publication, re-registration, final lease pending cleanup,
+and one owner close while another remains active.
+
+Verification / delivery
+-------------------------
+Keep source versions/headers/docstrings and Python 3.15. Add deterministic tests
+for both original races through the new fake controlled adapter, actual facade/
+runtime/Job/Pack lifecycle, retained state/preview loss, rollback and no-legacy-
+fallback. Run focused sessions/context, runtime/application/LLM/provider/Job/
+observation regressions and full Actant suite; report actual counts/skips/limits.
+This review inspected the existing pipeline, context/runtime invocation/Job and
+teardown paths plus the proposal. No production edits/tests executed for the
+documentation checkpoint. Managed llama.cpp remains unbound and unsafe for shared
+transitions until ER-03 adopts all entry/lifetime paths. No real provider/model
+effect, monitoring, consumer adoption or guarantee beyond approved scope is claimed.
+Publish source commits/actual completion to Integration inbox; no self-acceptance.

@@ -1,4 +1,4 @@
-# file: backend/core/ids.py ; version: 2
+# file: backend/core/ids.py ; version: 3
 from __future__ import annotations
 
 import uuid
@@ -17,7 +17,7 @@ __all__: list[str] = [
 @dataclass(frozen=True, slots=True)
 class Uuid7Id:
     """
-    Base value object for typed Actant runtime identifiers.
+    Base value object for typed Tertalis runtime identifiers.
 
     Concrete domains define identity types by deriving from this class.
     Instances of different concrete identity types are never equal, even

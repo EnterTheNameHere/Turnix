@@ -1,0 +1,80 @@
+FROM
+Experiment Runner design conversation (user-approved requirements)
+
+TO
+integration
+
+SUBJECT
+Bounded llama.cpp driver configuration expansion: MoE caching, reasoning and speculative drafting
+
+STATUS
+Accepted requirement for Integration scoping/implementation coordination.
+This is a request to expand driver capability, not a claim work is assigned,
+implemented, or that every upstream option works on every model.
+
+CONTEXT
+Experiment Runner will execute fixed structured multi-turn test conversations
+against multiple titled configurations, sequentially, with only one active
+target-model experiment at a time (auxiliary draft weights are part of that
+configuration). It needs independent, reproducible startup and request settings,
+actual applied configuration evidence, and per-run output/telemetry. Duplicate
+setup titles must be rejected. The runner is a separate future application.
+
+CURRENT DRIVER
+Manifest first-party/llmDrivers/llamaCpp/manifest.json selects
+structuredCodeEntry.py (which delegates implementation to codeEntry.py).
+Driver supports structured actant.llm.messages@1, existing managed
+model settings, validated providerOptions including reasoningEffort, and
+launch extraArgs. It does not expose dedicated MoE cache/drafting controls,
+request chat_template_kwargs or general request reasoning_format.
+
+REQUESTED CONFIGURATION SURFACE
+A. MoE: expose --moe-cache-mib as structured nonnegative MiB field, --cpu-moe
+all-expert CPU placement, retain --n-cpu-moe and existing offload controls.
+Keep explicit contrast with KV caching. Preserve extraArgs for unusual flags.
+B. Reasoning/thinking: separate server --reasoning on/off/auto,
+--reasoning-effort, --reasoning-budget, --reasoning-budget-message,
+--reasoning-format and supported history/preservation controls from request
+reasoning_effort, chat_template_kwargs (e.g. enable_thinking false),
+reasoning_format and optionally reasoning_control. Support server Jinja
+chat-template kwargs where available. Do not collapse these into a single
+thinking boolean or confuse suppressing/formatting reasoning output with
+disabling reasoning generation.
+C. Speculative decoding: expose --spec-type (none, draft-mtp,
+draft-simple, draft-eagle3, draft-dflash, draft-dspark, ngram variants),
+--spec-draft-n-max/min, optional auxiliary model, draft GPU placement,
+and relevant draft sampling/threshold controls. Accommodate method-specific
+options through validated structure when worthwhile and retain extraArgs for
+new experiments. Explicit no-speculation baseline; never silently enable it.
+Support only actual options of the pinned llama.cpp build; reject or clearly
+mark unsupported configurations rather than claiming them applied.
+
+COMPATIBILITY AND EVIDENCE
+- Verify exact upstream llama.cpp option spellings, availability, accepted
+  values and server/request scope against actual supported builds/versions,
+  especially recent MoE cache, drafting and thinking options.
+- Some features are chat-template, model or backend dependent. Record what was
+  requested, concrete server argv and request payload, build identity and any
+  provider-reported effective capabilities; do not claim honored behavior from
+  request acceptance alone. Keep observable reasoning content/metadata where
+  exposed instead of dropping it.
+- Avoid duplicate authority for structured flags versus extraArgs, with clear
+  conflict validation and no silent normalization/ignored options.
+- Distinguish server restart requirements from per-call changes, and preserve
+  existing shared managed-driver leases, cancellation, multi-application
+  ownership, and observation contracts. Do not bypass shared runtime control.
+- Model/control compatibility should be discovered by tests; do not hardcode
+  a universal model-specific compatibility table.
+- Preserve non-thinking baseline and optional telemetry; never activate
+  monitoring merely to use these options.
+- Tests should cover parsing/validation, command and payload formation,
+  unknown/unsupported options, conflicting args, output preservation,
+  shared lifetime/cancellation and actual configured profile identification.
+
+NEXT ACTION
+Integration: inspect current driver and upstream supported options; prepare
+bounded source/test work packages with owner, branch/baseline, compatibility
+and verification plan, and implement or delegate under ai-workflow protocol
+sections 11-12. Escalate genuinely new architectural/lifecycle decisions;
+do not broaden into an Experiment Runner implementation, optimization engine
+or automatic server restart policy without separate authorization.

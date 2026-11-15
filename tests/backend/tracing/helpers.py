@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/helpers.py ; version: 3
+# file: tests/backend/tracing/helpers.py ; version: 4
 from __future__ import annotations
 
 import threading
@@ -82,7 +82,7 @@ def operationsAfter(
 
 def createSinkTracer(
     *,
-    origin: str = "actant.test",
+    origin: str = "tertalis.test",
     **kwargs: object,
 ) -> Tracer:
     return Tracer(

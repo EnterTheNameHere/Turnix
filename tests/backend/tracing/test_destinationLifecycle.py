@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_destinationLifecycle.py ; version: 1
+# file: tests/backend/tracing/test_destinationLifecycle.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -42,7 +42,7 @@ def testDefinitionFailureIsReportedOnceUntilRegistrationRecovers() -> None:
     emergencyStream = StringIO()
     tracer = Tracer(
         destinations=(collector,),
-        origin="actant.test",
+        origin="tertalis.test",
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
     failing = ToggleDestination(failDefinitions=True)
@@ -53,7 +53,7 @@ def testDefinitionFailureIsReportedOnceUntilRegistrationRecovers() -> None:
 
     assert len(_recordsOfType(collector, "trace.destination-failed")) == 1
     assert emergencyStream.getvalue().count(
-        "[ACTANT TRACE DESTINATION FAILURE]",
+        "[TERTALIS TRACE DESTINATION FAILURE]",
     ) == 1
 
     failing.failDefinitions = False
@@ -62,7 +62,7 @@ def testDefinitionFailureIsReportedOnceUntilRegistrationRecovers() -> None:
 
     assert len(_recordsOfType(collector, "trace.destination-recovered")) == 1
     assert emergencyStream.getvalue().count(
-        "[ACTANT TRACE DESTINATION RECOVERED]",
+        "[TERTALIS TRACE DESTINATION RECOVERED]",
     ) == 1
     assert not any(
         record.type == "trace.destination-failed"
@@ -81,7 +81,7 @@ def testDefinitionFailureIsReportedOnceUntilRegistrationRecovers() -> None:
 
 def testRecordFailureUsesSameEdgeTriggeredHealthEpisode() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
     failing = ToggleDestination(failRecords=True)
 
     tracer.addDestination(failing)
@@ -99,8 +99,8 @@ def testRecordFailureUsesSameEdgeTriggeredHealthEpisode() -> None:
 
 def testSameDestinationGetsIndependentRegistrationPerTracer() -> None:
     shared = CollectingDestination()
-    first = Tracer(destinations=(shared,), origin="actant.first")
-    second = Tracer(destinations=(shared,), origin="actant.second")
+    first = Tracer(destinations=(shared,), origin="tertalis.first")
+    second = Tracer(destinations=(shared,), origin="tertalis.second")
 
     added = _recordsOfType(shared, "trace.destination-added")
     assert len(added) == 2  # noqa: PLR2004
@@ -116,7 +116,7 @@ def testSameDestinationGetsIndependentRegistrationPerTracer() -> None:
 def testRemoveAndReaddCreatesNewRegistrationIdentity() -> None:
     collector = CollectingDestination()
     target = ToggleDestination()
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
 
     tracer.addDestination(target)
     firstAdded = _recordsOfType(collector, "trace.destination-added")[-1]
@@ -136,7 +136,7 @@ def testRemoveAndReaddCreatesNewRegistrationIdentity() -> None:
 def testRemovingFailedDestinationCarriesFailureEpisodeSummary() -> None:
     collector = CollectingDestination()
     target = ToggleDestination(failRecords=True)
-    tracer = Tracer(destinations=(collector,), origin="actant.test")
+    tracer = Tracer(destinations=(collector,), origin="tertalis.test")
 
     tracer.addDestination(target)
     assert tracer.removeDestination(target)

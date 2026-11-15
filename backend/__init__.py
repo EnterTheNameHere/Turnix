@@ -1,6 +1,6 @@
-# file: __init__.py
+# file: backend/__init__.py ; version: 1
 """
-Trusted Actant platform implementation package.
+Trusted Tertalis platform implementation package.
 
 This package is backend/platform implementation code. It is not Pack code,
 not a content root, and not loaded through PythonExecutionAdapter.

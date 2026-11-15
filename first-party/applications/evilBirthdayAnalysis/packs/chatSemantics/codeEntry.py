@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 15
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 16
 from __future__ import annotations
 
 import hashlib
@@ -130,7 +130,7 @@ def _vocabulary(
     list[dict[str, object]],
     dict[str, object],
 ]:
-    """Loads one coherent vocabulary plus strong Actant source provenance."""
+    """Loads one coherent vocabulary plus strong Tertalis source provenance."""
     path = ctx.config.get("chatEmotesFile", "chatEmotes.json")
     if type(path) is not str:
         raise ValueError("Application config chatEmotesFile must be a string path.")
@@ -1709,7 +1709,7 @@ def _persistentLineSemantic(
     The logical address remains stable when source or processing changes.
     Memory-managed revisioning records successive authoritative states. The
     Pack owns the domain validity rule: exact raw input and vocabulary content
-    identity must still match. Actant automatically compares the persisted
+    identity must still match. Tertalis automatically compares the persisted
     producer identity with the currently executing CodeEntry implementation.
 
     File-level source observation is retained as provenance but deliberately

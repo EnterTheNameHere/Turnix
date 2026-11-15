@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_saveBundle.py ; version: 4
+# file: tests/backend/save/test_saveBundle.py ; version: 5
 from __future__ import annotations
 
 import pytest
@@ -49,7 +49,7 @@ def test_committed_state_snapshot_contains_only_reachable_chunks() -> None:
     state = _state()
     snapshot = state.snapshot()
 
-    assert snapshot["formatId"] == "actant.committed-values@2"
+    assert snapshot["formatId"] == "tertalis.committed-values@2"
     chunks = snapshot["chunks"]
     assert isinstance(chunks, list)
     assert len(chunks) == 1

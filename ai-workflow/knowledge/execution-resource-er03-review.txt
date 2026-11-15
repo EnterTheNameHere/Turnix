@@ -1,0 +1,143 @@
+ER-03 INTEGRATION CONCRETE PROPOSAL REVIEW
+=========================================
+Owner: Integration. Date: 2026-11-02.
+Reviewed canonical proposal: 646d8a6 (execution-resource-er03-proposal.txt).
+Worker: execution-resource-llamacpp; exact dispatch parent 897e491.
+Accepted source base: ER-01/02/R1 and LC-01/02/03 already integrated.
+
+Disposition
+-----------
+Changes requested at the mandatory proposal checkpoint. Do not begin production
+implementation yet. Return one compact proposal addendum resolving sections 1-3
+below, with exact API/phase/rollback sequencing. No renewed A/B/C decision is
+requested. Integration accepts the provider limitation in section 4 within the
+existing minimal-guarantee policy; it is not a reason to invent retained reuse.
+This review is source/design inspection, not runtime or implementation acceptance.
+
+Preserve the proposed stable host domain versus immutable residency catalog,
+exact Registration/issued-owner grants, ticket-based lease transfer, fail-closed
+managed facade, guarded substrate paths, no implicit transition, owned-process
+reap evidence, and explicit unknown-quiescence quarantine. ER-01/02 remain the
+only admission/ownership authority. No original worker source is to be replayed.
+
+1. Composition must precede application hooks, outside enclosing locks
+---------------------------------------------------------------------
+Source evidence at 646d8a6:
+- RuntimeHost.createApplication/loadApplication hold host._lane while calling
+  ApplicationLifecycle.create/load and registering the runtime.
+- ApplicationLifecycle activates the plan, then invokes create/load/run hooks,
+  saves authoritative state and starts the runtime before returning.
+- PackLoader.activatePack registers issued owners then scope.publish, and only
+  afterward appends the loaded Pack. lifetimeBoundary drains at the outermost
+  decorated call; nested activate/activatePack do not establish an earlier drain.
+
+Consequently a composition queue drained only at the existing outer host boundary
+binds too late for hooks that use LLM facilities, and composition failure can occur
+after persistence/start/host registration. Revoking only the exact provider does
+not roll back that already-completed lifecycle. Draining inside activate instead
+would still run under the enclosing host lane.
+
+Specify an explicit composition barrier after all required owners/registrations
+are published and before application hooks, authoritative creation commit/save,
+runtime start and public host registration. Describe host/runtime stop versus
+in-progress initialization, lookup/invocation exclusion, failed composition after
+partial binding, complete Pack/owner/module cleanup, and failure attribution.
+Do not solve this by broadly dropping serialized Job/transaction protection around
+arbitrary Pack code. New callbacks, rollback stop/wait and finalization must run
+outside the applicable host/runtime/registry/broker/domain lanes.
+
+If lifecycle.py or a bounded host initialization phase split is necessary, include
+it explicitly in the revised source list and describe the smallest change. That
+specific phase correction is reviewable; a general lifecycle redesign is not
+authorized. Cover both hosted create/load and supported standalone/direct
+PackLoader activation. Notifications from an abandoned/withdrawn activation must
+never later publish a binding. Test hooks that execute LLM work, failure before
+any application hook/save, and concurrent shutdown using Events and lock probes.
+
+2. Binding grants are a snapshot, not a mutable subscription
+-----------------------------------------------------------
+LlmExecutionBindings.bind copies profiles/grants, validates exact live owners and
+rejects a second binding/pending publication for the same exact registration.
+There is no accepted grant-extension API. The proposal's instruction to
+re-evaluate grants when later CodeEntries become available does not specify an
+implementable operation against these APIs.
+
+Prefer one composition barrier after the full activation plan has issued the
+intended caller/helper owners. Define subsequent activatePack behavior explicitly:
+new owners receive no implied grant; existing bindings/claims remain unchanged.
+Any necessary drained rebinding/new registration must have exact revocation,
+ticket-transfer and race semantics. Do not mutate binding internals, impersonate
+an old owner, or broaden future-owner authority. A new backend grant API would
+require separate concrete review and is not authorized by this proposal.
+
+3. Host policy and initial transition migration must be executable
+-----------------------------------------------------------------
+The explicit transition rule is accepted; retain it. Never implement automatic
+materialization in admit/ensureModel as a compatibility fallback. However the
+assignment also requires preserving live consumer and shared-lease contracts.
+Rejecting every previously managed activation without a newly supplied host
+policy is an operational migration, not merely an internal adapter change.
+
+Provide the exact trusted host configuration/composer entry point, actual
+CodeEntry/Registration selection rules, approved profile/catalog inputs and the
+caller/helper grant representation. Do not expose provider-specific machinery
+through the generic host or let Pack config mint domain/transition authority.
+Show a complete managed example from host construction through activation,
+authorized initial transition and first run. Also state the diagnostic for an
+unmigrated caller and inventory in-repository composition/tests that need updating.
+Do not edit consumer application branches under ER-03; record their adoption
+dependency explicitly. Do not keep an unguarded legacy managed mode to make old
+tests pass. Existing old live leases must neither be stolen nor stopped.
+
+4. Stock-provider retention/freshness limitation accepted, with bounded claims
+----------------------------------------------------------------------------
+Within the already accepted guarantee policy, supportsRetention=False and
+supportsRequiredFresh=False are acceptable for this stock HTTP adapter slice.
+Reject retain=True, required reuse and required freshness before provider IO.
+Never describe those rejections as completion of physical retained-context
+adoption. ER-01/02 retained handles/pins remain available backend facilities;
+the stock llama.cpp provider does not yet realize that capability. Preserve this
+Requires gap in state/knowledge/examples and the later real-asset gate.
+
+Best-effort FreshContext may request owned-slot cache_prompt=false, with truthful
+attempt/acknowledgement/unknown evidence. It does not attest all hidden-state
+reset. Optional erase must remain explicitly configured and owned; no injected
+save path, fake retained handle, silent replay, or startup/context-size changes.
+
+Independent source check: pinned server README describes id_slot and conditional
+prefix-cache reuse, rather than an atomic require-existing-context operation:
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/README.md
+The lack of a demonstrated adequate mechanism is enough to reject a required
+promise. This is not proof that every possible provider mechanism is impossible,
+nor validation of the user's actual binary/model behavior.
+
+5. Quiescence and cleanup acceptance conditions remain binding
+------------------------------------------------------------
+Keep local HTTP close distinct from provider completion. The proposed terminal
+plus post-terminal owned idle-slot check is a candidate source-backed normal
+completion rule, not yet actual-binary proof. Specify the exact terminal parser,
+request/slot correlation and bounded observation ordering; include a normal
+successful completion test that can release claims and permit later transition.
+EOF/[DONE] alone, an idle observation before a queued cancellation takes effect,
+foreign/wrong process or malformed/disabled slot observation cannot free a claim.
+
+Pinned server-context.cpp sends a final result and releases its slot on normal
+completion paths; retain exact source-backed ordering in implementation evidence:
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-context.cpp
+Actual transport/build behavior remains ER-04. Ambiguous requests stay unknown;
+no automatic recovery, arbitrary process kill or hidden retry. Partial startup,
+failed wait/kill and final ticket disposal retain exact cleanup ownership.
+
+Next deliverable / verification
+-------------------------------
+Publish a compact addendum and addressed reply to Integration on canonical
+actant-integration. Resolve the lifecycle barrier, later-owner grant behavior and
+concrete host migration above before production authorization. Existing adapter
+path/test inventory is otherwise a useful basis; preserve both original race
+reproductions and deterministic lock/publication tests. No further broad design
+proposal, new workstream, real inference, download or ER-04 dispatch is needed.
+
+Actual review evidence: clean Integration fast-forward to 646d8a6; inspection of
+proposal, assignment, accepted minimal-guarantee/ER-02 review, host/lifecycle/Pack
+activation, broker bind and driver stop paths; pinned upstream source retrieval.
+No runtime tests or real assets exercised; production source unchanged.

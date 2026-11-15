@@ -1,0 +1,81 @@
+FROM
+Experiment Runner design conversation (user-approved)
+
+TO
+integration
+
+SUBJECT
+Architectural review required: sequential Experiment Runner configuration switching
+
+STATUS
+Design investigation request; no Experiment Runner implementation assignment.
+
+GOAL
+Design a reusable Experiment Runner Application executing predefined structured
+multi-turn conversations sequentially across named model and llama.cpp setups,
+with one active experimental target configuration at a time. Additional selected
+draft-model weights may be part of that one configuration. Generated assistant
+responses join subsequent conversation history; prescribed messages do not
+change based on responses. Capture exact outputs, applied parameters and
+observations.
+
+ACCEPTED INPUT DIRECTION
+Central JSON5 execution file references an ordered messages JSON5 array and a
+named llama.cpp setup catalog JSON5. Messages use single role keys, such as
+{system:"..."}, {user:"..."}, {assistant:"..."}. User entries trigger
+generation; generated assistant responses enter later context. Setup titles
+must be unique; duplicates fail validation before execution. Output file naming
+uses patterns and OS exclusive-create collision handling when overwrite is off;
+other file errors propagate. No concurrent experiment models.
+
+SOURCE FINDINGS AT REQUEST
+- first-party/llmDrivers/llamaCpp/manifest.json selects structuredCodeEntry.py.
+- structuredCodeEntry.onLoad prepares configuration and obtains one host shared
+  service lease under serviceId llm.driver.llama.cpp.managed, with compatibility
+  key determined by the entire prepared configuration. Incompatible acquisition
+  raises SharedServiceConflictError, while compatible owners share a driver.
+- backend/runtime/sharedServices.py tracks lease lifetime/refcount but supplies
+  no exclusive execution arbitration.
+- codeEntry.LlamaCppDriver.ensureModel() reuses same selected live process or
+  calls stop() and _startModel() when selected model changes. It does not itself
+  establish protection from another Application's in-flight inference.
+- Recent LC-01/02/03 driver extensions cover MoE/reasoning/drafting and
+  private effective/requested configuration evidence, but don't authorize
+  arbitrary model/server transitions across shared Applications.
+
+REVIEW QUESTIONS
+1. Which existing authorized Application/host facility can request an
+   experiment run's model and server profile, including multiple named setups
+   on the same model with different startup flags, without direct process
+   control from the runner?
+2. Which changes are per-call-only and can reuse the current resident server?
+   Which require a different process/configuration lease? How are effective
+   launch configuration, build and request evidence verified for each run?
+3. How can a transition avoid interrupting an in-flight call owned by another
+   Application? Define run admission, busy/conflict behavior, safe waiting or
+   explicit denial; do not invent automatic preemption, restart authority,
+   eviction or resource policy without design approval.
+4. Who owns server leases/claims between successive runs? How do completion,
+   cancellation, failure, timeout, unload, and crash/recovery avoid stale
+   claims or silently changing another Application's service?
+5. How should sequential experiments interact with model residency and
+   auxiliary speculative draft weights? One experiment at a time does not
+   mean Actant's other Applications necessarily stop running.
+6. Can the current shared registry and managed llama.cpp driver satisfy
+   these constraints unchanged? If not, provide a minimum provider-neutral
+   lifecycle/arbitration seam and architecture choices for design-owner review.
+7. How to validate real inference/model behavior and observation publication
+   end to end, separating synthetic acceptance from hardware/server exercise?
+
+BOUNDARIES
+Do not implement the Experiment Runner, build a general scheduler, bypass shared
+lease authority, force-stop other Applications, assume global resource exclusivity,
+or silently restart shared services. No automatic tuning/optimizer. Preserve
+PM-01/02/03, G-01/02 and LC-01/02/03 accepted contracts, and ensure configuration
+records are not confused with proof that a model honored a setting.
+
+REQUESTED DELIVERABLE
+Record source/test findings with full Integration ref, recommended minimal
+design/contract, unresolved authority questions and proposed staged work
+packages in ai-workflow. Escalate consequential choices before committing to
+implementation. Follow ai-workflow coordination protocol sections 11-12.

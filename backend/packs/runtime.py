@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 13
+# file: backend/packs/runtime.py ; version: 17
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +11,8 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 from backend.context.codeEntryContext import CodeEntryIdentity
+from backend.llm.executionSessions import lifetimeBoundary
+from backend.llm.providerComposition import activateBatch, packUnloadBoundary
 from backend.core.runtimeIds import newRuntimeId
 from backend.registration import RegistrationScope
 from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
@@ -25,12 +27,14 @@ _APPLICATION_HOOK_NAMES = ("onApplicationCreate", "onApplicationLoad", "onApplic
 
 @dataclass(frozen=True, slots=True)
 class CodeEntryDefinition:
+    """Names one declared source entry within its owning Pack root."""
     codeEntryId: str
     source: str
 
 
 @dataclass(frozen=True, slots=True)
 class PackDefinition:
+    """Immutable discovered Pack identity and ordered CodeEntry declarations."""
     packId: str
     kind: str
     version: str
@@ -46,6 +50,7 @@ class ManualActivationPlan:
 
     @classmethod
     def fromJson(cls, value: object) -> "ManualActivationPlan":
+        """Validates a manual ordered activation list without dependency resolution."""
         if not isinstance(value, dict) or not isinstance(value.get("packs"), list):
             raise ValueError("Activation plan must contain a 'packs' list.")
         packIds = tuple(value["packs"])
@@ -66,11 +71,13 @@ class PackResolver:
     """
 
     def __init__(self, *, roots: tuple[Path, ...]) -> None:
+        """Binds configured discovery roots without loading or activating any Pack."""
         self._roots = tuple(root.resolve() for root in roots)
         self._candidatesByPackId: dict[str, tuple[PackDefinition, ...]] | None = None
 
     @staticmethod
     def _definition(manifestPath: Path, manifest: object) -> PackDefinition:
+        """Validates one manifest into immutable Pack/source declarations."""
         if not isinstance(manifest, dict):
             raise ValueError(f"Pack manifest must contain a JSON object: {manifestPath}.")
         packId = manifest.get("packId")
@@ -110,6 +117,7 @@ class PackResolver:
         )
 
     def _discover(self) -> dict[str, tuple[PackDefinition, ...]]:
+        """Snapshots manifest discovery once, preserving distinct version candidates."""
         cached = self._candidatesByPackId
         if cached is not None:
             return cached
@@ -131,6 +139,7 @@ class PackResolver:
         return snapshot
 
     def requireSingle(self, packId: str) -> PackDefinition:
+        """Requires an unambiguous configured Pack candidate; never chooses a version silently."""
         if type(packId) is not str or not packId:
             raise ValueError("Pack identity must be a non-empty exact string.")
         matches = self._discover().get(packId, ())
@@ -144,6 +153,7 @@ class PackResolver:
 
 @dataclass(slots=True)
 class _LoadedCodeEntry:
+    """Owns an executed module and its state until exactly scoped unload."""
     identity: CodeEntryIdentity
     pack: PackDefinition
     module: ModuleType
@@ -152,6 +162,7 @@ class _LoadedCodeEntry:
 
 @dataclass(slots=True)
 class _LoadedPack:
+    """Keeps activation entries and registration scope together for rollback/unload."""
     pack: PackDefinition
     entries: tuple[_LoadedCodeEntry, ...]
     registrationScope: RegistrationScope
@@ -166,12 +177,19 @@ class PackLoader:
     """
 
     def __init__(self, *, runtime: ApplicationRuntime, resolver: PackResolver) -> None:
+        """Binds one runtime/resolver and begins with no activated Pack ownership."""
         self._runtime = runtime
         self._resolver = resolver
         self._loadedPacks: list[_LoadedPack] = []
         self._activationBarrierReached = False
 
+    @lifetimeBoundary
     def activate(self, plan: ManualActivationPlan) -> None:
+        """Stage the full plan and compose outside lanes before its barrier."""
+        return activateBatch(self, lambda: self._activatePlan(plan))
+
+    def _activatePlan(self, plan: ManualActivationPlan) -> None:
+        """Activates the ordered plan and rolls back only entries prepared by this attempt."""
         self._runtime.requireOperational()
         checkpoint = len(self._loadedPacks)
         previousBarrier = self._activationBarrierReached
@@ -179,7 +197,7 @@ class PackLoader:
         self._runtime.trace("activation-plan-started", attributes={"packIds": list(plan.packIds)})
         try:
             for packId in plan.packIds:
-                self.activatePack(self._resolver.requireSingle(packId))
+                self._activatePack(self._resolver.requireSingle(packId))
         except Exception as activationError:
             cleanupErrors = self._closeLoadedPacks(self._loadedPacks[checkpoint:])
             del self._loadedPacks[checkpoint:]
@@ -199,7 +217,13 @@ class PackLoader:
         self._activationBarrierReached = True
         self._runtime.trace("activation-plan-completed", attributes={"packIds": list(plan.packIds)})
 
+    @lifetimeBoundary
     def activatePack(self, pack: PackDefinition) -> None:
+        """Compose one new Pack batch without enlarging existing binding grants."""
+        return activateBatch(self, lambda: self._activatePack(pack))
+
+    def _activatePack(self, pack: PackDefinition) -> None:
+        """Executes source entries provisionally, then atomically publishes their registrations."""
         self._runtime.requireOperational()
         self._activationBarrierReached = False
         if pack.kind == "appPack" and pack.packId != self._runtime.applicationRun.application.appPackId:
@@ -303,14 +327,17 @@ class PackLoader:
         )
 
     def invokeApplicationCreate(self, *, memoryView: CommittedValueTransaction) -> None:
+        """Invokes the app creation hook within its supplied uncommitted memory view."""
         if not isinstance(memoryView, CommittedValueTransaction):
             raise TypeError("onApplicationCreate requires a CommittedValueTransaction memoryView.")
         self._invokeApplicationHook("onApplicationCreate", memoryView=memoryView)
 
     def invokeApplicationLoad(self) -> None:
+        """Invokes the app load hook with a fresh, expiring invocation Context."""
         self._invokeApplicationHook("onApplicationLoad")
 
     def invokeApplicationRun(self) -> None:
+        """Invokes the app run hook after activation without extending its Context lifetime."""
         self._invokeApplicationHook("onApplicationRun")
 
     def _invokeApplicationHook(
@@ -319,6 +346,8 @@ class PackLoader:
         *,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> None:
+        """Dispatches only the defining AppPack hook and always invalidates its fresh Context."""
+        self._runtime.requireCompositionReady()
         self._runtime.requireOperational()
         if not self._activationBarrierReached:
             raise RuntimeError("Application lifecycle cannot run before the activation-plan barrier.")
@@ -366,7 +395,12 @@ class PackLoader:
             attributes={"hook": hookName, "appPackId": loadedPack.pack.packId},
         )
 
+    @packUnloadBoundary
+    @lifetimeBoundary
     def close(self) -> None:
+        """Revokes new controlled work before legacy unload, without waiting across lanes."""
+        if not self._runtime._llmClosePrepared:
+            self._runtime.prepareLlmClose(permanent=False)
         self._activationBarrierReached = False
         cleanupErrors = self._closeLoadedPacks(tuple(self._loadedPacks))
         self._loadedPacks.clear()
@@ -374,9 +408,12 @@ class PackLoader:
             raise ExceptionGroup("PackLoader cleanup reported errors.", cleanupErrors)
 
     def _closeLoadedPacks(self, packs: tuple[_LoadedPack, ...] | list[_LoadedPack]) -> list[Exception]:
+        """Revokes exact controlled bindings before withdrawing registrations and unloading entries."""
         errors: list[Exception] = []
         for loadedPack in reversed(tuple(packs)):
             self._runtime.trace("pack-unload-started", attributes={"packId": loadedPack.pack.packId})
+            for item in loadedPack.entries:
+                self._runtime.revokeLlmCodeEntry(item.identity.codeEntryInstanceId)
             loadedPack.registrationScope.withdraw()
             packErrors = self._unloadEntries(list(loadedPack.entries))
             errors.extend(packErrors)
@@ -391,6 +428,7 @@ class PackLoader:
         return errors
 
     def _unloadEntries(self, entries: list[_LoadedCodeEntry]) -> list[Exception]:
+        """Attempts each eligible onUnload once with fresh cleanup Context and aggregates failures."""
         errors: list[Exception] = []
         for item in reversed(entries):
             callback = getattr(item.module, "onUnload", None)
@@ -450,7 +488,7 @@ class PackLoader:
         implementationId = hashlib.sha256(identityMaterial).hexdigest()
 
         moduleName = (
-            f"_actant_{pack.packId.replace('.', '_')}_"
+            f"_tertalis_{pack.packId.replace('.', '_')}_"
             f"{definition.codeEntryId.replace('.', '_')}_{instanceId.replace('-', '_')}"
         )
         spec = importlib.util.spec_from_file_location(moduleName, sourcePath)

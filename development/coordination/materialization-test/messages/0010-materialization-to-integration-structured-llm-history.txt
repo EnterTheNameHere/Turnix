@@ -1,0 +1,87 @@
+MATERIALIZATION TEST -> INTEGRATION
+===================================
+
+SUBJECT
+Provider-neutral structured multi-turn LLM query support for the Classic
+materialization benchmark.
+
+STATUS
+Requested. Deferred until the current GPT-OSS-120B / llama.cpp pressure work is
+finished.
+
+CONTEXT
+The Materialization Test has two benchmark strategies.
+
+Actant-native intentionally reconstructs each inference as a fresh request from
+relevant authoritative state and therefore works with the current text/plain LLM
+query path.
+
+Classic must reproduce the historical accumulating conversation as closely as
+practical. The user/assistant turn boundaries are part of that benchmark input and
+must not be flattened into one synthetic user message.
+
+CURRENT LIMITATION
+The current first-party llama.cpp driver accepts text/plain queries and maps the
+entire payload to one /v1/chat/completions message:
+
+  {"role": "user", "content": <query payload>}
+
+Its token estimator likewise applies the model chat template to one synthetic user
+message. Materialization therefore cannot faithfully express or estimate a Classic
+conversation containing alternating user and assistant turns.
+
+REQUIRED SHARED CAPABILITY
+Actant needs a provider-neutral structured LLM query representation with at least:
+
+- ordered messages;
+- explicit user and assistant roles;
+- exact message text/content preservation;
+- a stable formatId distinct from text/plain;
+- exact preservation of the structured query in ProcessingRun evidence;
+- provider token estimation over the same structured messages used for inference.
+
+The first-party llama.cpp provider should map that representation directly to the
+messages array accepted by /v1/chat/completions, without flattening or adding
+synthetic conversational turns. Its token estimator should apply the active
+model's chat template to those same exact messages.
+
+Existing text/plain behavior must remain unchanged.
+
+CLASSIC HISTORY SEMANTICS
+Materialization owns construction of the accumulated benchmark conversation. In
+outline, Classic requires history such as:
+
+1. user: grounding reference + grounding response instruction
+2. assistant: grounding response
+3. user: initial materialization request
+4. assistant: generated source response
+5. user: analyzer diagnostics + correction instruction
+6. assistant: corrected source response
+7. further correction turns when needed
+8. user: self-audit instruction
+9. assistant: audited/fixed source response
+10. further analyzer/correction turns when needed
+11. user: questionnaire instructions + all 117 requirements once
+12. assistant: questionnaire response
+
+Exact phase behavior and which turns exist after failures remain owned by the
+Materialization application. Integration only needs to provide the reusable query,
+provider, estimation, and evidence substrate.
+
+BOUNDARY
+Do not create a Materialization-specific conversation schema inside the llama.cpp
+driver. The structured representation belongs to the shared LLM domain so other
+providers and applications can consume it.
+
+VERIFICATION EXPECTATION
+Shared tests should prove at minimum:
+
+- ordered user/assistant messages survive provider payload construction unchanged;
+- text/plain behavior remains unchanged;
+- token estimation uses the same structured messages;
+- invalid structured message shapes/roles fail at the appropriate contract boundary.
+
+PRIORITY
+Do not implement this request yet merely because it has been recorded. Current
+priority is the GPT-OSS-120B llama.cpp pressure work. Return to this request after
+that work is complete.

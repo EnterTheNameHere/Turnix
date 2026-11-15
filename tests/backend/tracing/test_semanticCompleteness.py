@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_semanticCompleteness.py ; version: 3
+# file: tests/backend/tracing/test_semanticCompleteness.py ; version: 4
 from __future__ import annotations
 
 import hashlib
@@ -96,20 +96,20 @@ def testExplicitSpanAndOriginConflictIsRejectedByDirectAndFluentApis() -> None:
     context = span.getContext()
 
     with pytest.raises(TraceContextError):
-        tracer.emitEvent(span=context, origin="actant.other")
+        tracer.emitEvent(span=context, origin="tertalis.other")
 
     with pytest.raises(TraceContextError):
-        tracer.event().span(context).origin("actant.other")
+        tracer.event().span(context).origin("tertalis.other")
 
     with pytest.raises(TraceContextError):
-        tracer.event().origin("actant.other").span(context)
+        tracer.event().origin("tertalis.other").span(context)
 
     span.complete()
 
 
 def testDefaultCustomOutcomeOverridesAreRecordLocal() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     definitionsBefore = tracer.getTraceTypeDefinitions()
     span = tracer.span().start()
 
@@ -138,7 +138,7 @@ def testDeclaredSpanTypeRejectsRecordLocalLabelOverride() -> None:
 
 def testLaterBuilderAttributesReplaceEarlierValues() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     (
         tracer.event()
@@ -156,7 +156,7 @@ def testLaterBuilderAttributesReplaceEarlierValues() -> None:
 
 def testDirectAndFluentEventApisProduceEquivalentSemantics() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     checkpoint = checkpointDestination(collector)
 
     eventType = TraceEventType(
@@ -202,7 +202,7 @@ def testDirectAndFluentEventApisProduceEquivalentSemantics() -> None:
         "outcome",
         "durationNs",
         "causedBy",
-        "actantRunId",
+        "tertalisRunId",
         "applicationId",
         "applicationRunId",
     )
@@ -212,7 +212,7 @@ def testDirectAndFluentEventApisProduceEquivalentSemantics() -> None:
 
 def testTraceReferencesAcceptTypedIdsAndDeduplicate() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     jobId = JobId.new()
     eventId = TraceEventId.new()
 
@@ -232,7 +232,7 @@ def testTraceReferencesAcceptTypedIdsAndDeduplicate() -> None:
 
 def testRejectedEndAttributesLeaveSpanActiveAndDoNotConsumeSequence() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     checkpoint = checkpointDestination(collector)
 
     span = tracer.span().start()
@@ -291,7 +291,7 @@ def testImportedSpanEndMayOmitDuration() -> None:
 
 def testDefaultEventLabelOverrideIsRecordLocal() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     definitionsBefore = tracer.getTraceTypeDefinitions()
 
     tracer.event().label("creator.notice").emit()
@@ -307,7 +307,7 @@ def testDefaultEventLabelOverrideIsRecordLocal() -> None:
 
 def testDefaultSpanStartLabelOverrideIsRecordLocal() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     definitionsBefore = tracer.getTraceTypeDefinitions()
 
     span = tracer.span().label("opened").start()

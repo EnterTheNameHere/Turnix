@@ -1,4 +1,4 @@
-# file: backend/tracing/emergency.py ; version: 3
+# file: backend/tracing/emergency.py ; version: 4
 from __future__ import annotations
 
 import sys
@@ -83,7 +83,7 @@ class TraceEmergencyReporter:
 
         """
         self._write(
-            "[ACTANT TRACE DESTINATION FAILURE] "
+            "[TERTALIS TRACE DESTINATION FAILURE] "
             f"registration={registrationId} {operation} failed for "
             f"{typeName(destination)}: "
             f"{typeName(err)}: {self._safeString(err)}",
@@ -109,7 +109,7 @@ class TraceEmergencyReporter:
 
         """
         self._write(
-            "[ACTANT TRACE DESTINATION RECOVERED] "
+            "[TERTALIS TRACE DESTINATION RECOVERED] "
             f"registration={registrationId} "
             f"destination={typeName(destination)}.",
         )
@@ -130,7 +130,7 @@ class TraceEmergencyReporter:
         """
         eventText = "unknown" if eventId is None else str(eventId)
         self._write(
-            "[ACTANT TRACE RECURSION] A destination attempted ordinary "
+            "[TERTALIS TRACE RECURSION] A destination attempted ordinary "
             "trace publication while consuming trace evidence; "
             f"event={eventText}.",
         )
@@ -153,7 +153,7 @@ class TraceEmergencyReporter:
 
         """
         self._write(
-            "[ACTANT TRACE ABANDONMENT FAILURE] Could not publish abandonment "
+            "[TERTALIS TRACE ABANDONMENT FAILURE] Could not publish abandonment "
             f"evidence for span {spanId}: {typeName(err)}: "
             f"{self._safeString(err)}",
         )
@@ -172,7 +172,7 @@ class TraceEmergencyReporter:
 
         """
         self._write(
-            "[ACTANT TRACE CONTEXT FAILURE] "
+            "[TERTALIS TRACE CONTEXT FAILURE] "
             + requireString(message, "message"),
         )
 

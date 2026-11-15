@@ -1,0 +1,326 @@
+EXPERIMENT RUNNER - SHARED EXECUTION TRANSITION REVIEW
+====================================================
+
+Owner: Integration. Date: 2026-11-02.
+Status: investigated working contract; A/B/C accepted with minimal-guarantee limits
+in the decision addendum below. Not a canonical design amendment or implemented
+API. ER-01 dispatch prepared; worker unassigned. Earlier approval-pending language
+records the original review and is superseded by that addendum.
+Full investigated Integration ref: 314870b7b9b2380612674319366aa8d808a6fc30.
+Request: mail/integration/archive/
+2026-11-01-experiment-runner-configuration-switching-review.txt.
+Work packages: assignments/execution-resource-transitions.txt (bounded preparation;
+no implementation dispatched; ER-04 real assets remain separately gated).
+
+Finding: current facilities are insufficient unchanged
+-----------------------------------------------------
+1. SharedServiceRegistry.acquire/releaseLease serializes lifetime/refcounts and
+   rejects a different compatibility key while a service exists. It neither admits
+   executions nor pins a model. All managed llama.cpp facades use the same service
+   ID llm.driver.llama.cpp.managed. PreparedConfiguration.compatibilityKey includes
+   the entire frozen config/catalog, relevant environment, cwd and config discovery.
+   Different standalone setup catalogs conflict even if a resident process is idle.
+   Conversely a shared catalog permits selecting different named profiles through
+   ensureModel. Changing service IDs/ports to evade this conflict is not arbitration.
+2. codeEntry.LlamaCppDriver.ensureModel (around 797) checks only activeModelName and
+   process.poll. A different named selection calls stop/_startModel without knowing
+   whether another facade owns an active response. Names can denote the same model
+   file with different startup settings. Multiple models mapped into one catalog
+   do not make sequential switching safe across Applications.
+3. structuredCodeEntry.getExecutionProfile resolves residency before returning an
+   estimator bound to the mutable driver. stream calls ensureModel separately.
+   streamingRuntime._resolveExecution obtains a profile before query construction;
+   prepareProcessing may call /apply-template and /tokenize later. Locking only
+   stop/start or the HTTP inference body leaves an estimation/profile race.
+4. ctx.llm exposes run/prepareProcessing/runProcessing and forwards Job cancellation;
+   there is no authorized execution-reservation/profile-transition facility today.
+   Provider registration and managed config loading are not a general right to
+   mutate another owner's server. No runner-side stop/process calls are appropriate.
+5. Response cancellation closes a local transport. It is not independently proven
+   that the server has stopped computing when close returns. Release rules must not
+   reinterpret cancellation-requested or Job-terminal as confirmed resource quiescence.
+6. ApplicationRuntime.close/Pack unload releases provider leases; host shutdown closes
+   shared services. Neither path currently establishes an execution-drain contract.
+   Last-lease close is not proof that an in-flight provider operation is finished.
+
+Existing design and working direction
+-------------------------------------
+DA-19 owns cancellation requests, execution-stop attempts and terminal Job outcomes;
+timeout is distinct from cancellation and committed state survives cancelled work.
+DA-28 owns host/shared-operation composition; IS-03 owns workspace/host locking, not
+GPU exclusivity or permission to stop a model. Read their actual docs/design paths,
+not rewrite_recommendations or upcoming material.
+knowledge/shared-runtime-resource-pressure.txt already proposes host-owned neutral
+residency/active claims, compatible reuse, idle replacement and typed active conflict.
+That remains noncanonical working direction. Experiment pressure adds full startup
+profile identity, an optional exclusive run reservation, and estimation-to-execution
+pinning. It does not authorize the previously proposed automatic idle policy by itself.
+
+Independent evidence at the investigated ref
+---------------------------------------------
+Integration Python 3.15.0b4:
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/first_party/llmDrivers tests/backend/runtime/test_sharedServices.py
+350 passed in 1.18s, zero skips. Existing tests cover lazy sharing, incompatible
+config rejection, final lease cleanup, cancellation and LC-01/02/03 surfaces.
+They do not establish active residency protection or an experiment reservation.
+No full suite rerun was needed for this documentation-only investigation; latest
+full accepted implementation result remains 1488 passed at ebb4ccc.
+
+Two deterministic diagnostic reproductions used the real structured provider/driver,
+fake Popen/health and synthetic SSE, with two catalog entries A/B referencing the
+same placeholder target but reasoning off/on. No model/process/server was launched:
+- Start A.stream and consume its first delta, retaining the open generator/response.
+  Call driver.ensureModel(B). The A fake process is terminated while A response is
+  still open; B becomes resident. Observed old_process_terminated=true and
+  stream_response_still_open=true. Two facades share that same driver by construction.
+- Obtain A's execution profile, select B, then use A's returned token estimator.
+  Intercept postJson: both /apply-template and /tokenize use active residency B.
+  Observed profile_selected_for=A, calls_used=[B,B].
+Diagnostic script is local ignored python-embedded/transition-review.py; this is
+reproduction evidence, not a new accepted Architectural Test or real-server result.
+No production source changed. No GPU/global-exclusivity or server-stop proof claimed.
+
+Proposed minimum neutral contract
+----------------------------------
+Keep three separate concepts:
+- Service participant lease: host-composed lifetime of one controlled domain and
+  its provider adapter. Long-lived Application registration may keep this lease.
+- Residency descriptor/generation: immutable selected target plus all startup
+  inputs, auxiliary weights, environment/cwd/config policy and observed build.
+  A draft model is part of that one descriptor, not an independently scheduled target.
+- Execution claim: admitted operation pinned to a descriptor/generation. Optional
+  exclusive run reservation encloses the experiment conversation and its turn calls.
+  Participant lease alone neither pins residency nor authorizes replacement.
+
+Domain identity is an explicitly configured controlled resource, not a model title,
+new port, physical-device guess, or whole mutable setup catalog. Host configuration
+defines which adapter/executable/transport/security envelope may serve that domain.
+Different backends/domains are not assumed to have disjoint hardware. Coordination
+is within one owning host; external servers and other host processes are not under
+this authority. General multi-host/device scheduling is outside this slice.
+
+Applications request an authorized opaque profile reference through a provider-neutral
+LLM/session facade. They do not pass arbitrary argv, mutate Pack config, reach into
+driver internals or release another owner's lease. A trusted provider/host binding
+resolves references to immutable descriptors. Catalog uniqueness is validated by the
+future runner before admission; a title is a label, not a reusable compatibility key.
+Exact API names/signatures and profile-registration authority require design review.
+
+Proposed immediate admission outcomes, atomically under the domain authority:
+- Empty and allowed: reserve a transition generation, materialize the requested
+  profile, verify readiness, then grant the operation. Do not grant while loading.
+- Compatible resident with no incompatible/exclusive claim: allow ordinary shared
+  operations if provider capacity permits. Full server-slot scheduling is deferred;
+  underlying capacity failure is explicit, never a silent policy queue.
+- Exclusive experiment reservation: grant only when all operations/reservations in
+  that domain have drained. While held, deny unrelated calls, even compatible ones.
+  Sequential turn operations within the owner's session reuse its pinned generation.
+- Incompatible but idle: transition only if the demand explicitly authorizes idle
+  replacement under host policy. Retain one transition owner; block new admissions
+  until old residency is released and the new one ready. No implicit preemption.
+- Busy/loading/draining/unknown-quiescence: return typed bounded contention evidence
+  and leave the resident service/owners untouched. No fairness/automatic retry/wait
+  guarantee. The caller may explicitly retry later within its own Job/deadline.
+Requester/owner evidence must be privacy-filtered; never expose another app's prompt,
+private argv, credentials or raw setup catalog as a contention diagnostic.
+
+Identity/claim coverage
+-----------------------
+All operations against the managed domain must participate, including existing
+Applications, both adapter/substrate entry paths, previews, token estimation and
+ordinary runProcessing. A runner-only lock is insufficient. A host-level coordinator
+must not coexist with an unguarded ensureModel/stop bypass on the same resource.
+Do not change SharedServiceRegistry into a model scheduler or merely weaken its
+whole-config conflict check. Migrate catalog config out of lifetime identity only
+when the new descriptor/admission enforcement is present end to end.
+
+For ordinary execution: acquire before profile resolution, retain through any
+template/tokenizer calls, query preparation and stream transport cleanup. Return
+immutable evidence tagged by residency generation. Release operation claims before
+unrelated completion-side work once execution is quiescent; the experiment's outer
+reservation remains. Reject overlapping/reentrant calls in one exclusive session
+initially rather than deadlocking or implicitly serializing arbitrary nested Jobs.
+For a standalone preview: acquire/release around preparation, return generation-tagged
+evidence, and revalidate/rebuild on later execution; a preview is not a durable pin.
+For an experiment: prefer one run-owned Job/session covering all turns, including
+history bookkeeping, released between configurations. Other work may win the next
+admission. Continuous exclusion across the entire suite would need a separate policy.
+
+The generic pipeline/provider boundary needs an admitted execution-session protocol
+(or equivalent explicit scoped object), so a profile/estimator cannot outlive its
+binding unnoticed. getExecutionProfile followed by stream is currently too weak.
+Owner identities derive from runtime/invocation authority, never caller-spoofed IDs.
+Provider callbacks run outside coordinator locks after a transition token is reserved;
+publish success/failure only if the generation still matches. No blocking callback
+under a global host/registry lock and no stale callback may clear a new generation.
+
+Startup versus per-call settings and evidence
+--------------------------------------------
+LC-02 providerOptions (temperature/sampling, maxTokens, reasoningEffort,
+reasoningFormat/chatTemplateKwargs) are per-call controls; reuse the same resident
+profile when only those change. Template-dependent behavior remains unverified until
+exercised. Server MoE/KV/placement/context/threads/load, startup reasoning/template
+defaults, speculation method/length/sampling/devices and auxiliary weights are
+startup descriptor changes. Same target file with different startup settings is
+still a different residency. Renaming a title alone need not restart the process.
+Conservative identity may reject reuse; never normalize unknown extraArgs semantics.
+
+Per experiment retain privately: requested profile/ref, resolved descriptor/generation,
+LC-01 requested/planned/actual argv/build/env and launch evidence, each concrete
+serialized request as sent (distinguish planned versus sent), response/usage/reasoning
+and observation interval provenance. Existing ProcessingRun providerOptions/query
+and providerMetadata help but are not by themselves a record of the exact wire body.
+Add explicit provider-scoped capture for selected consumers, not global raw logging.
+Do not treat health/HTTP success/help advertisement as proof of settings honored.
+Bound evidence/status on failed admission/startup/cancelled calls separately from
+successful results; preserve transaction rules and private/public metadata boundary.
+
+Completion/failure/cancellation/recovery
+---------------------------------------
+Operation handles release idempotently in finally on success, protocol failure,
+consumer close or observed cancellation, but mark the residency reusable only once
+provider quiescence is established. If local response close is insufficient evidence,
+retain a draining/quarantined residency and deny new execution/replacement until
+provider confirmation or an explicitly authorized owned-process shutdown/reap proves
+it safe. Never free a claim merely because a deadline/TTL/Job terminal state elapsed.
+Cancellation/timeout outcome remains Job-owned; the resource records stop/quiescence
+status independently and does not silently restart cancelled work.
+
+Application unload closes admission, requests cancellation of its own work, drains
+operations and releases its reservation/participant lease. Existing operations hold
+internal lifetime references until cleanup; one app unload must not stop another's
+calls. Host close drains under explicit shutdown authority; cleanup failures remain
+reported and the domain unavailable rather than falsely idle. If provider startup
+or unload fails, record failed/unknown residency and explicit recovery requirement;
+do not promise the previous model was restored or auto-retry a crashed request.
+Host restart does not restore Python handles/claims. Orphan managed processes require
+verified ownership/process identity and explicit recovery policy; never attach/kill
+an arbitrary PID/port or infer authority from persisted claim records. Cross-host
+crash recovery is a later gate, not claimed solved by an in-memory finally block.
+
+Consequential choices requiring design-owner/user decision
+---------------------------------------------------------
+Additional user requirement: fresh versus retained context (2026-11-02)
+---------------------------------------------------------------------
+Packs need explicit fresh inference context versus required reuse of retained
+context, independently of model residency. This clarification is design input,
+NOT approval of A/B/C or an implemented API. Current providerOptions exposes no
+slot/cache/context-handle controls.
+Pinned primary documentation exposes id_slot, cache_prompt (prefix KV reuse),
+/slots/{id}?action=erase and slot save/restore; chat completions accepts completion
+controls. It also warns caching may change numerical results through batch shapes:
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/README.md
+Actual binary/slot/reset/reuse behavior remains untested here.
+
+Extend the proposal with owner-scoped context handles bound to residency and
+context generations, separate from transcript, model weights and capacity:
+- Fresh: new logical context or reset of an owned idle context, excluding applicable
+  prompt-cache reuse and recording reset evidence; keep compatible weights resident.
+- Required reuse: same owned retained context and compatible rendered prefix/settings;
+  fail explicitly if state was evicted/lost/invalidated. Never silently rebuild when
+  physical reuse is required. Optional prefer-reuse/rebuild is a different policy.
+- Retained contexts pin residency/capacity even between calls; incompatible transitions
+  must respect them. Reject concurrent/foreign/stale handle use. Do not clear another
+  owner's slot. Cancellation may invalidate uncertain context state.
+- Conversation history remains authoritative in the Pack/Application; KV state is a
+  derived execution artifact. Ordinary chat calls still supply required history;
+  retaining a slot does not establish a server-side append-only conversation API.
+- Fresh state does not mean resizing contextWindowTokens, unloading weights, clearing
+  MoE weight caches, or a GPU-wide cold run. GPU retention depends on backend/placement.
+  Fresh context alone does not ensure deterministic output: prompt/template, RNG/
+  sampling, backend/build and execution/cache policy also need controlled validation.
+Tests/gates must prove reset/reuse evidence, no reload for same-model fresh runs,
+loss failure, owner isolation, generation invalidation and retained pins blocking
+transitions. Flag forwarding or repeated output alone is not sufficient proof.
+
+A. Recommend explicit exclusive reservation per experiment conversation, denying
+   unrelated same-profile calls too. Alternative: only prohibit incompatible
+   transitions; compatible calls may interfere with timing measurements.
+B. Recommend explicit idle-transition authorization against host-approved profile
+   references. Decide who registers/selects new catalogs and whether all ordinary
+   calls may replace idle residency or only authorized sessions. An idle service is
+   not sufficient authority by itself. No active preemption or hidden waiting.
+C. Approve the scoped pipeline/provider session contract and an initial fail-closed
+   quiescence rule. Local HTTP close alone cannot be assumed to stop server work;
+   real-provider evidence may force a bounded recovery mechanism before reuse.
+These are proposals. No implementation starts until these choices are resolved.
+
+Real-asset validation gate (separate from synthetic acceptance)
+--------------------------------------------------------------
+Use an explicitly selected executable/model/backend/template and controlled host
+domain; record version/help/hash, environment/config inputs and model identity.
+Start with disabled speculation and nonthinking request, then one reasoning and
+one auxiliary setup supported by those assets. Capture requested/actual/effective
+evidence separately, native usage, outputs and reasoning. Exercise two Applications:
+hold an active call/reservation, attempt incompatible admission, verify typed denial
+and unchanged original output/process; then drain and perform authorized transition.
+Exercise close/cancel/timeout and prove server quiescence before subsequent admission.
+Opt in to provider-neutral PM observation; publish a selected same-app G-01 read
+grant and inspect G-02, then revoke/teardown without retaining sources. Do not infer
+global GPU exclusivity or performance improvement from that run. No weights downloaded,
+models started, monitoring activated or consumer branches changed by this review.
+
+
+DESIGN-OWNER DECISION (2026-11-02): MINIMAL GUARANTEES, A/B/C ACCEPTED
+---------------------------------------------------------------------
+The user approves A, B and C as the minimal direction, with the simplifications
+below. This supersedes their "awaiting approval" label above; detailed API
+signatures and implementation details still require bounded Integration review.
+This records an architectural direction, not implementation acceptance.
+
+A. One experiment conversation may explicitly reserve exclusive admission in a
+   controlled execution domain. Deny unrelated Actant operations in that domain
+   while held, including compatible calls. No GPU-global exclusivity, unrelated
+   process authority, automatic queue or hidden preemption.
+B. Explicit host-authorized idle residency transition to an approved immutable
+   profile. Busy/unknown operations are not forcibly replaced; report a typed
+   conflict. No automatic waiting/retry policy; the Pack decides what to do next.
+C. Scoped execution/session ownership across profile resolution, estimation,
+   preparation, stream and cleanup, with fail-closed handling of uncertain
+   quiescence. Local transport closure is not proven server termination.
+
+GENERAL RESPONSIBILITY
+Actant guarantees structural invariants that it controls: claim/handle ownership,
+lifetime and authorization, no deliberate incompatible transition during protected
+execution, scoped session validity, and truthful outcomes. A driver's best-effort
+operation is NOT evidence of an unrequested stronger guarantee. Provider-specific
+controls remain available only behind appropriate Actant ownership boundaries.
+Packs choose conversation data, requested freshness/reuse, application overflow
+policy, recording and their own acceptable uncertainty.
+
+GUARANTEE POLICY
+Default for provider-dependent behavior is best effort, with accurate reporting
+of what was attempted, acknowledged, failed or remains unknown. Do not silently
+ignore an operation, substitute fresh for required reuse, or report unknown effects
+as guaranteed. If a creator explicitly requires a stronger contract and Actant/
+the driver cannot fulfill that specific promise, reject that requirement rather
+than silently downgrade it. No universal attestation hierarchy, comprehensive
+provider-state discovery, generic verification framework or full general contract
+engine is authorized. Small standard lifecycle vocabulary with optional specific
+driver controls is sufficient initially. Some implicit platform guarantees are
+mandatory because they are how the interface remains safe.
+
+STATE SEMANTICS
+Fresh logical inference state and optional retained state are distinct from
+resident model weights, context-window settings and GPU warm/cold status. Offer
+minimal fresh/reuse operations and owner-scoped handle invalidation. Retained
+physical state loss must not silently become replay/rebuild when reuse was
+explicitly required. Drivers own provider mechanisms (slots, KV/prefix caches,
+sampler/speculation details) and should acknowledge the precise operation they
+performed without promising all hidden state was reset. A Pack may accept a
+best-effort reset or ask for a stronger contract if later supported.
+Context overflow behavior belongs primarily to the Pack, while drivers report
+limits and errors and must not silently alter an explicitly fixed experiment.
+Opaque export/import, universal snapshot persistence, complete hidden-cache
+isolation, bit-identical output and exhaustive determinism testing are deferred
+unless a concrete consumer establishes the need. Keep handle design extensible
+without building those facilities now.
+
+IMPLEMENTATION BOUNDARY
+ER-01/02/03 may be prepared as bounded, separately reviewable packages using
+the above agreed direction; preserve their gated combined rollout. ER-04 remains
+a separately scoped real-binary/model verification gate, not synthetic proof or
+permission to start models/download weights. No Experiment Runner application
+implementation or broad scheduling/resource arbitration is authorized by this
+decision. Integration should refresh assignment/state language and propose
+concrete dispatch under the established coordination protocol.

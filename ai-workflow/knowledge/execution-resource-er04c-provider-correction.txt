@@ -1,0 +1,172 @@
+ER-04C PROVIDER CLEANUP CORRECTION - IMPLEMENTATION / ACCEPTANCE
+==============================================================
+Owner/implementer/reviewer: Integration, direct implementation. Date: 2026-11-03.
+Starting Integration parent: bdb5bfda067b6948eb218ed59728caefa05548c3.
+Authorization: d93fac5, mail/integration/archive/2026-11-03-er04c-provider-cleanup-correction-approval.txt.
+Provider/test/tool source: d027870. Pre-header probe refinement: fff7ea8.
+Provider contract documentation / safe-run source: 11b92e2.
+
+Decision and scope
+-------------------
+The bounded provider-specific correction is implemented and accepted on
+actant-integration. Six supervised native-correlated real abort cases now return
+confirmed cleanup through ordinary ER-01/02 finalization while preserving the
+original Cancelled/Failed Job. Each returned the domain to READY before normal
+runtime shutdown. No emergency disposal was needed in this corrected series.
+Backend claim/lifecycle authority, public facade/API, LC/PM/G contracts and
+consumer branches are unchanged. No worker or external reviewer was used;
+Integration separately reviewed source, tests and actual private case artifacts.
+
+Acceptance is specifically native-bound abort cleanup. The original active
+cancel/early-close/timeout cases have real evidence, as does blocked-body stop.
+Do NOT promote this to an unconditional full ER-04/all-abort guarantee: actual
+pre-header native capture remained inconclusive. If a transmitted operation has
+no adequate native binding, the implemented result remains UNKNOWN. Deterministic
+claim tests and real loopback tests cover interruption/unknown behavior at that
+boundary. No later idle snapshot or process exit repairs a tombstone.
+
+Production implementation
+--------------------------
+first-party/llmDrivers/llamaCpp/ownedTransport.py owns one HTTP operation and its
+raw socket. Connect, send and receive use nonblocking sockets and short bounded
+wait slices that check stop. This avoids Windows behavior where shutdown of a
+timeout-mode socket alone did not promptly wake a buffered read. The callback
+only marks stop/shuts down/closes its exact raw socket; HTTPResponse and its
+BufferedReader are finalized by the owning reader. Partial-open/pre-header stop,
+repeated stop and one-time final close have explicit ownership. Known pre-send
+stop is distinct from possible server acceptance. Address resolution itself is
+not promised interruptible. Managed HTTP has no proxy/redirect/reconnect fallback.
+
+executionAdapter.py first verifies the owned native slot is idle, then sends
+exactly one request to that slot. Before yielding a first nonterminal SSE event
+it attempts to bind a new integer id_task while that slot is actively processing.
+It keeps the SSE completion ID separate, rejects stale/non-advancing/native
+boolean IDs, and poisons correlation on conflicting stream identity. Existing
+managed slot bookkeeping excludes another queued request for that same slot;
+independent HTTP clients must not bypass it. This is not hostile-client isolation.
+
+Before finalizing an abort, closeExecution checks that the reader has finished
+and the exact process object, residency token and cleanup ticket remain current.
+Revocation removes new-execution authority, not the exact ticket's cleanup right.
+Two matching same-task idle acknowledgements can confirm quiescence, within at
+most two seconds and the request timeout. Slot JSON uses a remaining absolute
+deadline and 1 MiB cap through its own owned transport. Wrong/missing/stale IDs,
+changed process/generation, malformed replies, deadline expiry, active readers
+or uncertain final close stay UNKNOWN. Result caching prevents duplicate
+finalization or later evidence from repairing an unknown disposition.
+
+Normal completion retains native terminal/consistent ID/DONE plus owned-slot
+idle proof, additionally checking bound task identity when available. No native
+debug-log dependency was introduced; logs independently corroborate test evidence.
+No universal resumable header/DELETE policy or process recovery was added.
+Required retention/physical freshness remain unsupported. External mode unchanged.
+
+Deterministic and real-socket verification
+-----------------------------------------
+New durable cases exercise exact task release; missing/boolean/negative/reused/
+stale/foreign IDs; busy native slot before send; malformed/multiple slot sets;
+native completion racing cancellation; changed process/residency; repeated stop;
+successful/unknown duplicate finalization; late replies/deadline; failed reader
+close; host/application revocation and cleanup after admission withdrawal.
+Real loopback HTTP cases stop both pre-header and blocked-body reads before the
+peer releases data, checking only the reader performs buffered close. Connect
+interruption cannot send or reconnect after stop. Existing R1/R2 race tests pass.
+Existing bad-native identity tests still require UNKNOWN; their auxiliary-IO
+expectations account for the new baseline/binding reads. The LC combined fixture
+now substitutes owned transport instead of urllib, preserving payload, separate
+reasoning, startup gate, privacy and evidence assertions.
+
+Own Python 3.15.0b4 / pytest 9.2.0:
+  final focused: 148 passed in 4.11s, zero skips;
+  relevant combined: 928 passed in 9.92s at d027870 (before one probe-only test);
+  final full: 1779 passed in 11.99s, zero skips at 11b92e2.
+The initial broad run found one outdated LC fake-HTTP seam (1777 pass/1 fail);
+it was adapted to owned transport, without weakening its contract assertions.
+Python AST, exact repository-path/version increments, all class/function/private/
+magic docstrings and git diff checks passed. No Ruff claim. Embedded-home warning
+persists. Source changes are provider/test/harness only; no backend code changed.
+
+Corrected actual abort series
+------------------------------
+Same supplied binary/model SHA-256 identities as prior cef285a evidence. Binary
+0.8.0-dev/build12031/060b2fea4, Windows AMD64; executable SHA-256:
+f727ec0b2b18095982433b86768ce49470e79008170936d5656143b870109493.
+CPU-only/context1024/token24/threads4/one process-slot-request per abort case.
+No download/copy, port takeover, automatic retry or resource-ceiling increase.
+The interactive operator issued each run/status/finish command separately.
+
+Six actual aborts: job-cancel, disconnect, early-close, read-timeout, stream-delete
+(private opt-in test variant only), and blocked-job-cancel. All six captured
+native active task identity, recorded exact native cancellation/release, matched
+the production adapter's private native binding, and independently observed the
+same task idle twice. All production cleanup effects were ACKNOWLEDGED/CONFIRMED,
+claim counts drained and state READY before shutdown; original Jobs remained
+Cancelled/Failed. Native terminal/DONE was absent on those abort streams.
+Timeout retained actual TimeoutError beneath LlmProviderConnectionError.
+The blocked-body case observed the actual owned raw read wait; stop returned
+about 0.0008s after that boundary and cleanup completed about 0.2973s afterward.
+These are individual bounded observations, not latency promises or benchmarks.
+
+Two pre-header attempts were INCONCLUSIVE, never relabeled as active aborts:
+the first sampled idle before native activation; a probe-only bounded polling
+refinement then lost the boundary because headers arrived before reliable active
+capture. Both were allowed to complete normally, returning Succeeded/confirmed
+normal cleanup. No token ceiling was raised or synthetic native stop fabricated.
+Pre-header interruption is verified by real loopback/deterministic tests, but
+actual llama.cpp task-correlated pre-header abort remains unverified.
+
+All eight case children closed through ordinary runtime cleanup after confirmed
+claim release. Zero emergency terminate/kill commands, tombstone repairs, manual
+claim finishes or quarantined-domain reuse. All operator sessions and workers
+exited. The prior emergency-disposal approval remains test-only if later needed.
+
+Normal real-provider regression / separate phase accounting
+-----------------------------------------------------------
+An additional actual --phase all run at 11b92e2 revalidated 04A/B/D/E and safe
+04C: 32 checks, ten native completed calls, same-weight fresh reuse, explicit
+transitions, two-Application contention, owner teardown, template/tokenize,
+real PM/G-01/G-02 authenticated viewer/revocation, bounded Qwen controls and
+confirmed cleanup of all seven sequential owned launches.
+31 hardware samples; unavailable metrics remain distinct from zero, no GPU
+inference or attribution claim. Connected/revoked screenshots inspected; revoked
+view clears prior data. Qwen low/high distinction is still inconclusive at the
+24-token cutoff. Reasoning stays separate/private.
+
+The standalone all run intentionally reports 04C blocked with reason
+active-aborts-require-separate-supervised-probes: it does not run unattended
+aborts or import another run as its own proof. Its JSON has no failed scenario
+or cleanup; gate projection is exit 2, while the PowerShell output pipeline
+returned 1 for that non-success exit. The six supervised cases supply separate
+reviewed native-bound abort evidence, not a rewrite of the standalone run.
+Do not claim a single unconditional all-phase CLI pass or full pre-header gate.
+
+Reviewed evidence and reproduction
+-----------------------------------
+Shared allowlist: tools/executionResourceValidation/verification/corrected-abort-summary.json.
+Private review manifest: python-embedded/er04-local/corrected-abort-review.private.json.
+Safe regression folder: python-embedded/er04-local/20261103-091641-ed124e38/.
+Raw models/config/argv/prompts/partial answers/reasoning/task IDs/handles/logs/
+screenshots remain ignored. Private artifacts were separately replayed for sole
+launch identity, exact task matching, terminal absence, provider cleanup effect,
+READY before CLOSED, preserved Job state, actual child exit and no workers.
+Both model and binary hashes match prior evidence. All these checks passed.
+Do not publish the private manifest or native identifiers.
+
+From checkout root (each abort invocation requires operator supervision):
+  .\python-embedded\python.exe -X frozen_modules=off -m tools.executionResourceValidation.abortProbe --config python-embedded/er04-local/config.json --case job-cancel
+Other cases: disconnect, early-close, read-timeout, stream-delete,
+blocked-job-cancel, pre-header-cancel. The last may legitimately be inconclusive.
+Use run TOKEN / status / finish TOKEN. Explicit emergency disposal is allowed
+only if that case's actual cleanup remains unknown/failed, never to pass a gate.
+  .\python-embedded\python.exe -X frozen_modules=off -m tools.executionResourceValidation.run --config python-embedded/er04-local/config.json --phase all
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib --tb=short tests
+
+Continuation
+--------------
+Approved bounded implementation is delivered; native-bound abort cleanup is
+accepted. No further correction is inferred from inconclusive pre-header capture:
+its missing-identity UNKNOWN contract remains intentional and tested. Further
+actual pre-header/stuck-decode validation, stronger provider receipts, required
+retention/freshness, consumer adoption and broader policy are separate work.
+Current consumers still need trusted composition/grants and explicit transitions;
+no application migration or production recovery policy was performed.

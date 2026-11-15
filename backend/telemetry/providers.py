@@ -1,0 +1,198 @@
+# file: backend/telemetry/providers.py ; version: 4
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING, Protocol
+
+from backend.telemetry.model import (
+    CpuStaticObservation,
+    CpuUtilizationObservation,
+    GpuObservation,
+    SignalUnavailable,
+    SwapObservation,
+    SystemMemoryObservation,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class MachineTelemetryProvider(Protocol):
+    """Defines host CPU and memory observations required by the telemetry service."""
+
+    def primeCpu(self) -> None:
+        """Primes non-blocking CPU counters without publishing their first result."""
+        ...
+
+    def systemMemory(self) -> SystemMemoryObservation:
+        """Returns current physical-memory values."""
+        ...
+
+    def swap(self) -> SwapObservation:
+        """Returns current swap/pagefile values."""
+        ...
+
+    def cpuStatic(self) -> CpuStaticObservation:
+        """Returns physical and logical CPU topology."""
+        ...
+
+    def cpuUtilization(self) -> CpuUtilizationObservation:
+        """Returns non-blocking aggregate and per-logical-core utilization."""
+        ...
+
+
+class GpuTelemetryProvider(Protocol):
+    """Defines observation of the currently relevant GPU device."""
+
+    def gpu(self) -> GpuObservation:
+        """Returns one current GPU observation."""
+        ...
+
+    def close(self) -> None:
+        """Releases provider resources when applicable."""
+        ...
+
+
+class PsutilMachineTelemetryProvider:
+    """Maps psutil host observations without redefining provider memory semantics."""
+
+    def __init__(self, psutilModule: object | None = None) -> None:
+        """Binds to psutil, permitting an injected module seam for deterministic tests."""
+        self._psutil = import_module("psutil") if psutilModule is None else psutilModule
+
+    def primeCpu(self) -> None:
+        """Primes both aggregate and per-core psutil CPU percentage counters."""
+        self._psutil.cpu_percent(interval=None, percpu=False)
+        self._psutil.cpu_percent(interval=None, percpu=True)
+
+    def systemMemory(self) -> SystemMemoryObservation:
+        """Preserves psutil virtual-memory total, available, used, free, and percent."""
+        value = self._psutil.virtual_memory()
+        return SystemMemoryObservation(
+            totalBytes=int(value.total),
+            availableBytes=int(value.available),
+            usedBytes=int(value.used),
+            freeBytes=int(value.free),
+            usagePercent=float(value.percent),
+        )
+
+    def swap(self) -> SwapObservation:
+        """Preserves psutil swap/pagefile capacity values without claiming paging rate."""
+        value = self._psutil.swap_memory()
+        return SwapObservation(
+            totalBytes=int(value.total),
+            usedBytes=int(value.used),
+            freeBytes=int(value.free),
+            usagePercent=float(value.percent),
+        )
+
+    def cpuStatic(self) -> CpuStaticObservation:
+        """Returns psutil physical/logical counts while representing unknown counts explicitly."""
+        physical = self._psutil.cpu_count(logical=False)
+        logical = self._psutil.cpu_count(logical=True)
+        return CpuStaticObservation(
+            physicalCores=(
+                int(physical) if physical is not None else SignalUnavailable("physical CPU count unavailable")
+            ),
+            logicalCores=(
+                int(logical) if logical is not None else SignalUnavailable("logical CPU count unavailable")
+            ),
+        )
+
+    def cpuUtilization(self) -> CpuUtilizationObservation:
+        """Returns already-primed non-blocking CPU utilization observations."""
+        aggregate = float(self._psutil.cpu_percent(interval=None, percpu=False))
+        perCore = tuple(float(value) for value in self._psutil.cpu_percent(interval=None, percpu=True))
+        return CpuUtilizationObservation(aggregatePercent=aggregate, perLogicalCorePercent=perCore)
+
+
+class NvmlGpuTelemetryProvider:
+    """Observes one NVIDIA GPU through NVML while degrading optional sensors independently."""
+
+    def __init__(self, *, deviceIndex: int = 0, nvmlModule: object | None = None) -> None:
+        """Initializes NVML and selects one device by index."""
+        if type(deviceIndex) is not int or deviceIndex < 0:
+            raise ValueError("deviceIndex must be a non-negative exact integer.")
+        self._nvml = import_module("pynvml") if nvmlModule is None else nvmlModule
+        self._nvml.nvmlInit()
+        try:
+            self._handle = self._nvml.nvmlDeviceGetHandleByIndex(deviceIndex)
+        except Exception:
+            self._nvml.nvmlShutdown()
+            raise
+        self.deviceIndex = deviceIndex
+        self._closed = False
+
+    def _optional(
+        self,
+        label: str,
+        read: Callable[[], object],
+        transform: Callable[[object], object],
+    ) -> object:
+        """Reads one optional sensor and converts unsupported/failing reads to unavailable."""
+        try:
+            return transform(read())
+        except Exception as err:
+            return SignalUnavailable(f"{label} unavailable: {type(err).__name__}")
+
+    def gpu(self) -> GpuObservation:
+        """Returns required GPU memory/utilization plus best-effort diagnostic sensors."""
+        memory = self._nvml.nvmlDeviceGetMemoryInfo(self._handle)
+        utilization = self._nvml.nvmlDeviceGetUtilizationRates(self._handle)
+        name = self._nvml.nvmlDeviceGetName(self._handle)
+        if isinstance(name, bytes):
+            name = name.decode("utf-8", errors="replace")
+        temperatureSensor = getattr(self._nvml, "NVML_TEMPERATURE_GPU", 0)
+        graphicsClock = getattr(self._nvml, "NVML_CLOCK_GRAPHICS", 0)
+        memoryClock = getattr(self._nvml, "NVML_CLOCK_MEM", 2)
+        return GpuObservation(
+            deviceIndex=self.deviceIndex,
+            name=str(name),
+            totalVramBytes=int(memory.total),
+            usedVramBytes=int(memory.used),
+            freeVramBytes=int(memory.free),
+            gpuUtilizationPercent=float(utilization.gpu),
+            memoryControllerUtilizationPercent=float(utilization.memory),
+            temperatureCelsius=self._optional(
+                "temperature",
+                lambda: self._nvml.nvmlDeviceGetTemperature(self._handle, temperatureSensor),
+                float,
+            ),
+            powerDrawWatts=self._optional(
+                "power draw",
+                lambda: self._nvml.nvmlDeviceGetPowerUsage(self._handle),
+                lambda value: float(value) / 1000.0,
+            ),
+            powerLimitWatts=self._optional(
+                "power limit",
+                lambda: self._nvml.nvmlDeviceGetEnforcedPowerLimit(self._handle),
+                lambda value: float(value) / 1000.0,
+            ),
+            graphicsClockMhz=self._optional(
+                "graphics clock",
+                lambda: self._nvml.nvmlDeviceGetClockInfo(self._handle, graphicsClock),
+                int,
+            ),
+            memoryClockMhz=self._optional(
+                "memory clock",
+                lambda: self._nvml.nvmlDeviceGetClockInfo(self._handle, memoryClock),
+                int,
+            ),
+            performanceState=self._optional(
+                "performance state",
+                lambda: self._nvml.nvmlDeviceGetPerformanceState(self._handle),
+                str,
+            ),
+            fanSpeedPercent=self._optional(
+                "fan speed",
+                lambda: self._nvml.nvmlDeviceGetFanSpeed(self._handle),
+                float,
+            ),
+        )
+
+    def close(self) -> None:
+        """Shuts down this provider's NVML session once."""
+        if self._closed:
+            return
+        self._closed = True
+        self._nvml.nvmlShutdown()

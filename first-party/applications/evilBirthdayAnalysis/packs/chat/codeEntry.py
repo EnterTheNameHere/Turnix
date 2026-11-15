@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 6
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 7
 from __future__ import annotations
 
 import math
@@ -232,7 +232,7 @@ def _records(
 ) -> tuple[list[dict[str, object]], list[datetime], datetime, dict[str, object]]:
     """Returns parsed chat plus provenance for exactly the consumed source bytes.
 
-    Actant's observed read couples content identity to the bytes actually read.
+    Tertalis's observed read couples content identity to the bytes actually read.
     The Pack cache therefore compares strong content identity rather than
     treating filesystem metadata as proof of equality.
     """

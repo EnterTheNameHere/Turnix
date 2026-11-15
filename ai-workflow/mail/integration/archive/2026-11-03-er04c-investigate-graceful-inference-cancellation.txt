@@ -1,0 +1,106 @@
+FROM
+Actant design owner (user-confirmed direction; source investigation)
+
+TO
+integration
+
+SUBJECT
+ER-04C: investigate existing llama.cpp inference cancellation before any process-termination fallback
+
+STATUS
+request / design-owner direction
+
+CONTEXT
+ER-04 local harness is delivered at 7b6c6d5 and bounded actual run at cef285a.
+04A/B/D/E are verified; 04C active cancellation, early-close, and transport
+timeout remain blocked pending safe quiescence/cleanup evidence. The design owner
+requested that we first check for a usable existing way to stop inference, and
+accepted a bounded investigation before deciding on supervised exact-owned-process
+termination. Do not interpret this request as authorization for automatic
+termination/restart/recovery or to clear unknown ownership.
+
+SOURCE FINDING (PINNED LLAMA.CPP, NOT YET REAL-TESTED)
+Actual reported binary 0.8.0-dev build 12031, source
+060b2fea4ed528810ddc91d48fb22b3e4d63eb85.
+Pinned upstream source tools/server/server-queue.cpp:
+  server_response_reader::~server_response_reader calls stop();
+  stop() posts SERVER_TASK_TYPE_CANCEL for unfinished task IDs with queue
+  priority, removing result waiters.
+Pinned tools/server/server-context.cpp:
+  SERVER_TASK_TYPE_CANCEL matches task ID and releases the slot;
+  ordinary SSE handling observes req.should_stop(), exits streaming,
+  and reader destruction may issue cancellation.
+Pinned tools/server/server-http.cpp connects HTTP connection-closed checks to
+request lifetime/stream cleanup.
+The public POST /v1/chat/completions/control in this pinned build only
+accepts action reasoning_end; the internal RESPONSE_CANCEL action is not
+exposed as a general chat HTTP stop. POST /slots/{id}?action=erase is cache
+management, not task cancellation. WebSocket response.cancel applies to
+realtime sessions, not ordinary chat completion streams.
+These source observations suggest a graceful cancellation route through
+client disconnect, but DO NOT establish that the real server detects close,
+cancels the exact running inference, reaches quiescence promptly, or exposes
+sufficient task-correlated evidence to safely release ER-01 claims.
+
+REQUEST / IMPLEMENTATION BOUNDARY
+1. Analyze the exact pinned provider/ER-03 stream lifecycle, cancellation
+   propagation, native task IDs and /slots state, documenting any mismatch or
+   available stronger API. Include a deterministic fake-IO test if helpful.
+2. Prepare a narrowly scoped, operator-supervised, bounded real-provider
+   probe for active cancellation, early stream close and transport timeout.
+   Retain the original owned process/slot/generation and correlate the cancel
+   target before/after, with exact native IDs where available. Observe completion,
+   cancellation indication, slot state and actual process identity; an arbitrary
+   idle slot or successful HTTP close is NOT by itself proof of exact-task
+   quiescence. Never repurpose unrelated task/slot/process observations.
+3. Do not run a destructive/unattended live abort test unless cleanup disposition
+   and operator control are adequate for a potentially stuck inference. If safe
+   bounded execution is not achievable under current authorization, deliver the
+   probe/plan and report BLOCKED with the concrete missing evidence/policy.
+4. If a graceful path can establish sufficient quiescence, propose the smallest
+   provider-specific correction and durable regression/real-asset checks that
+   preserve existing structural admission and fail-closed contracts. No new
+   general-purpose recovery machinery. Separate 'cancellation requested',
+   'task actually stopped', 'process idle', and 'claim safe to release'.
+5. If no usable gracefully verifiable path exists, report exact findings and
+   propose the previously discussed SUPERVISED fallback: explicit owner
+   authorization to terminate the exact Actant-launched process; verify
+   termination/reaping before disposing old residency. This is a proposal gate,
+   NOT pre-authorization to implement or run forced termination.
+
+NON-GOALS / LIMITS
+Do not weaken ER-01 unknown-quiescence quarantine; no silent claim release,
+uncontrolled process kills, automatic restart, preemption, arbitrary port
+takeover, consumer migration, Experiment Runner, new global guarantees or
+model downloads. Preserve the local-only asset/privacy rules and redaction of
+raw prompts, reasoning, paths and logs. Use previously supplied local
+llama-server and GGUFs if accessible; do not assume source and binary identity
+without verifying build evidence.
+
+OWNERSHIP EXPECTATION
+Integration owns scoping, direct investigation or bounded delegation, evidence,
+cross-contract review and reporting on actant-integration. No broader
+architecture/cleanup authority is inferred.
+
+BLOCKING
+04C full acceptance remains BLOCKED until actual controlled evidence supports
+graceful safe disposition, or a separately approved supervised fallback does.
+No acceptance claim on the basis of source inspection or synthetic mocks alone.
+
+RELEVANT MATERIAL
+ai-workflow/state/execution-resource-validation.txt
+ai-workflow/knowledge/execution-resource-er04-validation.txt
+ai-workflow/assignments/execution-resource-validation.txt
+ai-workflow/knowledge/execution-resource-er03-acceptance.txt
+first-party/llmDrivers/llamaCpp/README.md
+upstream pinned llama.cpp: tools/server/server-queue.cpp,
+tools/server/server-context.cpp, tools/server/server-http.cpp,
+tools/server/README.md.
+
+REPORT BACK
+A source-backed capability/limits report; test plan and, only if safely
+authorized/executed, real task-correlated cancellation evidence with exact
+branch/source/binary references; explicit disposition per 04C case; whether
+a small graceful-stop integration is sufficient or a supervised termination
+fallback needs separate design-owner approval. Preserve ER-04 partial status
+until actual evidence justifies a change.

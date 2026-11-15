@@ -1,4 +1,4 @@
-# file: backend/tracing/records.py ; version: 2
+# file: backend/tracing/records.py ; version: 3
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -79,7 +79,7 @@ class TraceRecord:
     outcome: str | None = None
     durationNs: int | None = None
     causedBy: tuple[TraceReference, ...] = field(default_factory=tuple)
-    actantRunId: Uuid7Id | None = None
+    tertalisRunId: Uuid7Id | None = None
     applicationId: Uuid7Id | None = None
     applicationRunId: Uuid7Id | None = None
 
@@ -156,7 +156,7 @@ class TraceRecord:
                 raise ValueError("causedBy must not contain duplicates.")
             seenReferences.add(reference)
 
-        requireOptionalUuid7Id(self.actantRunId, "actantRunId")
+        requireOptionalUuid7Id(self.tertalisRunId, "tertalisRunId")
         requireOptionalUuid7Id(self.applicationId, "applicationId")
         requireOptionalUuid7Id(self.applicationRunId, "applicationRunId")
 

@@ -1,4 +1,4 @@
-# file: backend/values/validation.py ; version: 2
+# file: backend/values/validation.py ; version: 3
 from __future__ import annotations
 
 from backend.core.validation import requireExactNonBlankString, typeName
@@ -107,7 +107,7 @@ def requireValueAddressSegment(value: str, name: str) -> str:
 
 def requireValueAddress(value: str, name: str) -> str:
     """
-    Validates one canonical address in the Actant Value System.
+    Validates one canonical address in the Tertalis Value System.
 
     A ValueAddress identifies one logical value independently of the
     representation, storage provider, programming language, or runtime object
@@ -254,7 +254,7 @@ def _wrapSegmentDiagnostic(
 
 def requireRelativeValueAddress(value: str, name: str) -> str:
     """
-    Validates one canonical relative address in the Actant Value System.
+    Validates one canonical relative address in the Tertalis Value System.
 
     RelativeValueAddress uses the same canonical textual grammar as
     ValueAddress, but its semantic meaning is different. A relative address

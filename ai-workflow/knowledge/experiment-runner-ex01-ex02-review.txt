@@ -1,0 +1,122 @@
+EXPERIMENT RUNNER EX-01/02 - INDEPENDENT INTEGRATION REVIEW
+==========================================================
+Owner/reviewer: Integration. Date: 2026-11-03.
+Worker: 625361d12de9a18a445bb175cdc16b183cc7490b.
+Worker parent: 1f6e57ce28f5c611d14313c68c56e5a5040e38e2.
+Canonical review baseline: 354d2e2cd847f1ecf2487069973e64388b3efcf1.
+Decision: NOT integrated/accepted. EX-01/02-R1 correction required.
+No source edits or worker history replay performed by Integration.
+
+Disposition update: corrected worker 541d8b1 was independently accepted at
+Integration be092fd; see experiment-runner-ex01-ex02-acceptance.txt. The original
+review/reproduction below remains exact evidence at its named source.
+
+Finding EX-01/02-R1 [P2]: interruption can bypass owned host cleanup
+-------------------------------------------------------------------
+first-party/applications/experimentRunner/launcher.py:179-185.
+execute restores the previous SIGINT handler when runJob returns, then performs
+configuration evidence capture and the first result write before calling
+host.stop(). Those operations catch Exception only. Ctrl+C/KeyboardInterrupt
+at the result write escapes the cleanup sequence; the outer finally only removes
+the temporary directory, so the already started owned llama-server is never
+stopped/reaped. The same structural vulnerability exists before stop during
+configuration evidence capture. This contradicts the terminal path's ordinary
+cleanup contract and can leave resident weights and a listener after CLI exit.
+
+Independent deterministic reproduction on unchanged worker Application code:
+inject KeyboardInterrupt at launcher.persist after both synthetic calls complete.
+execute raises KeyboardInterrupt; the exact fake owned child still has
+returncode=None. One review reproduction FAILED in 0.23s, 63 worker tests deselected.
+No actual model interruption, forced disposal, tombstone repair or new ER scope.
+
+Required correction: make host cleanup structurally unavoidable on interruption
+and on failures in evidence/persistence/finalization. Preserve run/turn/Job
+outcomes and separately report launcher/write/host-cleanup disposition. Do not
+swallow interrupts as successful execution or reinterpret uncertain cleanup as
+confirmed. Keep exact owned cleanup, no generic PID/port takeover/recovery.
+Add a meaningful regression for post-Job Ctrl+C during first result persistence;
+also cover evidence capture interruption before teardown. Normal result-write
+Exception handling and existing cancellation/UNKNOWN tests must remain intact.
+
+Minimal runnable reproduction
+-------------------------------
+Append the following test to the delivered test_experimentRunner.py in an isolated
+snapshot of 625361d; it uses that module's actual runtime/provider fixture and
+synthetic process IO. Never append it to an unrelated checkout without review.
+
+def test_review_interrupt_during_persist_still_closes_owned_host(rig, monkeypatch):
+    """Interrupt result persistence after inference and require owned child reap."""
+    def interrupt(*args):
+        """Represent Ctrl+C after the Job signal handler has been restored."""
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(launcher, 'persist', interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        execute(rig)
+    assert all(process.returncode is not None for process in rig[0]['processes']), 'owned child remains alive'
+
+Command from the snapshot root (using Integration-owned Python, explicit snapshot
+path precedence because the embedded interpreter's _pth otherwise selects its
+parent checkout):
+  C:\Users\Enter\Documents\ChatGPT\Actant\Turnix\python-embedded\python.exe -X frozen_modules=off -c "import sys; sys.path.insert(0, '.'); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','tests/first_party/experimentRunner','-k','test_review_interrupt']))"
+
+Independent existing verification
+-----------------------------------
+Reviewed all five new runtime Python files, manifest, example, README and test
+module. Only assigned Application/test paths differ from source parent. Source
+header/path/version-1, AST/docstrings and git diff --check passed (six Python
+files including tests). No Ruff claim. Embedded-home warning persists.
+
+An untouched git archive snapshot of worker source was extracted under ignored
+python-embedded/review-ex01-625361d. Actual Python 3.15.0b4/pytest 9.2.0:
+  full worker suite: 1842 passed in 14.57s, zero skips;
+  focused existing worker tests: 63 passed in 0.99s, reviewer case deselected.
+The full run preceded adding the reviewer test; the focused run afterwards
+excluded only that new test. Full command uses the same -c path-precedence prefix
+as above, with ['-q','--import-mode=importlib','--tb=short','tests'].
+Initial direct -m pytest collection selected Integration's pinned package path
+and failed to import the new Application; the explicit path fixed the review
+environment without changing delivery or runtime configuration. This collection
+error is not an Application test failure and is not included in pass counts.
+
+Real ordinary two-turn acceptance evidence at unchanged 625361d
+---------------------------------------------------------------
+Integration has the existing explicitly supplied assets/config; worker-local
+asset blocker remains truthful for its environment but is cleared for this
+Integration run. Hashed actual binary and Qwen GGUF against prior private ER-04
+safe-run identities: both match. Observed build12031/060b2fea4 and successful
+required advertised-pinned-surface capability check. Actual launch ready; private
+configuration evidence still labels effective provider state unknown-unqueried.
+Do not promote requested settings/help advertisement to comprehensive attestation.
+
+One real owned CPU-only process, context1024/token24/threads4, batch/ubatch128,
+one slot, no KV offload, startup reasoning off, speculation none. Fresh unused
+loopback port, no takeover/download/model copy or GPU inference. Used checked-in
+two-turn definition and unchanged launcher/App/runtime/managed provider source.
+Review wrapper observed exact Popen and transport payloads without altering
+payload/cleanup; CREATE_NO_WINDOW hides the owned helper window only.
+
+Both ordinary turns succeeded and returned nonempty actual answers. Exact wire
+and recorded requests: [user1], then [user1, assistant1.rawText, user2]. No semantic
+memory-answer oracle. No separately returned reasoning namespace in either turn;
+recorded reasoning=null means unavailable, not proof of all internal thinking off.
+Both provider effects acknowledged/confirmed with iteratorCloseFailed=false.
+Run and actual Job succeeded, CLI projection 0; private file write succeeded;
+normal host cleanup completed and sole owned model child actually exited.
+No emergency disposal/abort probe, worker/model process left running or UNKNOWN
+repair. This is ordinary success evidence, not a real Ctrl+C/abort-path validation.
+
+Reviewed public structural summary:
+knowledge/experiment-runner-ex01-ex02-real-summary.json.
+Raw config, exact payloads/outputs, private configuration/build and hash evidence
+remain ignored under python-embedded/experiment-runner-review-625361d/.
+No private prompts/answers/reasoning/paths/native task IDs are in the summary.
+No user's W:\Projects\Actant checkout/runtime was accessed. Assets come from
+Integration's preexisting explicit ER-04 config, not filename-based substitution.
+
+Continuation
+--------------
+Send bounded R1 to experiment-runner, retain original delivery evidence, and
+review the corrected commit independently. Real ordinary demo at 625361d is
+accepted as evidence for that source/scope, not final Application acceptance.
+Reassess relevant normal behavior after correction without automatically rerunning
+all ER probes. EX-03/04/05 and backend/provider changes remain unassigned.
