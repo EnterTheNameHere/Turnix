@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 5
+# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 6
 """Strict, standard-library-only archive grammar; no execution or runtime imports."""
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import re
 import importlib
 import copy
 
-PREFIX = "actant.experiment."
+PREFIX = "tertalis.experiment."
 MANIFEST_NAME = "archive-manifest.json"
 DEFAULTS = dict(archiveBytes=256 * 1024 * 1024, logicalRecords=8192,
     frameBytes=65536, artifactBytes=8 * 1024 * 1024, requestBytes=2 * 1024 * 1024,
@@ -409,7 +409,7 @@ class Grammar:
                         require(not any(t["attemptId"] == payload["attemptId"] for t in self.turns.values()))
                     query = decode(blob(payload["queryRef"]))
                     fields(query, ("formatId", "messages"))
-                    require(query["formatId"] == "actant.llm.messages@1" and type(query["messages"]) is list)
+                    require(query["formatId"] == "tertalis.llm.messages@1" and type(query["messages"]) is list)
                     require(1 <= len(query["messages"]) <= 31 and len(query["messages"]) % 2 == 1)
                     for index, message in enumerate(query["messages"]):
                         fields(message, ("role", "content"))

@@ -1,4 +1,4 @@
-# file: scripts/verify_tools.py ; version: 1
+# file: scripts/verify_tools.py ; version: 2
 """Verify platform-pinned tools in the selected Windows embedded Python environment."""
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def verifyTools() -> dict[str, object]:
     scripts = Path(sys.executable).resolve().parent / "Scripts"
     versions = pinnedVersions(root / "requirements-tools.txt")
     tools: dict[str, object] = {}
-    with tempfile.TemporaryDirectory(prefix="actant-tool-check-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="tertalis-tool-check-") as temporary:
         directory = Path(temporary)
         sample = directory / "sample.py"
         sample.write_text('value: int = 1\n', encoding="utf-8")

@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_terminalAndClose.py ; version: 3
+# file: tests/backend/tracing/test_terminalAndClose.py ; version: 4
 from __future__ import annotations
 
 from io import StringIO
@@ -42,7 +42,7 @@ def testTerminalShowsTypeHumanLabelAndNoIds() -> None:
         colorMode="never",
     )
 
-    tracer = Tracer(origin="actant.test", destinations=(terminal,))
+    tracer = Tracer(origin="tertalis.test", destinations=(terminal,))
     eventType = TraceEventType(
         name="pipeline.ready",
         domain="pipeline",
@@ -66,7 +66,7 @@ def testTerminalShowsTypeHumanLabelAndNoIds() -> None:
 def testTerminalMarksUnknownParentWithoutInventingNesting() -> None:
     stream = StringIO()
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     span = tracer.span().start()
     context = span.getContext()
     span.complete()
@@ -80,7 +80,7 @@ def testTerminalMarksUnknownParentWithoutInventingNesting() -> None:
 
 def testClosePublishesAbandonmentButNotInventedSpanEnd() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     span = tracer.span().start()
     spanId = span.spanId
 
@@ -99,7 +99,7 @@ def testClosePublishesAbandonmentButNotInventedSpanEnd() -> None:
 def testTerminalShowsSpanDuration() -> None:
     stream = StringIO()
     terminal = TerminalTraceDestination(stream=stream, colorMode="never")
-    tracer = Tracer(origin="actant.test", destinations=(terminal,))
+    tracer = Tracer(origin="tertalis.test", destinations=(terminal,))
 
     tracer.span().start().complete()
 
@@ -109,7 +109,7 @@ def testTerminalShowsSpanDuration() -> None:
 def testDefaultLabelCannotSpoofTerminalAbandonmentBookkeeping() -> None:
     stream = StringIO()
     terminal = TerminalTraceDestination(stream=stream, colorMode="never")
-    tracer = Tracer(origin="actant.test", destinations=(terminal,))
+    tracer = Tracer(origin="tertalis.test", destinations=(terminal,))
 
     span = tracer.span().start()
 
@@ -129,7 +129,7 @@ def testDefaultLabelCannotSpoofTerminalAbandonmentBookkeeping() -> None:
 def testTerminalDoesNotMislabelCustomOutcomeUsingStandardTypeText() -> None:
     stream = StringIO()
     terminal = TerminalTraceDestination(stream=stream, colorMode="never")
-    tracer = Tracer(origin="actant.test", destinations=(terminal,))
+    tracer = Tracer(origin="tertalis.test", destinations=(terminal,))
 
     tracer.span().start().end("custom", label="completed")
 
@@ -148,7 +148,7 @@ def testTerminalPrimaryStartFailureDoesNotCommitDisplayNesting() -> None:
         showExceptions=False,
     )
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(terminal,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
@@ -176,7 +176,7 @@ def testTerminalEndCommitsDisplayCleanupBeforeDetailFailure() -> None:
         showExceptions=False,
     )
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(terminal,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
@@ -220,7 +220,7 @@ def testTerminalTimestampFormattingFallsBackToExactUnixNanoseconds(
         showExceptions=False,
     )
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector, terminal),
     )
 

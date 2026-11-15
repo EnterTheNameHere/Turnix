@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/verify_procedureR2_native.py ; version: 1
+# file: tests/first_party/experimentRunner/verify_procedureR2_native.py ; version: 2
 """Explicit opt-in native Windows recipe gate; uses existing verified copies, no installation/model."""
 import hashlib
 import importlib
@@ -109,12 +109,12 @@ def test_native_recipes_and_real_process_facade(rig, monkeypatch, tmp_path):
     assert view["status"] == "sealed" and view["recipeProvenance"] == {"ty-check": "windows-empty-config"}
     report = importlib.import_module("first-party.applications.experimentRunner.reporting").report(value["archive"]["path"])
     assert len(report["cliMetrics"]) == 4 and report["metrics"][0]["contributing"] == 2
-    evidence = dict(schemaId="actant.experiment.ex06-r2-native-verification@1", platform="Windows-amd64",
+    evidence = dict(schemaId="tertalis.experiment.ex06-r2-native-verification@1", platform="Windows-amd64",
         tools=tools, checks=checks, runtime=dict(modelTransport="synthetic", managedServer="synthetic",
             configuredProcess="actual-native-shared-facade", inferenceCalls=state["calls"], toolCalls=calls,
             archiveStatus=view["status"], suiteStatus=value["suite"]["status"], ambientInvalidConfig=True,
             sourceContainsExecutionTrap=True),
         limits=dict(sourceExecuted=False, modelLaunched=False, globalInstallOrPathChange=False,
                     posixVariantVerified=False, hashesAreObservationsNotAttestation=True))
-    if output := os.environ.get("TURNIX_EX06_R2_EVIDENCE"):
+    if output := os.environ.get("TERTALIS_EX06_R2_EVIDENCE"):
         Path(output).write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")

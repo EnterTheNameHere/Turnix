@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/procedureGrammar.py ; version: 2
+# file: first-party/applications/experimentRunner/procedureGrammar.py ; version: 3
 """Offline archive3 semantics; no Context, backend, parser dependency or active IO."""
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def rawText(ref, blob, maximum):
 def request(value, step, unit, grammar):
     """Bind exact process identity/argv/cwd/caps to host policy and actual unit Job."""
     fmt.fields(value, PROCESS_REQUEST)
-    fmt.require(value["schemaId"] == "actant.process.request@1")
+    fmt.require(value["schemaId"] == "tertalis.process.request@1")
     for name in ("requestId", "invocationId"):
         fmt.identifier(value[name], opaque=True)
     if not hasattr(grammar, "procRequestIds"):
@@ -153,7 +153,7 @@ def revision(ref, step, unit, grammar, blob, document):
     raw = rawText(value["contentRef"], blob, grammar.procPolicy["procedureLimits"]["artifactBytes"])
     observed = value["workspaceObservation"]
     fmt.fields(observed, ("schemaId", "relativePath", "bytes", "sha256", "observedTimeNs", "identity"))
-    fmt.require(observed["schemaId"] == "actant.workspace.read@1" and observed["relativePath"] == value["relativePath"]
+    fmt.require(observed["schemaId"] == "tertalis.workspace.read@1" and observed["relativePath"] == value["relativePath"]
         and observed["bytes"] == len(raw) and observed["sha256"] == fmt.digest(raw))
     fmt.integer(observed["observedTimeNs"])
     fmt.fields(observed["identity"], ("device", "inode", "size", "mtimeNs", "ctimeNs"))
@@ -208,7 +208,7 @@ def stepRequest(grammar, unit, step, ref, blob, document):
     elif op == "inference":
         query = fmt.decode(blob(value["queryRef"]))
         fmt.fields(query, ("formatId", "messages"))
-        fmt.require(query == dict(formatId="actant.llm.messages@1", messages=unit["history"])
+        fmt.require(query == dict(formatId="tertalis.llm.messages@1", messages=unit["history"])
             and query["messages"] and query["messages"][-1]["role"] == "user" and len(query["messages"]) <= 80)
         fmt.require(fmt.decode(blob(value["requestedOptionsRef"])) == unit["config"]["defaults"] | step.get("overrides", {}))
         planned = grammar.planned[grammar.activeUnit]

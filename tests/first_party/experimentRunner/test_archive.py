@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_archive.py ; version: 3
+# file: tests/first_party/experimentRunner/test_archive.py ; version: 4
 """Actual disk checkpoints, fresh process death/recovery and managed archive failure gates."""
 import importlib
 import json
@@ -124,7 +124,7 @@ def test_complete_invalid_frame_or_blob_is_corruption_not_success(rig, mode):
             if mode == 'chain':
                 data['previousCommitHash'] = '0' * 64
             elif mode == 'version':
-                data['schemaId'] = 'actant.experiment.archive-record@999'
+                data['schemaId'] = 'tertalis.experiment.archive-record@999'
             else:
                 data['sequence'] = 900
             data['dataSha256'] = fmt.hashWithout(data, 'dataSha256')
@@ -209,10 +209,10 @@ def test_disabled_capture_is_explicit_without_fake_serialized_bodies(rig):
 def test_host_v2_rejects_and_archive_expansion_preflight_has_no_io(rig):
     """Version/cap errors reject before archive creation or model transitions."""
     host = rig[1]
-    host['schemaId'] = 'actant.experiment.host@2'
+    host['schemaId'] = 'tertalis.experiment.host@2'
     with pytest.raises(schema.ValidationError):
         launcher.prepare(definition(), host)
-    host['schemaId'] = 'actant.experiment.host@3'
+    host['schemaId'] = 'tertalis.experiment.host@3'
     host['archive']['logicalRecords'] = 1
     with pytest.raises(fmt.ArchiveError):
         launcher.prepare(definition(), host)
@@ -232,7 +232,7 @@ def test_readonly_cli_archive_selection_and_legacy_json(rig, capsys):
     selected = json.loads(capsys.readouterr().out)
     assert selected['content'] and all(r['unitId'] == unit and r['turnId'] == turn for r in selected['records'])
     assert cli.main(['inspect', '--result', str(path)]) == 0
-    assert json.loads(capsys.readouterr().out)['schemaId'] == 'actant.experiment.execution@4'
+    assert json.loads(capsys.readouterr().out)['schemaId'] == 'tertalis.experiment.execution@4'
 
 
 CRASH_CHILD = r'''
@@ -253,7 +253,7 @@ run = a.ArchiveRun(w, d, SimpleNamespace(requestEvidence=None), {'limits': polic
 run.initial(suite, dict(validationPolicy=policy, capturePolicy='disabled'))
 port = run.unit(suite['units'][0], 'synthetic-child-job')
 t = d.value()['conversation']['turns'][0]
-port.begin(t['id'], {'formatId':'actant.llm.messages@1','messages':[{'role':'user','content':t['content']}]}, {})
+port.begin(t['id'], {'formatId':'tertalis.llm.messages@1','messages':[{'role':'user','content':t['content']}]}, {})
 w.observe(SimpleNamespace(eventType='delta', text='diagnostic partial', metadata={}))
 ack = None
 if sys.argv[3] == 'acked':
@@ -296,7 +296,7 @@ def test_timer_flush_without_new_events_and_separate_reasoning(rig):
     writer, run, suite = diagnosticWriter(rig, partialSeconds=0.05)
     try:
         port = run.unit(suite['units'][0], 'diagnostic-job')
-        port.begin('t1', dict(formatId='actant.llm.messages@1', messages=[dict(role='user', content='hello')]), {})
+        port.begin('t1', dict(formatId='tertalis.llm.messages@1', messages=[dict(role='user', content='hello')]), {})
         writer.observe(SimpleNamespace(eventType='delta', text='answer', metadata={'llamaCppReasoning': {'content': 'reason'}}))
         deadline = time.monotonic() + 2
         while writer.sequence < 4 and time.monotonic() < deadline:
@@ -356,7 +356,7 @@ def test_runtime_capture_bounds_poison_without_silent_truncation(rig, limit):
     writer, run, suite = diagnosticWriter(rig, **caps)
     try:
         port = run.unit(suite['units'][0], 'diagnostic-job')
-        port.begin('t1', dict(formatId='actant.llm.messages@1', messages=[dict(role='user', content='hello')]), {})
+        port.begin('t1', dict(formatId='tertalis.llm.messages@1', messages=[dict(role='user', content='hello')]), {})
         writer.observe(SimpleNamespace(eventType='delta', text='x' * (500 if limit == 'pending' else 1), metadata={}))
         if limit in ('events', 'partials'):
             deadline = time.monotonic() + 2

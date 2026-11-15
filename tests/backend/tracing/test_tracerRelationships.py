@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_tracerRelationships.py ; version: 4
+# file: tests/backend/tracing/test_tracerRelationships.py ; version: 5
 from __future__ import annotations
 
 import pytest
@@ -18,12 +18,12 @@ from tests.backend.tracing.helpers import CollectingDestination, checkpointDesti
 
 def testParentlessEventUsesTracerOrigin() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     tracer.event().message("started").emit()
 
     record = collector.records[-1]
-    assert record.origin == "actant.test"
+    assert record.origin == "tertalis.test"
     assert record.kind == "event"
     assert record.spanId is None
     assert record.spanStartEventId is None
@@ -31,7 +31,7 @@ def testParentlessEventUsesTracerOrigin() -> None:
 
 def testNestedRelationshipsAndSpanStartRegistrationAreExplicit() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     checkpoint = checkpointDestination(collector)
     pipelineType = TraceSpanType(name="pipeline.run", domain="pipeline")
     stageType = TraceSpanType(name="pipeline.stage", domain="pipeline")
@@ -50,7 +50,7 @@ def testNestedRelationshipsAndSpanStartRegistrationAreExplicit() -> None:
 
     assert pipelineStart.kind == "spanStart"
     assert pipelineStart.parentSpanId is None
-    assert pipelineStart.origin == "actant.test"
+    assert pipelineStart.origin == "tertalis.test"
     assert pipelineStart.spanStartEventId == pipelineStart.eventId
 
     assert event.eventId == eventId
@@ -78,7 +78,7 @@ def testNestedRelationshipsAndSpanStartRegistrationAreExplicit() -> None:
 
 def testLateEventCanReferenceEndedSpanThroughTransferredContext() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     span = tracer.span().start()
     spanContext = span.getContext()
     span.complete()
@@ -93,7 +93,7 @@ def testLateEventCanReferenceEndedSpanThroughTransferredContext() -> None:
 
 def testDefaultCustomOutcomeUsesDefaultDefinitionWithoutRegistration() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     initialDefinitions = tracer.getTraceTypeDefinitions()
     span = tracer.span().start()
 
@@ -133,7 +133,7 @@ def testExplicitSpanTypeUsesDeclaredCustomOutcome() -> None:
             ),
         },
     )
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     tracer.span(explicitTraceType).start().end("superseded")
 
@@ -154,7 +154,7 @@ def testBuilderIsConsumedByEmitAttempt() -> None:
 
 def testSpanDurationMatchesMonotonicRecordTimestamps() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     checkpoint = checkpointDestination(collector)
 
     tracer.span().start().complete()

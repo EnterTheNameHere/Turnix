@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/readable.py ; version: 3
+# file: first-party/applications/experimentRunner/readable.py ; version: 4
 """Explicit private, chronological text export using the validated offline archive API."""
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def exportText(directory, unitId, outputRoot, name):
         with (output / filename).open("x", encoding="utf-8", newline="\n") as destination:
             destination.write(text)
     (output / "index.txt").write_text("\n".join(index) + "\n", encoding="utf-8")
-    manifest = dict(schemaId="actant.experiment.text-export@1", source=source.binding, unitId=unitId,
+    manifest = dict(schemaId="tertalis.experiment.text-export@1", source=source.binding, unitId=unitId,
                     contentPolicy="selected-private", records=records,
                     artifacts=[dict(file=filename, artifactRef=ref, rendering=encoding)
                                for filename, text, ref, encoding in artifacts])

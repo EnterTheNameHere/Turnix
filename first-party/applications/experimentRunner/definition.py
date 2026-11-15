@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/definition.py ; version: 3
+# file: first-party/applications/experimentRunner/definition.py ; version: 4
 """Strict bootstrap experiment schema and immutable canonical JSON snapshots."""
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ class Snapshot:
 
 def validate(value, policy):
     """Freeze a v2 suite only after every configuration and expansion budget validates."""
-    if type(value) is dict and value.get("schemaId") == "actant.experiment.definition@3":
+    if type(value) is dict and value.get("schemaId") == "tertalis.experiment.definition@3":
         import importlib
         return importlib.import_module("first-party.applications.experimentRunner.procedureFormat").validate(value, policy)
     try:
@@ -127,7 +127,7 @@ def validate(value, policy):
     except (TypeError, ValueError, UnicodeError, RecursionError, OverflowError) as error:
         raise ValidationError("Invalid definition JSON.") from error
     fields(value, ("schemaId", "experimentId", "configurations", "conversation", "repetitions", "errorPolicy", "contextPolicy"))
-    require(value["schemaId"] == "actant.experiment.definition@2", "Unsupported definition schema; use version 2.")
+    require(value["schemaId"] == "tertalis.experiment.definition@2", "Unsupported definition schema; use version 2.")
     name(value["experimentId"])
     number(value["repetitions"], 1, min(10, policy["maxRepetitions"]), integer=True)
     require(value["errorPolicy"] == "stop" and value["contextPolicy"] == "fresh-best-effort", "Unsupported run policy.")

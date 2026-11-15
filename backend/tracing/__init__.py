@@ -1,6 +1,6 @@
-# file: backend/tracing/__init__.py ; version: 3
+# file: backend/tracing/__init__.py ; version: 4
 """
-Provides Actant tracing infrastructure.
+Provides Tertalis tracing infrastructure.
 
 The package defines deterministic trace-type identifiers, immutable trace
 records, event and span emission, runtime context propagation, correlation

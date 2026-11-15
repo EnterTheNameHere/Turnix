@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 8
+# file: first-party/applications/experimentRunner/launcher.py ; version: 9
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
@@ -54,12 +54,12 @@ def readJson(path):
 def hostConfiguration(value):
     """Freeze trusted launch config separately from untrusted declarative experiments."""
     value = schema.decode(schema.canonical(value))
-    procedure = value.get("schemaId") == "actant.experiment.host@5"
+    procedure = value.get("schemaId") == "tertalis.experiment.host@5"
     schema.fields(value, ("schemaId", "llamaCpp", "aliases", "limits", "archive",
         *(("observation", "processTools", "approvedCommands", "procedureLimits") if procedure else ())),
         ("persistConfigurationEvidence",) if procedure else ("persistConfigurationEvidence", "observation"))
-    schema.require(value["schemaId"] in ("actant.experiment.host@3", "actant.experiment.host@4", "actant.experiment.host@5"), "Unsupported host schema.")
-    if value["schemaId"] in ("actant.experiment.host@4", "actant.experiment.host@5"):
+    schema.require(value["schemaId"] in ("tertalis.experiment.host@3", "tertalis.experiment.host@4", "tertalis.experiment.host@5"), "Unsupported host schema.")
+    if value["schemaId"] in ("tertalis.experiment.host@4", "tertalis.experiment.host@5"):
         observations.validate(value.get("observation"))
     else:
         schema.require("observation" not in value, "Host3 has no observation policy.")
@@ -94,7 +94,7 @@ def hostConfiguration(value):
 def policyFor(host):
     """Project only frozen aliases and request/output limits into Application config."""
     value = host.value()
-    if value["schemaId"] == "actant.experiment.host@5":
+    if value["schemaId"] == "tertalis.experiment.host@5":
         return procedureFormat.policy(value)
     return {"aliases": value["aliases"], **value["limits"]}
 
@@ -106,9 +106,9 @@ def prepare(definitionValue, hostValue):
     if source is not None:
         definitionValue = source.value()
     procedure = procedureFormat.isProcedure(definitionValue)
-    schema.require(procedure == (host.value()["schemaId"] == "actant.experiment.host@5"), "Definition/host version mismatch.")
+    schema.require(procedure == (host.value()["schemaId"] == "tertalis.experiment.host@5"), "Definition/host version mismatch.")
     definition = schema.validate(definitionValue, policyFor(host))
-    if host.value()["schemaId"] in ("actant.experiment.host@4", "actant.experiment.host@5"):
+    if host.value()["schemaId"] in ("tertalis.experiment.host@4", "tertalis.experiment.host@5"):
         observations.validate(host.value()["observation"], definition)
     if procedure:
         if source is None:
@@ -121,7 +121,7 @@ def prepare(definitionValue, hostValue):
     else:
         archive.preflight(definition, policyFor(host) | {"captureRequired": host.value()["archive"]["capturePolicy"] == "required"},
             {k: host.value()["archive"][k] for k in archive.fmt.DEFAULTS},
-            observation=host.value()["schemaId"] == "actant.experiment.host@4" and host.value()["observation"]["enabled"])
+            observation=host.value()["schemaId"] == "tertalis.experiment.host@4" and host.value()["observation"]["enabled"])
     adapter = loadAdapter()
     catalog = adapter.LlamaCppCatalog.fromConfig(host.value()["llamaCpp"])
     schema.require(all(selector in catalog.profiles for selector in host.value()["aliases"].values()),
@@ -179,7 +179,7 @@ def privateConfiguration(value):
 def persist(io, directory, result):
     """Atomically write one opaque-run file into an explicitly selected private directory."""
     directory = Path(directory).resolve()
-    if result["suite"]["schemaId"] == "actant.experiment.suite@2":
+    if result["suite"]["schemaId"] == "tertalis.experiment.suite@2":
         directory = directory / result["suite"]["suiteId"]
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / (result["suite"]["suiteId"] + ".json")
@@ -355,24 +355,24 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
     config = hostConfig.value()
     procedure = procedureFormat.isProcedure(definition.value())
     schema.require(observationHandoff is None or callable(observationHandoff), "Invalid private observation hook.")
-    observer = observations.Controller(config["observation"], observationHandoff) if config["schemaId"] in ("actant.experiment.host@4", "actant.experiment.host@5") else None
+    observer = observations.Controller(config["observation"], observationHandoff) if config["schemaId"] in ("tertalis.experiment.host@4", "tertalis.experiment.host@5") else None
     control = SuiteControl() if control is None else control
     if job is not None and job.cancellationRequested:
         control.cancel()
     io = ManagedIo()
     suite = results.initialSuite(definition, schema.unitDefinition)
     startedNs = time.monotonic_ns()
-    envelope = {"schemaId": "actant.experiment.execution@4", "suite": suite,
+    envelope = {"schemaId": "tertalis.experiment.execution@4", "suite": suite,
                 "launcherFailure": None, "signalCleanupFailures": [],
                 "resultWriteFailure": None, "hostCleanup": "not-started",
                 "archive": {"archiveId": None, "path": None, "failure": None, "close": None}}
     if observer is not None:
-        envelope["schemaId"] = "actant.experiment.execution@5"
+        envelope["schemaId"] = "tertalis.experiment.execution@5"
     if procedure:
-        envelope["schemaId"] = "actant.experiment.execution@6"
+        envelope["schemaId"] = "tertalis.experiment.execution@6"
     resultPath = None
     host, runtime = None, None
-    temporary = tempfile.TemporaryDirectory(prefix="actant-experiment-")
+    temporary = tempfile.TemporaryDirectory(prefix="tertalis-experiment-")
     stage, pendingExit = "activation", None
     writer = archiveRun = None
     temporaryAttempted = archiveCloseAttempted = False

@@ -7,8 +7,8 @@ set "PSModulePath="
 set "setupExitCode=%ERRORLEVEL%"
 if not "%setupExitCode%"=="0" (
     echo.
-    echo Actant internal setup failed with exit code %setupExitCode%.
+    echo Tertalis internal setup failed with exit code %setupExitCode%.
     rem Keep double-click failures visible; automation can suppress this wait.
-    if not defined ACTANT_SETUP_NO_PAUSE pause
+    if not defined TERTALIS_SETUP_NO_PAUSE pause
 )
 exit /b %setupExitCode%

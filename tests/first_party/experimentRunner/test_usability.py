@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_usability.py ; version: 3
+# file: tests/first_party/experimentRunner/test_usability.py ; version: 4
 """Protect private setup, maintained preflight, real Windows launch and offline text output."""
 import importlib
 import json
@@ -120,7 +120,7 @@ def testEditableBatUsesAdjacentRootPythonAndPropagatesStatus(tmp_path, local, ex
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows setup entrypoints")
 @pytest.mark.parametrize("runtimePresent", [False, True])
 def testStandaloneSetupMissingRootDoesNotInstallIt(tmp_path, runtimePresent):
-    """Missing runtime or unavailable Actant imports fail before local initialization."""
+    """Missing runtime or unavailable Tertalis imports fail before local initialization."""
     checkout = tmp_path / "missing runtime checkout"
     app = checkout / "first-party/applications/experimentRunner"
     app.mkdir(parents=True)
@@ -213,7 +213,7 @@ def testLegacyArchiveNamesStayReadOnlyAndBadCurrentHeaderCannotFallback(rig, mon
     state, assets, results = rig
     authored = conversation()
     if version == 2:
-        assets.update(schemaId="actant.experiment.host@4", observation=launcher.observations.defaults())
+        assets.update(schemaId="tertalis.experiment.host@4", observation=launcher.observations.defaults())
     if version == 3:
         state["streams"] = [stream("```python\nx=1\n```"), stream("```python\nx=2\n```")]
         syntheticCli(monkeypatch, state)
@@ -226,7 +226,7 @@ def testLegacyArchiveNamesStayReadOnlyAndBadCurrentHeaderCannotFallback(rig, mon
     current.rename(legacy)
     before = {p.relative_to(archive): p.read_bytes() for p in archive.rglob("*") if p.is_file()}
     source = readable.reporting.Sources().open(archive)
-    assert source.header["schemaId"] == "actant.experiment.archive@" + str(version)
+    assert source.header["schemaId"] == "tertalis.experiment.archive@" + str(version)
     assert source.view["status"] == "sealed"
     assert readable.reporting.report(archive)["sources"][0]["validation"] == "validated-prefix"
     assert before == {p.relative_to(archive): p.read_bytes() for p in archive.rglob("*") if p.is_file()}

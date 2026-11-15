@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 16
+# file: backend/packs/runtime.py ; version: 17
 from __future__ import annotations
 
 import hashlib
@@ -488,7 +488,7 @@ class PackLoader:
         implementationId = hashlib.sha256(identityMaterial).hexdigest()
 
         moduleName = (
-            f"_actant_{pack.packId.replace('.', '_')}_"
+            f"_tertalis_{pack.packId.replace('.', '_')}_"
             f"{definition.codeEntryId.replace('.', '_')}_{instanceId.replace('-', '_')}"
         )
         spec = importlib.util.spec_from_file_location(moduleName, sourcePath)

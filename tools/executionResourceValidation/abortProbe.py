@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/abortProbe.py ; version: 4
+# file: tools/executionResourceValidation/abortProbe.py ; version: 5
 """Interactive, one-case ER-04C probe; emergency disposal requires explicit commands.
 
 Approval: canonical actant-integration coordination commit 2fff776, ER-04C
@@ -67,7 +67,7 @@ def dispose(child, processes, action, previous, wait_seconds=3):
     """Perform one explicit exact-handle disposal step; never escalate automatically.
 
     kill requires a prior terminate wait-timeout. Exit is recorded only after
-    Popen.wait succeeds. This function conveys no Actant claim/recovery authority.
+    Popen.wait succeeds. This function conveys no Tertalis claim/recovery authority.
     """
     child.require(processes)
     process = child.process

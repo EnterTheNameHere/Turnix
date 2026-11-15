@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_procedure.py ; version: 2
+# file: tests/first_party/experimentRunner/test_procedure.py ; version: 3
 """EX-06 actual runtime with explicitly synthetic model transport and configured CLI IO."""
 import copy
 import importlib
@@ -538,7 +538,7 @@ def test_invalid_frozen_input_before_io(rig, tmp_path, content):
 
 def test_json5_numeric_bounds_and_hex():
     """Support bounded Classic JSON5 numbers and reject long tokens before numeric conversion."""
-    prefix = b'{schemaId:"actant.experiment.definition@3",n:'
+    prefix = b'{schemaId:"tertalis.experiment.definition@3",n:'
     assert inputs.parse(prefix + b'0x10}', "json5")["n"] == 16
     for token in (b"1" * 129, b"0." + b"0" * 128 + b"1", b"1e999"):
         with pytest.raises(ValueError):

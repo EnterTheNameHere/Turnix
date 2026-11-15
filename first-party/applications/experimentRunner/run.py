@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/run.py ; version: 6
+# file: first-party/applications/experimentRunner/run.py ; version: 7
 """Terminal entry point; only explicit inspect displays private experiment content."""
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 
 
 def main(argv=None):
-    """Validate without launch, run through managed Actant, or explicitly inspect a private result."""
+    """Validate without launch, run through managed Tertalis, or explicitly inspect a private result."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     textExport = commands.add_parser("export-text", help="Explicitly export one unit's private artifacts as inert text.")

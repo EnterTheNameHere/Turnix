@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_processPrimaryR1.py ; version: 1
+# file: tests/backend/application/test_processPrimaryR1.py ; version: 2
 """Ordered cross-thread critical-primary arbitration, including false-valued objects."""
 from pathlib import Path
 import sys
@@ -244,7 +244,7 @@ def test_caller_start_first_beats_later_worker(bound, monkeypatch, falseFirst):
     def start(worker):
         """Raise from caller start only after the real supervisor entered ACK."""
         native(worker)
-        if worker.name == "actant-process-supervisor":
+        if worker.name == "tertalis-process-supervisor":
             assert entered.wait(3)
             raise first
     monkeypatch.setattr(Thread, "start", start)
@@ -273,7 +273,7 @@ def test_retained_owner_start_is_secondary_to_recorded_worker(bound, monkeypatch
     monkeypatch.setattr(capture._Operation, "work", delayedExit)
     def cannotStart(worker):
         """Inject a later caller critical error while scheduling retained cleanup."""
-        if worker.name == "actant-process-retained-owner":
+        if worker.name == "tertalis-process-retained-owner":
             raise second
         return start(worker)
     monkeypatch.setattr(Thread, "start", cannotStart)

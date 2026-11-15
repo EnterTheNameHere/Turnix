@@ -1,4 +1,4 @@
-# file: first-party/observationBridge/bridge.py ; version: 2
+# file: first-party/observationBridge/bridge.py ; version: 3
 """Bounded selected-publication registry with a replaceable loopback HTTP adapter."""
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class ObservationBridge:
         try:
             self._server = _Server((host, port), self)
             self._authority = f"127.0.0.1:{self._server.server_port}"
-            self._thread = Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.05}, name="actant-observation-bridge", daemon=True)
+            self._thread = Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.05}, name="tertalis-observation-bridge", daemon=True)
             self._thread.start()
         except BaseException:
             self.close()
@@ -227,7 +227,7 @@ class _Server(HTTPServer):
 class _Handler(BaseHTTPRequestHandler):
     """Strict read-only HTTP adapter with exact Host, Origin and Bearer checks."""
 
-    server_version = "ActantObservationBridge"
+    server_version = "TertalisObservationBridge"
     sys_version = ""
 
     def log_message(self, format, *args) -> None:

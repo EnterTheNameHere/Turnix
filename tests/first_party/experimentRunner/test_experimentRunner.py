@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 8
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 9
 """EX-01/02/R1/03 architectural tests: actual runtime/provider, synthetic process/HTTP IO."""
 import importlib
 import json
@@ -30,7 +30,7 @@ def hostValue(tmp_path):
     executable, model = tmp_path / 'server.exe', tmp_path / 'model.gguf'
     executable.touch()
     model.touch()
-    return {'schemaId': 'actant.experiment.host@3',
+    return {'schemaId': 'tertalis.experiment.host@3',
             'archive': dict(launcher.archive.fmt.DEFAULTS, capturePolicy='required', hashAssets=False),
             'llamaCpp': {'manageServer': True, 'executable': str(executable), 'defaultModel': 'Q',
                          'models': {'Q': {'modelPath': str(model), 'contextWindowTokens': 1024,
@@ -874,7 +874,7 @@ def test_ex03_all_preflight_errors_precede_first_launch(rig, bad):
     elif bad in ('bool', 'zero', 'negative'):
         value['repetitions'] = {'bool': True, 'zero': 0, 'negative': -1}[bad]
     elif bad == 'version':
-        value['schemaId'] = 'actant.experiment.definition@1'
+        value['schemaId'] = 'tertalis.experiment.definition@1'
     elif bad == 'memory-cap':
         rig[1]['limits']['maxOutputCharacters'] = 65536
         value['repetitions'] = 10
@@ -1273,7 +1273,7 @@ def test_ex03_checked_in_templates_validate_without_probing_assets(rig):
     for filename in ('example.definition.json', 'example.suite.definition.json'):
         definitionValue = launcher.readJson(launcher.APP / filename)
         prepared = launcher.prepare(definitionValue, host)
-        assert prepared[0].value()['schemaId'] == 'actant.experiment.definition@2'
+        assert prepared[0].value()['schemaId'] == 'tertalis.experiment.definition@2'
     assert rig[0]['processes'] == [] and rig[0]['requests'] == []
 
 
@@ -1626,7 +1626,7 @@ def test_ex03_r2_primary_exit_survives_paired_signal_cleanup_faults(rig, monkeyp
             launcher.execute(launcher.prepare(value, rig[1]), rig[2], control=control)
         assert caught.value is primary
         result = caught.value.experimentExecution.value()
-        assert result['schemaId'] == 'actant.experiment.execution@4'
+        assert result['schemaId'] == 'tertalis.experiment.execution@4'
         expectedStage = 'relay-start' if site == 'relay-start' else 'unit-admission' if site == 'loop-admission' else 'signal-handler-installation'
         assert result['launcherFailure'] == {'category': 'launcher-interrupted', 'stage': expectedStage}
         expected = (['handler-restoration', 'relay-close'] if cleanup == 'both' else [cleanup])

@@ -111,7 +111,7 @@ added. The bridge is optional observation and does not own inference outcomes.
 
 ## Transport-independent JSON v1
 
-`schemaId = "actant.observation-publication@1"`. `schema.py:serialize()` is independent
+`schemaId = "tertalis.observation-publication@1"`. `schema.py:serialize()` is independent
 of HTTP. A later viewer should reject other schema versions and reset association
 when the clock epoch changes. No prompts, response text, arbitrary provider metadata,
 raw error messages, exception objects, tracebacks, Python object dictionaries, GPU

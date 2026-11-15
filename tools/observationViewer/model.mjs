@@ -1,6 +1,6 @@
 // file: tools/observationViewer/model.mjs ; version: 1
 /** Pure bounded v1 parsing and time-aligned graph model. No HTTP, DOM or persistence. */
-export const SCHEMA = 'actant.observation-publication@1';
+export const SCHEMA = 'tertalis.observation-publication@1';
 export const LIMIT = 512;
 
 /** Fixed, non-reflective schema failure; never embeds incoming data. */

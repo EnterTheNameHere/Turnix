@@ -1,5 +1,5 @@
-# file: tests/backend/workspace/test_workspaceRuntime.py ; version: 1
-"""Tests for Actant-owned ephemeral filesystem workspaces."""
+# file: tests/backend/workspace/test_workspaceRuntime.py ; version: 2
+"""Tests for Tertalis-owned ephemeral filesystem workspaces."""
 
 from __future__ import annotations
 

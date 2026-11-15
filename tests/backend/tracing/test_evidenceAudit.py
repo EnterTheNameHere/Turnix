@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_evidenceAudit.py ; version: 3
+# file: tests/backend/tracing/test_evidenceAudit.py ; version: 4
 from __future__ import annotations
 
 from backend.tracing import (
@@ -14,7 +14,7 @@ from tests.backend.tracing.helpers import CollectingDestination
 
 def testPublishedEvidenceIsSelfConsistentAndDefinitionOrdered() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     pipelineType = TraceSpanType(
         name="pipeline.run",
         domain="pipeline",

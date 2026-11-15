@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_archiveRecoveryR1.py ; version: 1
+# file: tests/first_party/experimentRunner/test_archiveRecoveryR1.py ; version: 2
 """Per-attempt required provenance and truthful failure-only archive semantics."""
 from types import SimpleNamespace
 import json
@@ -32,7 +32,7 @@ def begin(rig):
     """Prepare one raw diagnostic attempt without executing any native or HTTP operation."""
     writer, run, suite = diagnosticWriter(rig)
     port = run.unit(suite['units'][0], 'diagnostic-job')
-    port.begin('t1', dict(formatId='actant.llm.messages@1', messages=[dict(role='user', content='hello')]), {})
+    port.begin('t1', dict(formatId='tertalis.llm.messages@1', messages=[dict(role='user', content='hello')]), {})
     return writer, port, suite
 
 

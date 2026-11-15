@@ -1,4 +1,4 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSpeculation.py ; version: 3
+# file: tests/first_party/llmDrivers/test_llamaCppSpeculation.py ; version: 4
 """LC-03 explicit method/auxiliary baseline, frozen lease inputs and combined gate."""
 from __future__ import annotations
 
@@ -553,7 +553,7 @@ def test_changed_automatic_config_presence_cannot_reuse_a_shared_lease(config, m
     ("draftPMin", 0), ("draftPSplit", 0),
 ])
 def test_every_new_control_is_managed_only_at_driver_and_model_scope(field, sample):
-    """External endpoints cannot claim startup speculation controls were applied by Actant."""
+    """External endpoints cannot claim startup speculation controls were applied by Tertalis."""
     for external in ({field: sample}, {"models": {"remote": {"modelPath": "unused", field: sample}}}):
         with pytest.raises(ValueError, match="external server separately"):
             impl.LlamaCppDriver(external)

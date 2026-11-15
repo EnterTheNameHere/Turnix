@@ -1,4 +1,4 @@
-# file: first-party/observationBridge/codeEntry.py ; version: 1
+# file: first-party/observationBridge/codeEntry.py ; version: 2
 """Explicit optional Pack activation and fresh-context publication capabilities."""
 import hashlib
 import importlib
@@ -14,7 +14,7 @@ def _loadImplementation():
     endpoint/publication state stays per activated CodeEntry instance.
     """
     root = Path(__file__).resolve().parent
-    packageName = "_actant_observation_bridge_" + hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+    packageName = "_tertalis_observation_bridge_" + hashlib.sha256(str(root).encode("utf-8")).hexdigest()
     if packageName not in sys.modules:
         spec = importlib.util.spec_from_file_location(packageName, root / "__init__.py", submodule_search_locations=[str(root)])
         if spec is None or spec.loader is None:

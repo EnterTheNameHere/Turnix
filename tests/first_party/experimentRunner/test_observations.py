@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_observations.py ; version: 2
+# file: tests/first_party/experimentRunner/test_observations.py ; version: 3
 """Actual App/PM/G ownership with synthetic provider IO and deterministic expiry boundaries."""
 import importlib
 import json
@@ -17,7 +17,7 @@ backendObservation = importlib.import_module('backend.observation')
 def host4(rig, *, live=False, enabled=True):
     """Select only synthetic provider t1 with physical hardware needs explicitly disabled."""
     host = rig[1]
-    host['schemaId'] = 'actant.experiment.host@4'
+    host['schemaId'] = 'tertalis.experiment.host@4'
     host['observation'] = observations.defaults()
     selected = dict(configurationIndex=1, repetition=1, turnId='t1')
     host['observation'].update(enabled=enabled, calls=[selected] if enabled else [])
@@ -41,9 +41,9 @@ def test_host3_keeps_archive1_and_host4_disabled_requests_nothing(rig, monkeypat
         raise AssertionError('unexpected request')
     monkeypatch.setattr(backendObservation.ObservationFacade, 'request', forbidden)
     value, _ = execute(rig)
-    assert value['schemaId'] == 'actant.experiment.execution@5'
+    assert value['schemaId'] == 'tertalis.experiment.execution@5'
     view = readArchive(value)
-    assert view['schemaId'] == 'actant.experiment.archive-view@2' and view['status'] == 'sealed'
+    assert view['schemaId'] == 'tertalis.experiment.archive-view@2' and view['status'] == 'sealed'
     assert view['observations'] == {} and rig[0]['calls'] == 2
 
 

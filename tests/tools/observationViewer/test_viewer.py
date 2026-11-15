@@ -1,5 +1,5 @@
-# file: tests/tools/observationViewer/test_viewer.py ; version: 1
-"""Actant-suite entry point for deterministic JS tests and fixed local asset-server checks."""
+# file: tests/tools/observationViewer/test_viewer.py ; version: 2
+"""Tertalis-suite entry point for deterministic JS tests and fixed local asset-server checks."""
 from __future__ import annotations
 
 import os
@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def test_deterministic_viewer_javascript_contracts() -> None:
     """Runs the pure parser/model/polling/security suite under Node without browser dependencies."""
-    node = os.environ.get("ACTANT_NODE") or shutil.which("node")
-    assert node, "Viewer tests require Node.js 20+; set ACTANT_NODE to its executable."
+    node = os.environ.get("TERTALIS_NODE") or shutil.which("node")
+    assert node, "Viewer tests require Node.js 20+; set TERTALIS_NODE to its executable."
     result = subprocess.run([node, "--test", str(Path(__file__).with_name("viewer.test.mjs"))], cwd=ROOT,
                             text=True, capture_output=True, check=False, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr

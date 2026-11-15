@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/setupLocal.py ; version: 1
+# file: first-party/applications/experimentRunner/setupLocal.py ; version: 2
 """Check existing platform readiness, then initialize missing private App files only."""
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def main():
         tools = prerequisites()
     except Exception:
         print("Experiment Runner prerequisite check failed. Run repository ROOT setup.bat separately; "
-              "it must provision the embedded runtime, Actant imports, Ruff 0.17.4 and ty 0.0.99.", file=sys.stderr)
+              "it must provision the embedded runtime, Tertalis imports, Ruff 0.17.4 and ty 0.0.99.", file=sys.stderr)
         return 2
     try:
         initialize(tools)

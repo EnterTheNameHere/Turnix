@@ -5,7 +5,7 @@ root `setup.ps1` using Windows PowerShell, works from any working directory and
 returns the PowerShell exit code. Setup parameters can be passed through, for
 example `setup.bat -Requirements requirements.txt`. On failure it prints the exit
 code and waits for a key so a double-click console remains visible. Automation
-can set `ACTANT_SETUP_NO_PAUSE=1` to suppress that failure-only wait.
+can set `TERTALIS_SETUP_NO_PAUSE=1` to suppress that failure-only wait.
 
 You can also run `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1`.
 Python 3.15.0b4 remains the primary runtime. Setup verifies the tracked vendor ZIP,
@@ -46,7 +46,7 @@ an alternate destination does not change that hook contract. An explicit fallbac
 into the default destination replaces that environment as before; there is no
 automatic downgrade. Applications must use the selected runtime/tool paths.
 
-Root setup provisions only Actant internals. It never discovers Applications or
+Root setup provisions only Tertalis internals. It never discovers Applications or
 invokes their setup scripts. For Application-local initialization, run that
 Application's own `setup.bat` or `setup.ps1` separately after root setup. Those
 scripts own local templates and user-file preservation and should check existing

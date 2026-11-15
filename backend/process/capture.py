@@ -1,4 +1,4 @@
-# file: backend/process/capture.py ; version: 2
+# file: backend/process/capture.py ; version: 3
 """Bounded configured-child ownership, outside runtime lanes and client callbacks."""
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from backend.process.runtime import ProcessExecutionError
 
 _pending = {}
 _pendingLane = RLock()
-_job = ContextVar("actant.process.actual-job", default=None)
+_job = ContextVar("tertalis.process.actual-job", default=None)
 _TICKET_SECONDS = 30.0
 
 
@@ -60,7 +60,7 @@ class _PrivateRecord:
 class ProcessRequest(_PrivateRecord):
     """Exact resolved process intent; it grants no execution authority."""
 
-    _schema = "actant.process.request@1"
+    _schema = "tertalis.process.request@1"
     requestId: str
     applicationRunId: str | None
     codeEntryInstanceId: str | None
@@ -120,7 +120,7 @@ class ProcessCleanup(_PrivateRecord):
 class ProcessOutcome(_PrivateRecord):
     """Detached outcome remains unchanged if retained cleanup later resolves."""
 
-    _schema = "actant.process.outcome@1"
+    _schema = "tertalis.process.outcome@1"
     request: ProcessRequest
     status: str
     phase: str
@@ -276,7 +276,7 @@ class _Operation:
         self.stopAttempted, self.primary, self.abandoned = False, None, False
         self.start = time.monotonic_ns()
         self.pin = False
-        self.worker = Thread(target=self.work, name="actant-process-supervisor", daemon=True, context=Context())
+        self.worker = Thread(target=self.work, name="tertalis-process-supervisor", daemon=True, context=Context())
 
     def requestStop(self, reason):
         """Latch only state; actual signal callback never closes/waits on IO."""
@@ -370,7 +370,7 @@ class _Operation:
             for index, pipe in enumerate((self.child.stdout, self.child.stderr)):
                 cap = self.request.stdoutBytes if index == 0 else self.request.stderrBytes
                 worker = Thread(target=self._read, args=(index, pipe, cap),
-                                name="actant-process-reader", daemon=True, context=Context())
+                                name="tertalis-process-reader", daemon=True, context=Context())
                 self.readers.append(worker)
                 worker.start()
             stopTime = None
@@ -590,7 +590,7 @@ def execute(runner, state, prepared, beforeLaunch):
             value = operation.outcome(False)
     else:
         try:
-            Thread(target=operation.reap, name="actant-process-retained-owner", daemon=True,
+            Thread(target=operation.reap, name="tertalis-process-retained-owner", daemon=True,
                    context=Context()).start()
         except BaseException as error:
             # Exact roots/pin remain retained if the OS cannot schedule cleanup.

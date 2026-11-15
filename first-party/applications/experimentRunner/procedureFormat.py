@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/procedureFormat.py ; version: 2
+# file: first-party/applications/experimentRunner/procedureFormat.py ; version: 3
 """Closed Classic procedure contracts and conservative budgets, safe for offline use."""
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 import sys
 
 schema = importlib.import_module("first-party.applications.experimentRunner.definition")
-PREFIX = "actant.experiment."
+PREFIX = "tertalis.experiment."
 PLATFORM_REF = "c99dd9315b9a8170f036df7d84a0a4a463966548"
 MAXIMA = dict(maxSteps=64, maxInputs=16, inputBytes=262144, totalInputBytes=1048576,
     maxArtifacts=8, artifactBytes=262144, maxCliCalls=16, argvBytes=8192, streamBytes=262144,

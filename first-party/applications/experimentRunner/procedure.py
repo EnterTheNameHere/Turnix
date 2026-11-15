@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/procedure.py ; version: 2
+# file: first-party/applications/experimentRunner/procedure.py ; version: 3
 """Linear procedures using only invocation-mediated model/process/workspace authority."""
 from __future__ import annotations
 
@@ -277,7 +277,7 @@ def execute(recorder, ctx, runId):
                 if stage == "message":
                     intent, refs, content = message(port, step, revisions, cli)
                 elif stage == "inference":
-                    query = dict(formatId="actant.llm.messages@1", messages=history)
+                    query = dict(formatId="tertalis.llm.messages@1", messages=history)
                     options = config["defaults"] | step.get("overrides", {})
                     queryRef, optionsRef = port.put(fmt.canonical(query), json=True), port.put(fmt.canonical(options), json=True)
                     intent = dict(queryRef=queryRef, requestedOptionsRef=optionsRef, attemptId=port.attemptIds[step["id"]])

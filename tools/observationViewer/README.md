@@ -1,7 +1,7 @@
 # Independent observation viewer (G-02)
 
 A standalone, read-only browser client for the accepted
-`actant.observation-publication@1` contract. It imports no Actant runtime, activates
+`tertalis.observation-publication@1` contract. It imports no Tertalis runtime, activates
 no Packs and creates no observation sessions. There is no build step, CDN, package
 installation, discovery or permanent frontend. Use a modern browser with ES modules,
 BigInt, Fetch streams and SVG. Python serves only six fixed public assets.
@@ -95,7 +95,7 @@ source-mutation request or general HTTP proxy. Each viewer owns its own transpor
 
 ## Verification
 
-Node.js 20+ runs deterministic tests; set `ACTANT_NODE` to its executable if it is
+Node.js 20+ runs deterministic tests; set `TERTALIS_NODE` to its executable if it is
 not on PATH. Node and Playwright are development tools only. Python's suite wrapper
 fails with an actionable message if Node is missing; it does not silently skip.
 

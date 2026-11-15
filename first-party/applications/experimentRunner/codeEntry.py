@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/codeEntry.py ; version: 5
+# file: first-party/applications/experimentRunner/codeEntry.py ; version: 6
 """One bounded conversation Job with ephemeral, rollback-independent diagnostics."""
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ class Recorder:
         """Validate/freeze a new invocation before its caller-retained Job is started."""
         schema.fields(payload, ("unitId", "definition"), ("archivePort",))
         port = payload.get("archivePort")
-        procedure = type(payload.get("definition")) is dict and payload["definition"].get("schemaId") == "actant.experiment.definition@3"
+        procedure = type(payload.get("definition")) is dict and payload["definition"].get("schemaId") == "tertalis.experiment.definition@3"
         portType = (importlib.import_module("first-party.applications.experimentRunner.procedureArchive").Port
                     if procedure else archive.UnitArchivePort)
         schema.require((port is not None and type(port) is portType) if procedure
@@ -127,7 +127,7 @@ class Recorder:
 
     def execute(self, ctx, runId):
         """Hold one actual exclusive session across answer replay and all per-call cleanup."""
-        if self.definition is not None and self.definition.value()["schemaId"] == "actant.experiment.definition@3":
+        if self.definition is not None and self.definition.value()["schemaId"] == "tertalis.experiment.definition@3":
             return importlib.import_module("first-party.applications.experimentRunner.procedure").execute(self, ctx, runId)
         with self.lock:
             if not self.pending or self.snapshot.value()["runId"] != runId:

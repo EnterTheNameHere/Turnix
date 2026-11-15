@@ -1,6 +1,6 @@
 # Experiment Runner
 
-This branch contains Experiment Runner and its shared Actant platform dependencies.
+This branch contains Experiment Runner and its shared Tertalis platform dependencies.
 Other Applications' exclusive files are excluded. Future platform imports must
 preserve the exclusions for `first-party/applications/evilBirthdayAnalysis/`,
 `tests/first_party/evilBirthdayAnalysis/`, `ai-workflow/mail/evil-analysis/` and
@@ -92,7 +92,7 @@ neither a successful Runner outcome nor clean static diagnostics proves correctn
 The sections below describe the accepted execution, schema and archive contracts.
 
 This Application runs ordered configurations and repetitions through the managed
-Actant llama.cpp provider. Each conversation execution is one actual Job with its
+Tertalis llama.cpp provider. Each conversation execution is one actual Job with its
 own exclusive conversation session. Histories start empty for every execution.
 The complete imported platform remains colocated with this AppPackage; Application
 source/tests belong on `actant-experiment-runner`, not the platform branch.
@@ -124,8 +124,8 @@ between Jobs. A post-loop interruption is re-raised after owned teardown.
 
 ## Explicit schema migration and preflight
 
-This launcher accepts `actant.experiment.definition@2` and trusted
-`actant.experiment.host@3`. Old host@1/@2 and definition@1 inputs explicitly reject; there is no silent
+This launcher accepts `tertalis.experiment.definition@2` and trusted
+`tertalis.experiment.host@3`. Old host@1/@2 and definition@1 inputs explicitly reject; there is no silent
 reinterpretation or compatibility adapter. Single-config/single-repetition behavior
 and EX-01/02/R1 architectural assertions remain covered with migrated fixtures.
 
@@ -212,12 +212,12 @@ revocation or a reservation race stops the suite and leaves explicit unstarted u
 
 ## Private outcomes and interruption handling
 
-`actant.experiment.execution@4` wraps a fresh `actant.experiment.suite@1`. The suite
+`tertalis.experiment.execution@4` wraps a fresh `tertalis.experiment.suite@1`. The suite
 has a fresh opaque suiteId, immutable definition/hash, timing/status and ordered
 units with stable independent unit IDs, config index/name/alias and repetition.
 Each unit has an actual Job outcome (null when unadmitted), independent unit status,
 lifetime-boundary status, optional private configuration evidence and a
-`actant.experiment.result@2` conversation result whose runId equals unitId.
+`tertalis.experiment.result@2` conversation result whose runId equals unitId.
 Conversation results retain turns/options/exact queries/answers/separate reasoning,
 timings, bounded native summaries and public executionEvidence snapshots. The unit
 is successful only when its Job, conversation, reservation close and lifetime
@@ -294,7 +294,7 @@ adds the private archive below; EX-05 remains unassigned.
 .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib --tb=short tests/first_party/experimentRunner
 ```
 
-Deterministic tests use actual Actant Application/Job/managed composition with
+Deterministic tests use actual Tertalis Application/Job/managed composition with
 explicitly SYNTHETIC process/HTTP IO. Real EX-03 acceptance separately requires eight
 actual nonempty Qwen responses across two startup profiles/two repetitions/two
 turns, verified identities/build, exact order/history, reuse/transitions and cleanup.
@@ -316,7 +316,7 @@ checkpoints. Host schema 3 requires the explicit `archive` object in
 ```
 
 Manifest/archive-record/archive-commit/archive-view/artifact-ref/provenance/partial/
-plan/turn-result/unit-summary/suite-summary are version 1 under `actant.experiment`.
+plan/turn-result/unit-summary/suite-summary are version 1 under `tertalis.experiment`.
 The exact strict grammar is in `archiveFormat.py`; unknown fields/versions reject.
 DATA hashes canonical sorted-key compact UTF-8 JSON excluding its `dataSha256`;
 COMMIT hashes its canonical fields excluding `commitSha256`. The first previous
@@ -432,13 +432,13 @@ archive directories and archive-issued unit/turn IDs:
 
 ```powershell
 python first-party/applications/experimentRunner/run.py report --archive C:\private\archive --format json
-python first-party/applications/experimentRunner/run.py compare --left C:\private\left --left-unit UNIT_ID --left-turn t1 --right C:\private\right --right-unit UNIT_ID --right-turn t1 --mode actant.experiment.answer-text@1 --format json
+python first-party/applications/experimentRunner/run.py compare --left C:\private\left --left-unit UNIT_ID --left-turn t1 --right C:\private\right --right-unit UNIT_ID --right-turn t1 --mode tertalis.experiment.answer-text@1 --format json
 python first-party/applications/experimentRunner/run.py export --kind report --archive C:\private\archive --format csv --output-root C:\private\exports --name summary
 ```
 
 Comparison requires exactly one explicit pair and one mode:
-`actant.experiment.answer-text@1`, `actant.experiment.reasoning-text@1`, or
-`actant.experiment.request-body@1`. Text compares Unicode code points exactly;
+`tertalis.experiment.answer-text@1`, `tertalis.experiment.reasoning-text@1`, or
+`tertalis.experiment.request-body@1`. Text compares Unicode code points exactly;
 body compares original serialized bytes. There is no normalization or fallback.
 Completed empty text is available; absent reasoning is unavailable. Results are
 `Equal`, `NotEqual`, `NotComparable` (exit 0, 1, 2). Corruption is always

@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/configuration.py ; version: 2
+# file: first-party/llmDrivers/llamaCpp/configuration.py ; version: 3
 """Provider-local startup authority, immutable inputs and bounded build evidence."""
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 
 SOURCE_COMMIT = "060b2fea4ed528810ddc91d48fb22b3e4d63eb85"
-SCHEMA = "actant.llamaCpp.configuration@1"
+SCHEMA = "tertalis.llamaCpp.configuration@1"
 LC01_FIELDS = (
     "moeCacheMiB", "cpuMoe", "serverReasoning", "serverReasoningEffort",
     "serverReasoningBudget", "serverReasoningBudgetMessage", "serverReasoningFormat",

@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_contextAndExceptions.py ; version: 3
+# file: tests/backend/tracing/test_contextAndExceptions.py ; version: 4
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +16,7 @@ from tests.backend.tracing.helpers import CollectingDestination, createSinkTrace
 
 
 @dataclass(frozen=True, slots=True)
-class ActantRunId(Uuid7Id): # TODO: replace when real class exists
+class TertalisRunId(Uuid7Id): # TODO: replace when real class exists
     pass
 
 
@@ -27,11 +27,11 @@ class ApplicationId(Uuid7Id): # TODO: replace when real class exists
 
 def testCorrelationContextIsAppliedAndTransferredWithSpan() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
-    actantRunId = ActantRunId.new()
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
+    tertalisRunId = TertalisRunId.new()
     applicationId = ApplicationId.new()
 
-    with tracer.correlations(actantRunId=actantRunId):
+    with tracer.correlations(tertalisRunId=tertalisRunId):
         span = tracer.span().start()
         context = span.getContext()
         span.complete()
@@ -40,7 +40,7 @@ def testCorrelationContextIsAppliedAndTransferredWithSpan() -> None:
         tracer.event().span(context).emit()
 
     lateRecord = collector.records[-1]
-    assert lateRecord.actantRunId == actantRunId
+    assert lateRecord.tertalisRunId == tertalisRunId
     assert lateRecord.applicationId == applicationId
 
 
@@ -80,7 +80,7 @@ def testExceptionSnapshotCapturesExceptionAndCatcherInformation() -> None:
 
 def testManagedSpanCompletesOnNormalExit() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     with tracer.span().start():
         tracer.event().emit()
@@ -91,7 +91,7 @@ def testManagedSpanCompletesOnNormalExit() -> None:
 
 def testManagedSpanErrorsAndPropagatesEscapingException() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     with pytest.raises(RuntimeError, match="broken"), tracer.span().start():
         raise RuntimeError("broken")
@@ -106,7 +106,7 @@ def testManagedSpanErrorsAndPropagatesEscapingException() -> None:
 def testManagedSpanCancelsAndPropagatesCancellation() -> None:
     async def run() -> None:
         collector = CollectingDestination()
-        tracer = Tracer(origin="actant.test", destinations=(collector,))
+        tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
         with pytest.raises(asyncio.CancelledError):
             async with tracer.span().start():
@@ -123,16 +123,16 @@ def testManagedSpanCancelsAndPropagatesCancellation() -> None:
 def testTransferredSpanPreservesExistingCorrelationAgainstAmbientConflict(
 ) -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
-    originalRunId = ActantRunId.new()
-    conflictingRunId = ActantRunId.new()
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
+    originalRunId = TertalisRunId.new()
+    conflictingRunId = TertalisRunId.new()
 
-    with tracer.correlations(actantRunId=originalRunId):
+    with tracer.correlations(tertalisRunId=originalRunId):
         span = tracer.span().start()
         context = span.getContext()
         span.complete()
 
-    with tracer.correlations(actantRunId=conflictingRunId):
+    with tracer.correlations(tertalisRunId=conflictingRunId):
         tracer.event().span(context).emit()
 
-    assert collector.records[-1].actantRunId == originalRunId
+    assert collector.records[-1].tertalisRunId == originalRunId

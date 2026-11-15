@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_spanLifecycleRecovery.py ; version: 2
+# file: tests/backend/tracing/test_spanLifecycleRecovery.py ; version: 3
 from __future__ import annotations
 
 import threading
@@ -46,7 +46,7 @@ class BlockingRecordDestination:
 
 def testManagedParentRecoveryAbandonsAmbientChildBeforeParent() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     checkpoint = checkpointDestination(collector)
 
     with tracer.span().start() as parent:
@@ -75,7 +75,7 @@ def testManagedParentRecoveryAbandonsAmbientChildBeforeParent() -> None:
 
 def testManagedRecoveryUnwindsDeepAmbientStackInLifoOrder() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     with tracer.span().start() as parent:
         child = tracer.span().start()
@@ -97,7 +97,7 @@ def testManagedRecoveryUnwindsDeepAmbientStackInLifoOrder() -> None:
 
 def testManagedRecoveryFollowsAmbientLeaseStackNotStructuralParent() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     structuralParent = tracer.span().start()
     structuralParentContext = structuralParent.getContext()
@@ -136,7 +136,7 @@ def testManagedRecoveryFollowsAmbientLeaseStackNotStructuralParent() -> None:
 def testCloseWaitsForAdmittedSpanStartThenAbandonsStartedSpan() -> None:
     collector = CollectingDestination()
     blocked = BlockingRecordDestination("spanStart")
-    tracer = Tracer(origin="actant.test", destinations=(collector, blocked))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector, blocked))
 
     spanHolder = []
     startErrors: list[BaseException] = []
@@ -191,7 +191,7 @@ def testCloseWaitsForAdmittedSpanStartThenAbandonsStartedSpan() -> None:
 def testCloseWaitsForAdmittedSpanEndAndDoesNotAlsoAbandonSpan() -> None:
     collector = CollectingDestination()
     blocker = BlockingRecordDestination("spanEnd")
-    tracer = Tracer(origin="actant.test", destinations=(collector, blocker))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector, blocker))
 
     spanReady = threading.Event()
     endSpan = threading.Event()
@@ -261,7 +261,7 @@ def testCloseWaitsForAdmittedSpanEndAndDoesNotAlsoAbandonSpan() -> None:
 
 def testSpanEndAfterCloseIsRejectedWithoutSecondTerminalEvidence() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
 
     spanReady = threading.Event()
     attemptEnd = threading.Event()
@@ -318,7 +318,7 @@ def testSpanEndAfterCloseIsRejectedWithoutSecondTerminalEvidence() -> None:
 
 def testConcurrentClosePublishesAbandonmentExactlyOnce() -> None:
     collector = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    tracer = Tracer(origin="tertalis.test", destinations=(collector,))
     span = tracer.span().start()  # noqa: F841
 
     threadCount = 8
@@ -364,7 +364,7 @@ def testCloseFallsBackToNonRestoringAbandonmentAfterLeaseRestoreFailure(
     emergencyStream = StringIO()
     collector = CollectingDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )

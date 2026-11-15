@@ -1,4 +1,4 @@
-# file: first-party/observationBridge/schema.py ; version: 1
+# file: first-party/observationBridge/schema.py ; version: 2
 """Allowlisted, transport-independent observation JSON; no generic object serialization."""
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from backend.telemetry.model import (
     SwapObservation, SystemMemoryObservation,
 )
 
-SCHEMA_ID = "actant.observation-publication@1"
+SCHEMA_ID = "tertalis.observation-publication@1"
 MAX_SAMPLES = 512
 MAX_WINDOWS = 512
 MAX_CORES = 256

@@ -6,7 +6,7 @@ export const BASE = 2n ** 60n + 123n;
 export function fixture() {
   const scalar = (value, unit) => ({availability: value === null ? 'unavailable' : 'available', value, unit});
   return {
-    schemaId: 'actant.observation-publication@1', publicationId: PUB, sessionId: '2'.repeat(32), revision: '1',
+    schemaId: 'tertalis.observation-publication@1', publicationId: PUB, sessionId: '2'.repeat(32), revision: '1',
     clock: {kind: 'host-process-monotonic', epochId: '3'.repeat(32), nanosecondsEncoding: 'decimal-string'},
     encodings: {integerEvidence: 'decimal-string', ratesAndPercent: 'finite-json-number'}, units: {timestampsAndGaps: 'nanoseconds', streamCharacters: 'unicode-code-points'},
     scope: 'whole-host-hardware/application-selected-stream', sourceLifetime: 'application',

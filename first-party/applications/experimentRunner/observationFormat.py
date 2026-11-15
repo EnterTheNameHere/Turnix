@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/observationFormat.py ; version: 2
+# file: first-party/applications/experimentRunner/observationFormat.py ; version: 3
 """Stdlib typed App observation archive projection; no collectors or runtime imports."""
 import importlib
 import math
@@ -228,7 +228,7 @@ def publicData(value):
     fmt.fields(value, ("schemaId", "sessionId", "encodings", "units", "clock", "scope", "sourceLifetime", "needs",
         "retention", "sampleIntervalSeconds", "windowSeconds", "hardwareAvailability", "streamAvailability",
         "collectionStopped", "hardware", "stream", "correlation", "correlationMeaning"))
-    fmt.require(value["schemaId"] == "actant.observation-publication@1")
+    fmt.require(value["schemaId"] == "tertalis.observation-publication@1")
     fmt.identifier(value["sessionId"], opaque=True)
     fmt.require(value["encodings"] == dict(integerEvidence="decimal-string", ratesAndPercent="finite-json-number"))
     fmt.require(value["units"] == dict(timestampsAndGaps="nanoseconds", streamCharacters="unicode-code-points",
