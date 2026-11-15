@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 10
+# file: backend/io/managedIo.py ; version: 11
 from __future__ import annotations
 
 import contextlib
@@ -41,7 +41,7 @@ class IoNotFoundError(IoError):
 
 
 class IoPermissionError(IoError):
-    """Raised when the operating system denies an Tertalis-mediated file operation."""
+    """Raised when the operating system denies a Tertalis-mediated file operation."""
 
 
 class IoDecodeError(IoError):

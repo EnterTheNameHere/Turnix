@@ -1,4 +1,4 @@
-# file: backend/tracing/context.py ; version: 4
+# file: backend/tracing/context.py ; version: 5
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +34,7 @@ class TraceCorrelationContext:
     Carries broad Tertalis and Application correlation identities.
 
     Correlation contexts are immutable snapshots. Each identity is optional so
-    tracing can represent execution before an Tertalis run, application, or
+    tracing can represent execution before a Tertalis run, application, or
     application run has been established.
     """
 

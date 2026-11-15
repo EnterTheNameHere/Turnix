@@ -1,4 +1,4 @@
-# file: backend/process/runtime.py ; version: 3
+# file: backend/process/runtime.py ; version: 4
 """Tertalis-owned execution boundary for configured external tools."""
 
 from __future__ import annotations
@@ -147,7 +147,7 @@ class ProcessRunner:
 
         A nonzero tool exit is a normal completed invocation and is returned in
         ``ProcessResult``. Failure to resolve, launch, communicate with, or wait
-        for the process is an Tertalis infrastructure failure.
+        for the process is a Tertalis infrastructure failure.
 
         Args:
             toolName: Logical host-configured tool identity.
