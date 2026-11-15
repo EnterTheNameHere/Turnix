@@ -1,4 +1,4 @@
-# file: backend/save/applicationStore.py ; version: 7
+# file: backend/save/applicationStore.py ; version: 8
 from __future__ import annotations
 
 import hashlib
@@ -42,8 +42,8 @@ class ApplicationStore:
     state accidentally.
     """
 
-    _APPLICATION_FORMAT = "actant.application@1"
-    _CURRENT_FORMAT = "actant.application-current@1"
+    _APPLICATION_FORMAT = "tertalis.application@1"
+    _CURRENT_FORMAT = "tertalis.application-current@1"
 
     def __init__(self, savesRoot: str | os.PathLike[str]) -> None:
         root = Path(savesRoot)

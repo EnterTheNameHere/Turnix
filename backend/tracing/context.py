@@ -1,4 +1,4 @@
-# file: backend/tracing/context.py ; version: 3
+# file: backend/tracing/context.py ; version: 5
 from __future__ import annotations
 
 import asyncio
@@ -31,14 +31,14 @@ UNSET = sentinel("UNSET")
 @dataclass(frozen=True, slots=True)
 class TraceCorrelationContext:
     """
-    Carries broad Actant and Application correlation identities.
+    Carries broad Tertalis and Application correlation identities.
 
     Correlation contexts are immutable snapshots. Each identity is optional so
-    tracing can represent execution before an Actant run, application, or
+    tracing can represent execution before a Tertalis run, application, or
     application run has been established.
     """
 
-    actantRunId: Uuid7Id | None = None
+    tertalisRunId: Uuid7Id | None = None
     applicationId: Uuid7Id | None = None
     applicationRunId: Uuid7Id | None = None
 
@@ -51,8 +51,8 @@ class TraceCorrelationContext:
                 If any non-None correlation identity is not a Uuid7Id.
 
         """
-        if self.actantRunId is not None:
-            requireInstance(self.actantRunId, Uuid7Id, "actantRunId")
+        if self.tertalisRunId is not None:
+            requireInstance(self.tertalisRunId, Uuid7Id, "tertalisRunId")
         if self.applicationId is not None:
             requireInstance(self.applicationId, Uuid7Id, "applicationId")
         if self.applicationRunId is not None:
@@ -89,10 +89,10 @@ class TraceCorrelationContext:
         )
 
         return TraceCorrelationContext(
-            actantRunId=(
-                cleanFallback.actantRunId
-                if self.actantRunId is None
-                else self.actantRunId
+            tertalisRunId=(
+                cleanFallback.tertalisRunId
+                if self.tertalisRunId is None
+                else self.tertalisRunId
             ),
             applicationId=(
                 cleanFallback.applicationId
@@ -258,14 +258,14 @@ class TraceRuntimeContext:
         self._spanContextVar: contextvars.ContextVar[
             TraceSpanContext | None
         ] = contextvars.ContextVar(
-            f"actantTraceSpanContext_{id(self)}",
+            f"tertalisTraceSpanContext_{id(self)}",
             default=None,
         )
 
         self._correlationContextVar: contextvars.ContextVar[
             TraceCorrelationContext
         ] = contextvars.ContextVar(
-            f"actantTraceCorrelationContext_{id(self)}",
+            f"tertalisTraceCorrelationContext_{id(self)}",
             default=TraceCorrelationContext(),  # noqa: B039
         )
 
@@ -364,7 +364,7 @@ class TraceRuntimeContext:
 
 class TraceCorrelationScope:
     """
-    Installs nested Actant correlation identities for one lexical scope.
+    Installs nested Tertalis correlation identities for one lexical scope.
 
     A correlation scope modifies one TraceRuntimeContext and is independent of
     the lifecycle of any Tracer using that context. Multiple trace producers
@@ -385,7 +385,7 @@ class TraceCorrelationScope:
         self,
         *,
         runtimeContext: TraceRuntimeContext,
-        actantRunId: Uuid7Id | UNSET | None = UNSET,
+        tertalisRunId: Uuid7Id | UNSET | None = UNSET,
         applicationId: Uuid7Id | UNSET | None = UNSET,
         applicationRunId: Uuid7Id | UNSET | None = UNSET,
     ) -> None:
@@ -396,8 +396,8 @@ class TraceCorrelationScope:
             runtimeContext:
                 Runtime context whose ambient correlations the scope modifies.
                 Its lifetime is independent of any Tracer using that context.
-            actantRunId:
-                Actant-run override. UNSET inherits the ambient value, None
+            tertalisRunId:
+                Tertalis-run override. UNSET inherits the ambient value, None
                 clears it, and Uuid7Id replaces it.
             applicationId:
                 Application override. UNSET inherits the ambient value, None
@@ -417,9 +417,9 @@ class TraceCorrelationScope:
             TraceRuntimeContext,
             "runtimeContext",
         )
-        self._actantRunId = _requireCorrelationOverride(
-            actantRunId,
-            "actantRunId",
+        self._tertalisRunId = _requireCorrelationOverride(
+            tertalisRunId,
+            "tertalisRunId",
         )
         self._applicationId = _requireCorrelationOverride(
             applicationId,
@@ -451,10 +451,10 @@ class TraceCorrelationScope:
         current = self._runtimeContext.getCurrentCorrelations()
 
         correlations = TraceCorrelationContext(
-            actantRunId=(
-                current.actantRunId
-                if self._actantRunId is UNSET
-                else self._actantRunId
+            tertalisRunId=(
+                current.tertalisRunId
+                if self._tertalisRunId is UNSET
+                else self._tertalisRunId
             ),
             applicationId=(
                 current.applicationId

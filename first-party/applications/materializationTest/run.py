@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/run.py ; version: 4
+# file: first-party/applications/materializationTest/run.py ; version: 5
 from __future__ import annotations
 
 import argparse
@@ -129,7 +129,7 @@ def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict
 def _saveAccepted(runtime, job) -> None:
     """Persist authoritative state accepted by a Job before propagating its error.
 
-    Actant may accept authoritative memory before a later side-effect publication
+    Tertalis may accept authoritative memory before a later side-effect publication
     fails. Saving before re-raising preserves that accepted state rather than
     losing it merely because the Job also carries an error.
     """

@@ -1,5 +1,5 @@
-# file: backend/process/runtime.py ; version: 1
-"""Actant-owned execution boundary for configured external tools."""
+# file: backend/process/runtime.py ; version: 4
+"""Tertalis-owned execution boundary for configured external tools."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 import subprocess
 import time
+from threading import Event, RLock
 from typing import Mapping, Sequence
 
 
@@ -26,7 +27,7 @@ class ProcessToolDefinition:
 
     The executable is runtime configuration rather than CodeEntry authority.
     Optional environment entries override the host environment inherited from
-    the Actant process for invocations of this tool only.
+    the Tertalis process for invocations of this tool only.
     """
 
     name: str
@@ -105,7 +106,7 @@ class ProcessToolRegistry:
         try:
             return self._definitions[name]
         except KeyError as err:
-            raise ProcessExecutionError(f"Process tool {name!r} is not configured.") from err
+            raise ProcessExecutionError("Process tool is not configured.") from None
 
 
 class ProcessRunner:
@@ -116,6 +117,23 @@ class ProcessRunner:
         if not isinstance(registry, ProcessToolRegistry):
             raise TypeError("registry must be a ProcessToolRegistry.")
         self._registry = registry
+        self._processLane = RLock()
+        self._active = None
+        self._quarantined = Event()
+
+    def requireReady(self):
+        """Reject every new process/normal runtime entry after uncertain ownership."""
+        if self._quarantined.is_set():
+            from backend.process.capture import ProcessCleanupPendingError
+            raise ProcessCleanupPendingError()
+
+    def requireDrained(self):
+        """Report pending exact owned resources even after runtime teardown attempts."""
+        with self._processLane:
+            pending = self._active is not None
+        if pending:
+            from backend.process.capture import ProcessCleanupPendingError
+            raise ProcessCleanupPendingError()
 
     def run(
         self,
@@ -129,7 +147,7 @@ class ProcessRunner:
 
         A nonzero tool exit is a normal completed invocation and is returned in
         ``ProcessResult``. Failure to resolve, launch, communicate with, or wait
-        for the process is an Actant infrastructure failure.
+        for the process is a Tertalis infrastructure failure.
 
         Args:
             toolName: Logical host-configured tool identity.
@@ -146,15 +164,16 @@ class ProcessRunner:
             TypeError: If arguments or timeout have invalid types.
             ValueError: If the working directory or timeout value is invalid.
         """
+        self.requireReady()
         definition = self._registry.require(toolName)
         normalizedArguments = self._normalizeArguments(arguments)
         cwd = Path.cwd() if workingDirectory is None else Path(workingDirectory).expanduser()
         try:
             cwd = cwd.resolve(strict=True)
         except OSError as err:
-            raise ProcessExecutionError(f"Process working directory cannot be resolved: {cwd}") from err
+            raise ProcessExecutionError("Process working directory cannot be resolved.") from None
         if not cwd.is_dir():
-            raise ValueError(f"Process working directory is not a directory: {cwd}")
+            raise ValueError("Process working directory is not a directory.")
         if timeoutSeconds is not None:
             if type(timeoutSeconds) not in (int, float):
                 raise TypeError("timeoutSeconds must be a number or null.")
@@ -166,11 +185,11 @@ class ProcessRunner:
             resolvedExecutable = configuredExecutable.resolve(strict=True)
         except OSError as err:
             raise ProcessExecutionError(
-                f"Configured executable for process tool {toolName!r} cannot be resolved: {configuredExecutable}",
-            ) from err
+                "Configured process executable cannot be resolved.",
+            ) from None
         if not resolvedExecutable.is_file():
             raise ProcessExecutionError(
-                f"Configured executable for process tool {toolName!r} is not a file: {resolvedExecutable}",
+                "Configured process executable is not a file.",
             )
 
         environment = os.environ.copy()
@@ -191,7 +210,7 @@ class ProcessRunner:
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as err:
-            raise ProcessExecutionError(f"Process tool {toolName!r} failed to execute: {err}") from err
+            raise ProcessExecutionError("Process tool failed to execute.") from None
         endedMonotonicNs = time.monotonic_ns()
         endedTimeNs = time.time_ns()
         return ProcessResult(

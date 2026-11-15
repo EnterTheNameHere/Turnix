@@ -1,4 +1,4 @@
-# file: backend/application/runtime.py ; version: 6
+# file: backend/application/runtime.py ; version: 7
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,7 +12,7 @@ __all__ = ["Application", "ApplicationRun", "ApplicationRunState"]
 
 @dataclass(slots=True)
 class Application:
-    """One durable Actant Application identity and its authoritative root.
+    """One durable Tertalis Application identity and its authoritative root.
 
     committedState belongs to the Application because it is the state that
     survives across ApplicationRuns through SaveBundle persistence. A run only

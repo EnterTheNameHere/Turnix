@@ -1,0 +1,134 @@
+EX-04 FIRST CHECKPOINT - INTEGRATION REVIEW / IMPLEMENTATION AUTHORIZATION
+=======================================================================
+Reviewer: Integration. Date: 2026-11-05.
+Canonical reviewed ref: 76b7409 on actant-integration.
+Application proof ref: b5363ea5c44e60159f03ee38c1ad5672656bec4f,
+exact parent accepted EX-03 5ff50b7e53ef2e7a918b6253b71b918441c4600d.
+Inputs: assignments/experiment-runner-ex04.txt;
+knowledge/experiment-runner-ex04-plan.txt;
+knowledge/experiment-runner-ex04-request-evidence-proposal.txt.
+
+Decision / meaning
+------------------
+APPROVED FOR IMPLEMENTATION with the binding clarifications below. No blocking
+defect found in the proposed architecture. The mandatory first checkpoint is
+complete. Application archive implementation may proceed on actant-experiment-runner
+from b5363ea5. This approves the proposed process-death protocol, bounded writer/
+reader and narrow shared seam direction; it does NOT accept an EX-04 capability.
+No production archive or evidence seam exists at these reviewed refs.
+
+Separate shared implementation is now explicitly assigned to the same implementer
+under assignments/experiment-runner-ex04-request-evidence.txt. Its platform-only
+patch must be reviewed/accepted independently before Application adoption. No
+Application source/tests may enter the platform patch. EX-05 remains unassigned.
+
+Independent evidence
+---------------------
+Fetched both branches and inspected proof commit/parent/diff. Exactly one owned
+test file changes: version5->6, synthetic rig retains exact Request.data and two
+feasibility cases are added. No production/platform code changes. Compared backend,
+first-party, tools and tests between proof Application and canonical platform:
+differences are exclusively the ten Application files and its owned test module.
+No shared source drift or deletion synchronization needed at this checkpoint.
+
+Checked actual source, not only proposal assertions:
+ - streamingRuntime._streamResolved catches ordinary streamObserver errors and
+   continues. Required persistence must have its own sticky failure/admission gate.
+ - ManagedIo atomic replacement lacks fsync; Job transaction IO is not a suitable
+   rollback-independent durable archive writer.
+ - _Session.stream serializes provider controls into Request.data and sends through
+   OwnedHttpTransport.open. Structured App queries are not exact body evidence.
+ - OwnedHttpTransport sets mayHaveSent before connection.request; failed connect
+   can remain false, partial send true is ambiguous. Successful open observes only
+   successful response headers; unsuccessful HTTP status can raise after headers
+   internally arrived. Do not invent a response-observation fact on those paths.
+ - compose has runtime-issued owners and exact source selectors; adapter admission
+   currently has no actual caller link. Minimal trusted binding is justified.
+
+Own Python3.15.0b4/pytest9.2.0, pristine git-archive b5363ea5 with source/backend/
+provider origins asserted inside that archive, no original-checkout source fallback:
+1919 passed in 17.21s, zero skips (140 App + 1779 platform), including both new
+feasibility proofs and all accepted EX-03 regressions. Command uses embedded Python
+-X frozen_modules=off, pytest -q --import-mode=importlib --tb=short tests, with
+archive root inserted and original checkout removed from sys.path.
+Existing embedded-home warning persists. No Ruff or real EX-04 run claimed.
+
+Binding archive implementation clarifications
+---------------------------------------------
+1. DATA/COMMIT + immutable blob protocol is approved for the declared local process-
+   death / OS-still-running model. Keep exact bytes/hash rules, artifact-before-
+   COMMIT ordering and flush/fsync before ACK. Test fresh-child exit after actual
+   ACK and inspect from another process. Record tested filesystem and directory
+   sync availability honestly; neither file fsync nor directory existence proves
+   universal power-loss durability. No broader IO rewrite is required.
+2. Writer timeout poisons future admissions but cannot revoke an in-progress OS
+   write. An eventual valid COMMIT may appear after timeout. Recovery may validate
+   it as an on-disk commit with ACK observation unavailable; it must never infer
+   execution succeeded or caller ACKed. Timed-out workers/handles retain explicit
+   ownership until completion or process exit. Bounded close must not claim a
+   stalled worker stopped, race it with a second writer, or force-dispose it.
+3. Timer/event thresholds trigger a checkpoint; they are not a wall-clock guarantee
+   that disk acknowledged it. Account for pending AND in-flight serialized bytes,
+   mandatory commands, artifacts and escaped JSON. Partial caps may truthfully stop
+   a fragmented stream; never silently omit content to label evidence complete.
+4. Archive failure latch and exact active-Job cancellation must be observed before
+   every next turn/unit admission, including timer/background failures without new
+   stream events. Worker callbacks/cancellation must not run under writer queue
+   locks or backend/domain/transport stop locks. Mandatory waits must observe
+   cancellation/deadlines; a stalled sink cannot freeze the cancellation relay.
+5. A required pre-send capture callback can fail a call whose provider never sent;
+   after-send sink failure cannot manufacture provider uncertainty or clear actual
+   UNKNOWN. Preserve actual call/Job/cleanup evidence, first non-Exception exit,
+   independent archive failure and later cleanup facts. Never let a final capture
+   callback replace an earlier provider/cancellation/interrupt exception.
+6. Reader enforces typed payloads/order/limits and validates all referenced blobs
+   before projecting a committed record. Torn final data is distinct from a
+   complete invalid frame/hash/reference. A valid prefix is useful evidence, not
+   complete success in a corrupt archive. Seal is not a close or ACK-return receipt.
+   Existing result schemas stay inspectable without being called durable archives.
+
+Binding shared seam clarifications
+----------------------------------
+7. Required/disabled policy is bound to actual runtime-issued owners at composition,
+   independently of whether a ContextVar scope exists. A required owner invoking
+   with no scope MUST fail before inference send; absence must not silently opt out.
+   A foreign scope must not capture a disabled owner's body. Repeated compose's
+   existing-binding fast path must not silently broaden/replace capture policy.
+8. ContextVar is a locator, not authority or exclusive ownership. Use an atomic
+   one-use claim on an instance-local scope bound to exact owner and admitted call.
+   Test copied contexts attempting overlapping and later reuse, cross-thread use,
+   wrong broker/owner, nested scopes, close/revocation and concurrent Applications.
+   Reject unsupported crossings explicitly. Cleanup can emit bounded final facts
+   for its already claimed ticket; it cannot authorize another inference.
+9. Actual-owner link is trusted adapter-only identity, excluded from repr, metadata,
+   traces and archives. Prefer the smallest identity comparison needed; exposing
+   runtime ownership to trusted adapter must not give the App a new execution or
+   revocation handle. Existing runtime validation/grants remain authoritative.
+10. Capture bytes EXACTLY from the immutable Request.data used by open; do not change
+    serialization, requests, transport or token/template/slot traffic. Required
+    serialized and attempt ACKs occur before inference open. Callbacks execute
+    outside broker/backend/stop locks, with fail-closed lifecycle rechecks before
+    send. After serialization/admission failure, release scope and preserve the
+    actual unsent/uncertain provider finalization semantics.
+11. Report only facts the current transport exposes: successful-open headers may
+    be observed; error-path headers may be unavailable. No new transport API is
+    required merely to replace unknown with a fact. mayHaveSent is not consumption.
+    Do not wrap a late error as not-sent simply because the sink failed.
+12. Fixed public failure text alone does not guarantee privacy: test exception
+    cause/context formatting, observerErrors, Job/trace/event/profile/PM/G paths
+    using distinctive synthetic private content. No ordinary raw sink exception
+    should leak a body/path through generic diagnostics. Preserve exact primary
+    non-Exception object/precedence; no raw content in secondary diagnostic records.
+
+Next checkpoint
+----------------
+Deliver platform-only shared patch first for independent review, with scope/policy/
+failure/privacy tests and full platform suite. App writer/reader may develop in
+parallel against an explicitly synthetic seam, without claiming provider capture.
+After accepted platform integration, safely consume COMPLETE platform preserving
+owned App files; then deliver App archive implementation and combined verification.
+Full EX-04 acceptance requires actual eight-call private archived request evidence,
+independent transport-byte comparison and fresh offline inspection. Existing EX-03
+real evidence does not certify this. Worker assets remain blocked; Integration can
+arrange its existing approved assets at the final gate. No real model crash/kill,
+new native abort probe, automatic resume/replay or EX-05 scope authorized.

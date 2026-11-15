@@ -1,4 +1,4 @@
-# file: backend/values/address.py ; version: 2
+# file: backend/values/address.py ; version: 3
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -88,7 +88,7 @@ class RelativeValueAddress:
 @dataclass(frozen=True, slots=True)
 class ValueAddress:
     """
-    Represents one canonical absolute address in the Actant Value System.
+    Represents one canonical absolute address in the Tertalis Value System.
 
     A ValueAddress identifies one logical value independently of how that
     value is represented, materialized, stored, transported, or accessed by a
@@ -96,7 +96,7 @@ class ValueAddress:
 
     ValueAddress is machine-facing identity. It is deliberately less
     expressive than ordinary text so that identity remains simple,
-    predictable, and portable across Actant implementations.
+    predictable, and portable across Tertalis implementations.
 
     Canonical addresses:
         - contain lowercase ASCII characters only;
@@ -129,7 +129,7 @@ class ValueAddress:
     does not automatically create further ValueAddress identities.
 
     The address grammar is intended to have the same semantic meaning in every
-    Actant-supported language. Python-specific object behaviour is not part of
+    Tertalis-supported language. Python-specific object behaviour is not part of
     ValueAddress identity.
 
     Attributes:

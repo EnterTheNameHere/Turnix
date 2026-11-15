@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 17
+# file: backend/values/committed.py ; version: 18
 from __future__ import annotations
 
 import base64
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from threading import RLock
 
-from backend.core.errors import ActantError
+from backend.core.errors import PlatformError
 from backend.core.runtimeIds import newRuntimeId
 from backend.values.address import ValueAddress
 from backend.values.layer import ValueLayer
@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 
-class StateConflictError(ActantError, RuntimeError):
+class StateConflictError(PlatformError, RuntimeError):
     """Raised when authoritative state changed after a transaction first touched an address."""
 
 
@@ -139,7 +139,7 @@ class CommittedValueLayer(ValueLayer):
         next authoritative revision number. Canonical content and metadata
         identities remain unchanged when that staged state commits.
 
-        Producers may persist this object inside validity metadata. Actant does
+        Producers may persist this object inside validity metadata. Tertalis does
         not infer or traverse dependencies automatically.
         """
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
@@ -283,7 +283,7 @@ class CommittedValueLayer(ValueLayer):
             )
 
         return {
-            "formatId": "actant.committed-values@2",
+            "formatId": "tertalis.committed-values@2",
             "values": values,
             "chunks": chunks,
         }
@@ -291,8 +291,8 @@ class CommittedValueLayer(ValueLayer):
     @classmethod
     def fromSnapshot(cls, snapshot: object) -> CommittedValueLayer:
         """Restores latest committed state from a validated persistence snapshot."""
-        if not isinstance(snapshot, dict) or snapshot.get("formatId") != "actant.committed-values@2":
-            raise ValueError("Committed Value snapshot requires formatId 'actant.committed-values@2'.")
+        if not isinstance(snapshot, dict) or snapshot.get("formatId") != "tertalis.committed-values@2":
+            raise ValueError("Committed Value snapshot requires formatId 'tertalis.committed-values@2'.")
 
         values = snapshot.get("values")
         chunks = snapshot.get("chunks")

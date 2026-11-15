@@ -1,0 +1,104 @@
+ER-01 INTEGRATION API REVIEW / IMPLEMENTATION AUTHORIZATION
+=========================================================
+Owner: Integration. Date: 2026-11-02.
+Reviewed proposal: 6920227 (canonical commit containing the original proposal).
+Dispatch parent: 5d30e6a0b5510d225473cbeb81689d26a38fe3bb.
+Worker: execution-resource-domain; new ER-01 implementer per user, independent of
+prior LC chat context. Canonical repo documents are the required handoff.
+Inputs: execution-resource-er01-proposal.txt, approved A/B/C decision addendum and
+assignments/execution-resource-transitions.txt. No new A/B/C principle vote.
+
+Decision
+--------
+Approve ER-01 implementation with the binding clarifications below. No second
+proposal checkpoint is needed for these provider-neutral lifecycle details.
+Refresh canonical coordination, synchronize safely to the commit containing this
+review, record exact implementation parent, and implement ER-01 only. No runtime
+capability is accepted by this review; ER-02/03 adoption remains a combined gate.
+
+Accept the neutral service/domain separation, retained failed/unknown tombstones,
+exact issued-handle validation, host-granted profiles/transition permission,
+explicit initial/idle materialization, generation tickets, immediate typed conflict,
+compatible operation claims, exclusive reservations and retained pins. Participant
+leases alone do not pin residency. Accept narrow effect/quiescence outcomes and
+fail-closed unknown state. Do not add a generic requirements/attestation engine.
+
+1. Admission revocation must not revoke cleanup authority
+--------------------------------------------------------
+The proposed live-owner/generation checks apply to new admission/use. Exact issued
+claims/tickets must remain able to finish/report/dispose their own outstanding work
+after participant/reservation/domain admission closes. Otherwise owner close would
+make legitimate late completion impossible and strand every blocker.
+Keep revoked-for-use distinct from terminally-disposed; no new execution after
+revocation, but cleanup can finish. Late/foreign generation evidence must never
+clear a newer blocker. Preserve typed idempotent duplicate completion behavior.
+Test owner/reservation/domain close followed by confirmed and unknown late finish.
+
+2. Provider evidence is trusted adapter input, never Pack assertion
+-----------------------------------------------------------------
+OperationClaim.finish(effect) and retained-context cleanup evidence are internal
+adapter/composition hooks. Future public owner/session close must not let a Pack
+assert quiescence=confirmed to bypass protection. Issued handles and evidence
+reporters must have documented roles, with no public caller-supplied authorization
+boolean. In-process host/provider trust is not a hostile Python sandbox.
+Keep error/outcome codes bounded and exclude opaque payloads/private labels from
+repr/diagnostics. Complete immutable descriptor identity is the adapter's contract;
+do not compare/hash arbitrary payloads or call payload equality under locks.
+Repeated registration is either idempotent for the same issued descriptor or a
+clear conflict; the core cannot certify semantic equality of opaque payloads.
+
+3. Deferred retained-context disposal needs a concrete owner
+-----------------------------------------------------------
+Specify and implement a trusted disposer callback/ticket registered when the pin
+is retained (or equivalent explicit adapter-owned lifecycle). pin.close requests
+revocation/cleanup; it must not fabricate future cleanup evidence while in use.
+After the last operation confirms quiescence, invoke the registered disposer exactly
+once outside all core/host/registry locks, then publish its typed result for that
+exact context ticket. Callback exceptions/unknown effects keep the proper blocker.
+No slot/reset/cache mechanism belongs in ER-01. This is generic disposal of an
+owned opaque resource, not snapshot persistence or provider-state introspection.
+Test pin close during use followed by late operation finish, disposer reentry/
+exception, double close and stale disposer results. No callback may be orphaned by
+final participant close. A retained pin from a closing reservation must continue
+blocking incompatible/unrelated admission until actually disposed.
+
+4. Cancellation during transitions must complete owned cleanup
+--------------------------------------------------------------
+Never hand a late materialized object to cancelled/closed work. The transition
+ticket owns disposal of unpublished results through adapter.release exactly once,
+outside locks. Known successful cleanup may leave the domain known-empty (or closed
+if shutdown won); failed/unknown cleanup leaves failed/unknown protection. No auto
+retry, resurrection of old READY or generic recovery is authorized. Cancellation
+outcome and resource disposition remain separate. Do not retain a permanent blocker
+merely because cancellation happened when ordinary owned cleanup can establish empty.
+bindStop after cancellation/owner-close must still deliver the pending stop request
+once; replacement/double registration semantics must be explicit and tested.
+
+5. Two-stage host close must really reach cleanup outside locks
+--------------------------------------------------------------
+Current RuntimeHost.stop holds its host lock during application/shared-service
+cleanup and returns early when state is STOPPED. Do not promise that all legacy
+callbacks already run outside that lock. For the new facility, close admission
+under the host lock, then call finishClose after leaving it. Preserve existing
+host/shared-service behavior rather than refactoring unrelated consumer teardown.
+Aggregate existing errors and new pending/failed/unknown cleanup honestly; setting
+host STOPPED is not proof all resources drained. Repeated stop/finishClose must
+not silently skip unresolved cleanup or repeat a provider disposal. Registering a
+replacement domain after failed/unknown shutdown must remain prohibited.
+Test a callback that requires a second thread to enter host/domain read paths:
+same-thread RLock reentry alone does not establish absence of a held lock.
+If lifecycle-only host wiring cannot preserve these bounds, report exact conflict
+before expanding host/Application teardown scope.
+
+Verification / scope
+---------------------
+Implement the deterministic barrier/event tests in the original proposal, plus
+the cases above; bounded joins are deadlock guards, not sleep-based race proofs.
+Run runtime tests, existing LLM/driver/Job/observation regressions and complete
+Actant tests. Record actual Python version, commands/counts/skips/limits; source
+headers/versions/docstrings and diff checks apply. No source/tests were changed
+or executed for this documentation-only review. Existing accepted test evidence
+remains unchanged. No model, real provider quiescence, consumer adoption or new
+managed switching safety is claimed. ER-02/03/04 and Runner remain unassigned.
+Publish completion with exact parent/branch/commits to Integration inbox; do not
+self-accept or merge production implementation into actant-integration.

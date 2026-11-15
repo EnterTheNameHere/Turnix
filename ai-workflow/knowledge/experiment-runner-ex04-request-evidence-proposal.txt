@@ -1,0 +1,140 @@
+EX-04 - MINIMAL PRIVATE LLAMA.CPP REQUEST EVIDENCE PROPOSAL
+==========================================================
+Owner/proposer: experiment-runner; shared owner/reviewer: Integration.
+Prepared 2026-11-03; published 2026-11-05.
+STATUS: PROPOSED DEPENDENCY, NOT AUTHORIZED/IMPLEMENTED.
+App baseline 5ff50b7; proof-only successor b5363ea5. Canonical parent b1234a64.
+Assignment forbids worker backend/provider edits without separate review. This
+requests that review; it does not establish a new shared API by itself.
+Archive counterpart: experiment-runner-ex04-plan.txt.
+
+Evidence / why existing seams do not suffice
+---------------------------------------------
+backend/llm/streamingRuntime.py:778-783 catches streamObserver Exception, appends
+observerErrors containing type/message and continues. Required disk sink cannot
+throw raw filesystem errors there or treat that raise as fatal. Proof test
+ex04_planning_required_checkpoint_cannot_rely_on_observer_raise runs actual Job,
+managed reservation and ctx.llm.run with fixed OSError observer: Job Succeeded,
+answer returned and cleanup confirmed. This best-effort contract is not a defect.
+
+first-party/llmDrivers/llamaCpp/executionAdapter.py:598-615 builds provider messages/
+options, adds id_slot and cache_prompt, then json.dumps(...).encode('utf-8') as
+http.Request.data. App LlmMessages payload is only planned structured messages.
+Proof ex04_planning_structured_snapshot_is_not_serialized_provider_body captures
+Request.data ONLY AT THE SYNTHETIC TEST BOUNDARY: messages equal App history but
+full body bytes/SHA differ and include stream/max_tokens/id_slot/cache_prompt.
+Current result/configurationEvidence contains no exact request-body receipt for
+success and every failure path. ConfigurationEvidence is startup/build evidence.
+
+ownedTransport.py open sets mayHaveSent before connection.request; a later
+successful response/idle snapshot cannot prove an earlier uncertain request's
+server consumption. No capture field in _LlmFacade.run, LlmCallRequest, public
+metadata or LlamaCppComposition currently supplies an operation-scoped private
+body sink. App production must not monkeypatch transport or rebuild serialization.
+backend/io/managedIo.py:494-503 uses write_text + replace, no fsync; it is not the
+proposed acknowledged process-death archive protocol. No shared IO rewrite proposed.
+
+Selected narrow shared shape (names proposed for review)
+----------------------------------------------------------
+1. Provider-owned PrivateRequestEvidence broker, optional trusted constructor
+   parameter on LlamaCppComposition, default None/off. Instance-local operation
+   scopes, NOT module-global transport interception or generic event collection.
+   Host policy lists exact initially composed caller EntrySelectors and required/
+   disabled capture plus bounded maxBodyBytes. Existing selector/transition grants
+   remain the sole execution authority. Definitions/providerOptions cannot mint
+   capture rights, choose destinations or broaden policies.
+2. Host archive port opens broker.scope(expected actual ApplicationRun/CodeEntry
+   instance, immutable suite/unit/turn correlation, sink, required=True) around one
+   ctx.llm.run. Scope has a non-serializable one-use nonce and is invalidated in
+   finally; no global lookup by caller-supplied string grants. ContextVar belongs
+   to that broker instance; no cross-thread/process/global capture subscription.
+   Closed/copied/reused/nested/foreign scopes reject as appropriate, never leak.
+3. compose already sees snapshot.owners actual identities AND runtime-issued owner
+   objects; bind policy there, not from application names. Current
+   LlmAdapterAdmission exposes residency/context/stop, NOT actual caller identity.
+   Small candidate backend addition: trusted read-only owner reference supplied by
+   LlmCallSession from access.owner when constructing LlmAdapterAdmission. Only
+   provider validates identity against compose-time policy; never expose/store the
+   live owner in App evidence. No new grant, Context or transaction. Integration
+   may choose an equivalent narrower owner binding, but identity must be actual,
+   not inferred from resource profile/filename/correlation/target label.
+4. _Session.stream claims that one scope for its exact admitted ticket/owner after
+   request options are validated, before stream IO. Estimator/template/slot traffic
+   does not consume the inference scope. Keep admission, cleanup ownership and
+   revocation checks unchanged. New execution after revocation denied; exact old
+   ticket may still emit final diagnostic disposition through its already bound
+   sink, without authorizing any new provider operation.
+5. Immediately after constructing http.Request, capture EXACT immutable
+   transport.data bytes, content type application/json, encoding utf-8, length,
+   SHA-256 and opaque evidence-call ID plus safe owner/residency correlation.
+   No reserialization, header/URL/cookie/Authorization capture or live handles.
+   Raw user/model-facing body is explicitly private intentional content. Store
+   original bytes as artifact; parsed view optional/non-authoritative. Provider
+   wraps ordinary sink errors in fixed private failure categories, no raw paths
+   through traces/observerErrors. Non-Exception exits keep first-exit semantics.
+6. REQUIRED serialized/body artifact + record must ACK BEFORE OwnedHttpTransport.open
+   can send. Absent/broken/wrong-owner/oversized/failing required capture rejects
+   before inference send; no best-effort fallback. Default off does not allocate
+   buffers or add bodies/paths to generic metadata/events/PM/G/traces. Explicit
+   disabled policy is recorded unavailable/disabled by App, not full provenance.
+
+Private phase facts (proposed actant.llamaCpp.requestEvidence@1)
+-----------------------------------------------------------------
+Provider uses the same sink for its exact admitted request, no global events:
+ - serialized: exact Request.data length/hash/body reference, ACK required;
+ - transport-attempt: durable intention BEFORE open; does NOT claim bytes sent;
+ - response-headers-observed: only after exact open returns successful response;
+ - final transport facts: actual mayHaveSent, response/body-observation availability,
+   reason and stage when known, with serverConsumption ALWAYS unknown.
+Capture booleans are observed facts, not a universal delivery enum or server ACK.
+Initial App turn-attempt with no later provider evidence => capture/send unavailable,
+not invented bytes. Serialized ACK only => prepared-for-transmission; if process
+dies before final facts, delivery UNKNOWN (even if it died just before open).
+Explicit final mayHaveSent=false after known pre-send failure => not-sent according
+to this owned transport; true => may-have-sent, never consumed/delivered guarantee.
+Header/SSE observation is only response evidence. Cancellation/pre-header/partial
+send/final-sink failure preserves ambiguity and original Job/cleanup disposition.
+
+Before-send sink failure is fatal and stops before open; existing finalizer handles
+the actual unsent/uncertain provider state, not an archive-invented cleanup receipt.
+After-send sink failure cannot unsend: poison archive, latch separate capture/write
+failure and cooperatively cancel that exact Job as necessary; preserve primary
+provider error/cancellation/UNKNOWN, no replay or claims repair. Final callback/
+archive-close failure may be unpersistable; caller diagnostics and recovered prefix
+must label missing observations unavailable. No generic best-effort observer change.
+
+Smallest proposed shared source/test boundary
+-----------------------------------------------
+ backend/llm/executionSessions.py: trusted actual-owner link on adapter admission
+   only, two construction sites; no public query/event or cancellation redesign.
+ first-party/llmDrivers/llamaCpp/requestEvidence.py (new): opt-in private broker,
+   scoped sink protocol/phase data/bounds, default-off/owner/lifetime checks.
+ first-party/llmDrivers/llamaCpp/executionAdapter.py: compose-time identity binding,
+   per-session scope and exact Request.data/pre-open/failure-finalization hooks.
+ llamaCpp/README.md and provider tests: contract/privacy/required behavior and
+   deterministic transport comparison/failure/owner/revocation tests.
+ No ownedTransport copy/fork/monkeypatch, all-provider logger, HTTP client, raw
+ request API, new telemetry/global observer or automatic provider restart.
+ Actual file/API choice and patch ownership require separate Integration approval.
+
+Verification before App adoption
+----------------------------------
+Independently test exact archived body/digest equals bytes handed to transport
+(success, Unicode, controls, caller mutation), opt-out zero capture, wrong/foreign/
+stale owner/scope/call rejection, scoped concurrent App isolation, required sink
+missing/failure/size rejection BEFORE send, pre-send open failure mayHaveSent=false,
+partial/pre-header mayHaveSent=true, response observation, late final callback
+failure, cancellation/revocation/cleanup, no telemetry/error-path raw leakage.
+Use actual managed broker/provider, synthetic IO for deterministic fault paths;
+normal real eight-call verification after separate shared acceptance/adoption.
+No native abort/crash probe or real provider kill needed.
+
+Decision requested / delivery status
+--------------------------------------
+Please review archive plan plus this narrow dependency, authorize/assign the
+shared implementation separately or return concrete corrections. App can prepare
+writer/reader tests against labeled synthetic sink after archive-contract review;
+full real exact-provenance adoption waits for accepted COMPLETE platform baseline.
+Two feasibility proofs in App b5363ea5 pass; no seam/archive capability is claimed.
+Worker assets still inaccessible. EX-03 acceptance at 5ff50b7 acknowledged; no
+EX-05/comparison/resume/automatic recovery or physical guarantees requested.

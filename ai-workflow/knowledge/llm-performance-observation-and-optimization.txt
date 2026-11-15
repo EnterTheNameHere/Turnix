@@ -1,0 +1,278 @@
+ACTANT - INFERENCE PERFORMANCE OBSERVATION AND OPTIMIZATION
+
+Working knowledge; accepted boundaries and integrated bounded PM-01/02/03 packages.
+
+STATUS
+------
+Working coordination knowledge, not canonical DA/IS design. Discussion owner:
+performance finder conversation. The design-owner decision below accepts the
+initial local-process boundaries. Integration prepared PM-01/02/03 work packages
+at ai-workflow/assignments/passive-monitoring.txt against
+4c659609ebc3a1f0ed78d714505a702db396dca6. Integration is accountable for
+implementation and acceptance. PM-01 is integrated and accepted at
+154dcd96c2b122d52af17fdbb756ecb4ecbf9983. PM-02 is integrated and accepted
+at f374492deb089e2c706c9a56565a9571ac47b194 after independent review and
+verification (see stream-observation.txt). PM-03 is integrated and accepted at
+bde9778614194fc1a01f65f5be568efe94f8d8fe; see application-observation.txt for
+interfaces, independent verification, limitations and consumer adoption boundaries.
+Exact interfaces, commits and verification: knowledge/telemetry-subscriptions.txt. Physical placement and optional provider
+activation policy remain open within the accepted boundaries.
+
+ACCEPTED REQUIREMENTS
+---------------------
+Reuse existing hardware telemetry; avoid duplicate collectors.
+Monitor ordinary inference and variability, not only optimizer experiments.
+Measure whole-system CPU, RAM, GPU and VRAM under normal competing workloads.
+Keep engine-specific instrumentation with the engine integration, not generic
+backend. Unused engines must not load their monitoring.
+Future hardware providers may include AMD/Radeon and Intel; initial NVIDIA
+support must not become a universal dependency.
+When unused, optional monitoring must not keep polling or retaining histories.
+Shared collection must honor active consumers independently.
+Monitoring never authorizes server restarts or optimizer experiments.
+Backend versus Pack placement remains open to actual implementation pressure.
+Optimization should consider speed, latency, memory headroom and variability.
+
+APPLICATION OBSERVATION BOUNDARY (TELEMETRY NOTE, 2026-10-29)
+------------------------------------------------------------
+The user relayed the telemetry conversation's architectural clarification:
+ordinary inference observation must not require an Application to know which
+hardware telemetry provider is available or how that provider is shared.
+An Application requests observations appropriate to its needs. Implementation
+resolves whether these come from an existing service, an optionally activated
+provider, or no available provider. Provider discovery, activation mechanics and
+sharing remain behind that application-facing boundary. Hardware unavailability
+must be explicit and must not be represented as a zero-valued measurement.
+
+Preserve this contract if implementation later moves between backend and Packs.
+Reusing TelemetryService is a candidate implementation mechanism, not a required
+Application dependency. The note does not establish new Pack activation authority,
+require automatic provider activation, or resolve the three scoping decisions
+below. This remains working coordination knowledge, not canonical DA/IS design.
+
+STREAMED-TEXT MEASUREMENT (ACCEPTED)
+------------------------------------
+Normal inference monitoring must remain useful without engine-native token
+counters. Timestamp delivered text using a monotonic clock; expose observed
+characters/second and optionally words/second, plus first-text latency and
+delivery variation. Stream chunks are not necessarily model tokens; network
+or buffering effects may cause bursts. Use time windows for meaningful plots.
+Do not present words/second or characters/second as actual tokens/second or
+convert them with an arbitrary universal ratio. When reliable engine token
+measurements exist, preserve them separately. Generic stream observation can
+work across providers; engine-specific metrics remain optional.
+Do not retain generated content solely to calculate rates, and avoid additional
+work when no consumer has enabled monitoring.
+
+FIRST IMPLEMENTATION CANDIDATE - PREPARED WORK PACKAGES
+-------------------------------------------------------------
+Passive monitoring of ordinary inference, using existing host TelemetryService
+and optional provider-neutral streamed-text measurements. Associate observations
+by time; expose time-series data for later graphing. Track characters/second,
+optional words/second, first-text latency and variations/recovery; preserve
+actual token rates separately if the engine provides reliable metrics.
+Keep collection disabled/no meaningful overhead without consumers.
+
+Prerequisite reconciliation: Integration's manifest selects structuredCodeEntry.py,
+which implements managed host leases and the active response cancellation callback;
+codeEntry.py is its underlying driver implementation. Source and fake-based tests
+were inspected at a4a51450a7abfe87ddece284cb3ca2aa334bf8b4, without executing
+tests. Consumer branches are older and have not adopted those provider changes;
+see ai-workflow/state/shared-packs.txt for named heads and limits.
+
+Out of initial scope: automatic tuning, model/server restarts, MTP experiments,
+persistent long-term storage and a full graph UI. Integration should choose
+bounded assignments, owners, tests and safe synchronization; this knowledge
+record does not authorize an implementer to start independently.
+
+INTEGRATION SCOPING - IMPLEMENTATION DECOMPOSITION
+--------------------------------------------
+Integration owns implementation and acceptance on actant-integration. Codex PM-01
+implemented PM-01, now accepted on Integration at
+154dcd96c2b122d52af17fdbb756ecb4ecbf9983; see telemetry-subscriptions.txt.
+No consumer Application branch has adopted it. Original source-inspection baseline:
+a4a51450a7abfe87ddece284cb3ca2aa334bf8b4. This is a proposed decomposition,
+not a design decision that backend or Pack is the final home of monitoring.
+
+1. DONE for the bounded backend contract in PM-01: optional shared observation
+   lifecycle and subscriptions. The original scope was to establish that lifecycle
+   around the existing
+   TelemetryService, reusing its machine/GPU providers. Verify actual composition
+   before assuming RuntimeHost currently constructs it: RuntimeHost source at the
+   baseline has SharedServiceRegistry but no TelemetryService reference. At that
+   original baseline,
+   TelemetryConfiguration is fixed per service, and history sampling starts a
+   thread when configured; PM-01 now supplies the per-consumer subscription API.
+   Define independent consumer ownership and bounded retention so ending one
+   consumer does not stop another, and the last monitoring consumer releases
+   monitoring-owned polling/history without stopping unrelated consumers.
+2. DONE for the bounded backend contract: accepted PM-02 provides the stream seam.
+   Original scope: add an opt-in provider-neutral observer at the existing LLM stream boundary
+   (LlmProcessingPipeline._streamResolved is a candidate, subject to accepted
+   placement). Timestamp non-empty delivered text using monotonic time, count
+   characters without retaining content, calculate first-text latency and bounded
+   time-window throughput/variation, and expose bounded samples for a consumer.
+   Words/sec may be deferred. Preserve native token metrics separately if made
+   available; never label delivery counts as tokens. Disabled runs must install no
+   observer, retain no monitoring history and do no monitoring-specific per-event
+   clock/count work. Cancellation, exceptions and normal completion must release
+   each run's monitoring claim without changing Job or provider outcomes.
+3. DONE for the bounded local-process contract: PM-03 correlates PM-01 collection
+   intervals and PM-02 stream windows using monotonic timestamps. Raw
+   TelemetrySnapshot.sampledTimeNs remains wall-clock display evidence only.
+   Overlap, uncovered spans and retention limits are explicit; hardware readings
+   are not interpolated or claimed simultaneous. No second collector was added.
+
+Architectural verification for an eventual implementation: fake clocks and
+providers cover first text, empty/bursty chunks, window boundaries, variation,
+bounded retention and no content storage; no-consumer mode performs no added
+monitoring polling or event work; two consumers release independently; hardware
+unavailability is explicit; time alignment survives wall-clock changes; token
+and text rates remain distinct; normal, failure and cancellation paths clean up
+without changing inference/Job outcomes. Verify multiple providers and existing
+telemetry consumers. Runtime tests and exact refs/results must be reported before
+acceptance. No optimizer, restart, tuning, storage or UI is included.
+
+The design-owner decision below resolves access/lifetime semantics, independent
+subscriptions and the local-process clock contract. Final physical placement and
+provider activation policy remain open. Escalate genuinely new architectural
+choices; this scope does not authorize consumer-branch changes.
+
+BOUNDARY DECISIONS - INTEGRATION PROPOSALS FOR DESIGN REVIEW
+------------------------------------------------------------
+These proposals incorporate the telemetry note and are accepted, with the
+clarification recorded in the design-owner decision below. Concrete task
+boundaries and verification now live in the prepared work packages.
+
+1. Access authority and placement: expose provider-neutral observation requests
+   through an invocation-authorized Application facade. A returned observation
+   session needs explicit lifetime authority if it can outlive that invocation;
+   it must not retain an invalid CodeEntryContext. Host composition resolves
+   shared infrastructure behind the facade. Do not require Applications to select
+   hardware providers or construct/share TelemetryService. Optional activation
+   must use the applicable existing activation authority; its availability and
+   policy still need agreement. Physical backend/Pack placement stays replaceable.
+2. Consumer lifecycle: use independently releasable subscriptions with bounded
+   retention. Run-scoped monitoring releases its own claim on completion, failure
+   or cancellation. Ending the last monitoring subscription stops only work owned
+   by monitoring; pre-existing telemetry consumers retain their own claims. Agree
+   how existing service ownership participates before modifying its lifecycle.
+3. Clock alignment: use host-process monotonic sample timestamps for hardware and
+   stream correlation, retaining wall-clock time separately for display. Define
+   the timestamp as observation time and expose sampling gaps rather than implying
+   simultaneous collection. Wall-clock changes must not alter rates or ordering.
+   Monotonic values from different processes/hosts require an explicit correlation
+   contract and are outside the first local-process slice.
+
+Continuation: use PM-01/02/03 in ai-workflow/assignments/passive-monitoring.txt.
+PM-01 and PM-02 are accepted backend facilities; PM-03 composes their reviewed
+interfaces and owns facade/lifetime integration.
+PM-01 worker/ref and tested interfaces are recorded in telemetry-subscriptions.txt.
+PM-01 is accepted at 154dcd96c2b122d52af17fdbb756ecb4ecbf9983. PM-02 is
+accepted at f374492deb089e2c706c9a56565a9571ac47b194, with exact interfaces/tests
+in stream-observation.txt. PM-03 is accepted at
+bde9778614194fc1a01f65f5be568efe94f8d8fe. All three packages are integrated;
+future consumer adoption or real-provider exercise must be scoped separately after
+checking current coordination. No such follow-on is assigned by availability.
+
+DESIGN-OWNER DECISION - ACCEPTED (2026-10-29)
+----------------------------------------------
+The three Integration boundary proposals above are accepted for the initial
+local-process passive monitoring implementation, with this clarification:
+long-lived observation is permitted when it has independent valid lifetime
+ownership; it must not retain an expired invocation CodeEntryContext.
+
+1. Application-facing, provider-neutral observation requests through an
+   authorized facade. Applications specify needed observations without choosing
+   hardware vendors or managing collection providers. Invocation authority
+   must not be implicitly stretched beyond its lifetime; ongoing observation
+   uses explicit valid session/owner authority. Backend versus Pack physical
+   placement and optional provider activation policy remain open.
+2. Independently releasable, bounded observation subscriptions. Run-scoped
+   claims release on success, failure or cancellation; unrelated consumers'
+   claims persist. Different sampling requirements must not cause duplicate
+   collectors or let one consumer invalidate another. Select the mechanism
+   during implementation against existing TelemetryService ownership.
+3. Host-process monotonic timestamps for sampling and inference alignment;
+   separate wall clock for display; gaps and non-simultaneous collection are
+   explicit. Cross-process/host clock correlation is deferred.
+
+Integration may now decompose and delegate the three bounded implementation
+areas with named owners, exact refs, dependency contracts and architectural
+tests. This acceptance authorizes scoping/delegation, not an unrestricted
+implementation of automatic optimization, UI, tuning or server restarts.
+
+GRAPHING DIRECTION - ACCEPTED (2026-11-01)
+-------------------------------------------
+First graphing capability uses a deliberately replaceable optional Observation
+Bridge Pack plus an independent browser viewer. No permanent Actant frontend,
+network server choice or general communication transport is established.
+
+G-01 proposed first bounded implementation scope:
+- Optional Pack exposes selected, explicitly authorized observation sessions
+  from existing PM-01/02/03 facilities. Activation/deactivation controls local
+  endpoint lifetime; clean shutdown releases only Pack-owned observation claims.
+- Initial transport: read-only localhost HTTP snapshot polling (e.g. once/sec),
+  with simple versioned serialization that preserves units, monotonic time
+  semantics, availability, gaps and bounded/truncated-history markers.
+- Multiple readers do not cause duplicate collection. Do not expose prompt,
+  response content or generated text. Local-only binding by default; avoid
+  treating loopback as authorization.
+- Pack activation alone does not turn on inference monitoring for every call.
+  Stream measurements attach only to explicitly observed sessions/calls through
+  legitimate Actant authority. No access to unrelated Application observations
+  without a defined authorized publication mechanism.
+- HTTP implementation is disposable; the observation representation and
+  frontend's graph data model should remain transport-independent.
+
+G-02 subsequent bounded scope:
+- Standalone browser viewer consumes G-01 read-only observations; initially
+  synchronized inference speed and CPU/GPU/memory plots; show missing readings,
+  true gaps and truncated histories; basic interaction can be scoped by
+  Integration. Graphing does not own hardware collectors.
+- Live viewer may later grow zoom, annotation, recording and run comparison,
+  without committing backend architecture prematurely.
+
+Integration should first inspect whether existing Pack lifecycle and PM-03
+ownership/attachment actually allow the proposed Bridge publication. If not,
+report the minimum necessary seam and design options before implementing an
+authority bypass. Prepare exact G-01 and G-02 task contracts, owners, tests,
+baselines and sequencing in ai-workflow. This is design acceptance and
+coordination authorization, not a claim of implementation or arbitrary network
+exposure. Automatic tuning, persistent histories and a general transport
+framework remain out of scope.
+
+GRAPH PUBLICATION AUTHORITY - OPTION B ACCEPTED (2026-11-01)
+------------------------------------------------------------
+Following Integration's feasibility review at
+86bb8aec793b69a76f59a1deb996a4d14e287255, the user selected B: revocable read-only
+publication grants for explicitly selected same-ApplicationRun sessions. Scope and
+tests are in ai-workflow/assignments/observation-graphing.txt.
+Issue through valid invocation authority, retain no invocation context, and delegate
+no inference, source release, collection creation or ambient session discovery.
+No RUN lifetime extension. Source session/owner revocation ends reading; independent
+publication withdrawal must not affect source ownership, other grants or consumers.
+Bridge withdrawal/unload stops serving its cached publication and relinquishes only
+its own access/claims. Already returned immutable snapshots remain caller-owned.
+Initial bridge activation is within the publishing application; no cross-application
+aggregation. Loopback remains subject to explicit read authorization.
+This accepts the bounded authority semantics, not a specific server, API spelling,
+general permissions system or permanent frontend. G-01's implementation/acceptance
+is recorded below; G-02 is now accepted against that contract as recorded below.
+
+G-01 integration acceptance (2026-11-01)
+------------------------------------------
+The accepted B delegation above has now been implemented/tested/published by the
+user-authorized Codex worker on g01-observation-bridge at
+fd127d740be70acaee8a7b76921c394f13a1c72f (two-commit series from 2dbfd8e).
+Integration independently reviewed both commits and accepted their combined source
+at 8c4df3578b7789e8da9e6412c1fed1256835a46c: 49 focused, 306 relevant regressions
+and 1144 complete Actant tests passed with zero skips on Python 3.15.0b4. Contracts/schema,
+source and grant ownership, credential/Origin boundary, exact tests and limits:
+knowledge/observation-bridge.txt. G-02 is independently accepted at
+40e66a2a580f39f5fae011e6ea47bbeafbecba83: 41 Node, 12 focused Python, 304 relevant
+and 1156 full Actant tests passed, zero skips. Integration independently repeated
+the real local G-01/synthetic-data Edge smoke and inspected all six screenshots.
+See knowledge/observation-viewer.txt for connection flow, semantic/browser limits
+and exact commands. Real hardware/provider exercise, other browsers and consumer
+adoption remain separately scoped; no follow-on is dispatched by this acceptance.

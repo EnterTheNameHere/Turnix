@@ -1,4 +1,4 @@
-# file: tests/first_party/materializationTest/test_run.py ; version: 2
+# file: tests/first_party/materializationTest/test_run.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
@@ -94,11 +94,11 @@ def test_loadConfig_automatically_applies_sibling_local_shadow(tmp_path: Path) -
 def test_loadConfig_accepts_absent_local_shadow(tmp_path: Path) -> None:
     """A repository default configuration remains usable without a local file."""
     configPath = tmp_path / "config.json"
-    configPath.write_text(json.dumps({"strategy": "actant-native"}), encoding="utf-8")
+    configPath.write_text(json.dumps({"strategy": "tertalis-native"}), encoding="utf-8")
 
     loaded = run._loadConfig(_JsonIo(), configPath)
 
-    assert loaded == {"strategy": "actant-native"}
+    assert loaded == {"strategy": "tertalis-native"}
 
 
 def test_normalizePaths_resolves_all_application_input_and_output_paths(

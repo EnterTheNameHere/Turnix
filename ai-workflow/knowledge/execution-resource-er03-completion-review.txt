@@ -1,0 +1,133 @@
+ER-03 INDEPENDENT COMPLETION REVIEW / R1 CORRECTION
+==================================================
+Owner: Integration. Date: 2026-11-03.
+Reviewed source: 63931d5ba89d2e449894bce46ccc3fbd10c7c13f.
+Exact worker parent / authorization: 445a4f992ff09642b9e29c59905aebfb44b308f4.
+Canonical completion report parent: ce9a0c2db8b39ef6ffe928710fc07fffbe5e1b0a.
+Worker: execution-resource-llamacpp. Original dispatch parent 897e491.
+
+Disposition
+-----------
+Not accepted or integrated. ER-03-R1 correction is required within the existing
+authorization, without a renewed proposal checkpoint. Independent tests reproduce
+two gate-serialization defects in three cases. Do not replay existing ER/LC source
+or cherry-pick 63931d5 into Integration until correction review/verification.
+Implementation is substantial and its existing tests pass, but they do not close
+the check-to-use windows below. Combined ER-02/03 safe adoption gate remains shut.
+
+R1-A: invocation can execute while composition owns the activation
+------------------------------------------------------------------
+providerComposition.invocationBoundary calls requireCompositionReady before
+entering invokeCapability/runJob. ApplicationRuntime.requireCompositionReady
+checks _compositionAttempt while holding runtime._lane, then releases that lane.
+The decorated method acquires its execution lane later; no atomic admission or
+second protected validation ties the gate check to execution.
+
+Deterministic reproduction:
+1. A real active runtime starts invokeCapability. Pause immediately after the
+   original requireCompositionReady has successfully returned.
+2. On a second thread activate an empty batch through public PackLoader.activate.
+   Hold its trusted composer with an Event, after the runtime entered composing.
+3. Resume the prechecked invocation. Its actual capability handler runs and reads
+   _compositionAttempt.phase == 'composing', rather than rejecting.
+
+This violates the authorized public invocation exclusion during prepare/compose.
+It allows arbitrary application code/mutation to overlap the outside-lock
+composition snapshot. The reproducer uses real runtime gates, registration and
+activation; the monkeypatch only introduces an Event pause after the real check.
+No sleeps, fake ownership assertions or production-source changes are involved.
+
+R1-B: runtime close/stop can finalize a provider during composition
+------------------------------------------------------------------
+prepareLlmClose calls requireNoPendingComposition before registry revocation and
+finishClose. That check does not atomically reserve a shutdown phase that excludes
+ActivationAttempt construction. The attempt constructor rejects _closed/current
+attempt, but not a shutdown already past its preflight check. A new activation can
+therefore start between the shutdown check and its callbacks/legacy teardown.
+
+Deterministic reproduction (both public runtime.close and runtime.stop):
+1. Create a real hosted/composed runtime and explicitly materialize A using the
+   real grant/domain path and fake owned process/HTTP.
+2. Start shutdown, pausing immediately after the original no-pending check returns.
+3. Start a later public empty activation batch and hold its composer with an Event.
+4. Resume shutdown. It terminates the owned process while the callback is still
+   outstanding; it does not retain that object until the composer unwinds.
+
+Both cases fail 'Shutdown finalized provider during composition'. This violates
+authorization sections 1/2 and contradicts the worker's pending-attempt cleanup
+claim. The outer lifetimeBoundary's later check cannot undo finishClose callbacks
+already invoked by prepareLlmClose.
+
+Required correction / source bounds
+------------------------------------
+Serialize activation admission, invocation entry and shutdown admission closure
+at their actual use boundary. Use a runtime-owned gate/issued state or equivalent
+atomic protocol, not another detached preflight check with the same race. Set
+shutdown exclusion before any provider finalizer can run. An activation that wins
+must retain its objects while composing; a shutdown that wins must prevent a new
+attempt from starting. Likewise the invocation/activation winner must be decided
+before arbitrary capability/Job code enters the protected region.
+
+Preserve immediate pending/typed errors, no waiting across lanes, outside-lock
+composition/provider cleanup, existing Job/transaction serialization and per-batch
+rollback. Do not simply hold the runtime lane around composer callbacks, poll,
+retry, remove architectural assertions, or revoke unrelated old work on a failed
+later batch. Audit equivalent host close/stop, direct PackLoader close/activation,
+standalone initialization and failed-composition paths for the same gap. Copied or
+reentrant invocation scopes must not become new activation authority.
+This remains the authorized ER-03 lifecycle seam, not a new grant/admission design.
+If correction actually requires broader ER-01/02 changes, report exact evidence
+before expanding; otherwise implement/test/report R1 directly.
+
+Runnable evidence
+-------------------
+Raw Python reproducer: knowledge/execution-resource-er03-gate-reproducer.txt.
+It imports only the submitted fake-IO fixture and adds independent gate assertions.
+On the exact worker source plus this coordination material, from checkout root:
+
+  Copy-Item ai-workflow/knowledge/execution-resource-er03-gate-reproducer.txt python-embedded/er03-gate-reproducer.py
+  .\python-embedded\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','python-embedded/er03-gate-reproducer.py']))"
+
+Expected on original 63931d5: 3 failed. Eliminate all three observed violations and
+add durable regressions covering both orderings at the actual runtime/host gate
+boundaries. If a corrected check itself becomes atomic admission, adapt the pause
+to that real boundary: a typed rejection of the competing activation is also a
+valid winner ordering. Do not require activation to start after an invocation or
+shutdown has already reserved exclusion. Do not depend only on this diagnostic.
+
+Actual independent verification
+--------------------------------
+Integration's own Python 3.15.0b4, MSC 1951 AMD64 / pytest 9.2.0.
+Worker source inspected/executed from an ignored git-archive snapshot:
+  C:/Users/Enter/Documents/ChatGPT/Actant/Turnix/python-embedded/er03-review-63931d5
+No worker/user checkout was modified, and no production source was cherry-picked.
+From that directory, prepend snapshot cwd to sys.path to avoid the embedded
+runtime's installed path importing Integration's older backend. Confirmed
+backend.runtime.runtimeHost.__file__ resolves inside the exact archive.
+
+Independent commands (archive cwd; .. points to Integration's own runtime):
+  ..\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','tests/first_party/llmDrivers/test_llamaCppExecutionResources.py']))"
+    47 passed in 1.24s, zero skips.
+  ..\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','tests']))"
+    1678 passed in 10.65s, zero skips.
+  ..\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','tests/first_party/llmDrivers/test_llamaCppExecutionResources.py','../er03_review_reproducer.py']))"
+    47 passed, 3 failed in 1.73s; the diagnostic is byte-equivalent to the durable
+    raw Python reproducer except its local file-path header.
+  git diff --check 445a4f9 63931d5
+    Passed. Worker-reported 828 relevant remains worker evidence, not a separate
+    Integration run. Ruff/header/docstring worker audits were not independently run.
+
+Initial archive launch imported the older Integration backend due to embedded
+path configuration and produced fixture errors; explicit cwd insertion corrected
+the harness before the source test results above. This was not a worker defect.
+Existing embedded-home warning persisted with successful execution.
+No actual binary/model/inference/download, hardware monitoring or consumer adoption.
+Unsupported stock retention/required freshness and separate ER-04 gate unchanged.
+
+Continuation
+--------------
+Worker refreshes canonical barriers, synchronizes safely, records correction parent,
+implements R1 and runs focused/new gate, relevant and full Actant tests. Report
+exact source/tests/limits to Integration inbox. Integration then independently
+reproduces these three cases on corrected source and rechecks compatibility before
+any source integration/acceptance. No self-acceptance or automatic next assignment.

@@ -1,0 +1,241 @@
+EX-04 - PROPOSED ARCHIVE / CHECKPOINT / RECOVERY CONTRACT
+========================================================
+Owner: experiment-runner. Prepared 2026-11-03; published 2026-11-05.
+STATUS: PROPOSED, review checkpoint.
+Authority: assignments/experiment-runner-ex04.txt; direct user start instruction.
+Canonical planning parent: b1234a6429a1cce3fa3f02c08e3cbe695e30a4de.
+Accepted EX-03 Application parent: 5ff50b7e53ef2e7a918b6253b71b918441c4600d.
+Test-only feasibility successor: b5363ea5c44e60159f03ee38c1ad5672656bec4f.
+Complete imported platform b59363c; reconciled e3024b8. Full non-EX/non-coordination
+projection still equals canonical platform. No platform/deletion merge needed.
+No archive production source or shared patch implemented. Large implementation is
+held at this required concrete review checkpoint, not reported as completed EX-04.
+Shared proposal: experiment-runner-ex04-request-evidence-proposal.txt.
+
+01. Versioning / private layout
+--------------------------------
+Definition@2 stays unchanged. Proposed host@3 adds REQUIRED archive caps/policy and
+private capture policy; old host@2 rejects explicitly after adoption, no implicit
+migration. Proposed execution@4 adds independent archive receipts/failures/cleanup;
+conversation-result@2 and suite@1 keep their existing semantics. New schemas:
+ actant.experiment.archive@1 (manifest)
+ actant.experiment.archive-record@1 (DATA frame)
+ actant.experiment.archive-commit@1 (COMMIT frame)
+ actant.experiment.archive-view@1 (read-only recovered projection)
+ actant.experiment.provenance@1 (selected private provenance artifact)
+ actant.experiment.partial@1 (incremental answer/reasoning artifact).
+Also artifact-ref@1, turn-result@1, unit-summary@1 and suite-summary@1 under
+actant.experiment.*; raw request blobs are NOT wrapped/reencoded.
+Historical execution@1/@2/@3 final JSON remains inspectable as historical JSON,
+never relabeled as a checkpoint archive or executed to reconstruct live authority.
+
+Host-selected private root / <new random archiveId>/ contains:
+ manifest.json             bounded immutable schema/identity/caps/source policy
+ records.log               append-only DATA/COMMIT frame pairs
+ artifacts/<sha256>.blob    immutable bytes; no user-chosen reference paths.
+archiveId, suiteId, unitId are distinct fresh opaque identities; unit/config/rep/
+turn order and immutable definition/hash retained. mkdir(exist_ok=False) reserves
+the archive exclusively, no overwrite/collision retry. Manifest/journal/artifacts
+are created exclusively. One writer owns the archive. Partial/orphan files are
+not commits. No database, journal replay engine, append by recovered reader or
+automatic resume. Application source/tests only, no platform import upstream.
+
+02. Exact logical commit format
+----------------------------------
+Each UTF-8 compact sorted-key DATA JSON line (terminated LF) has exactly:
+ schemaId, sequence (1..N), previousCommitHash, kind, archiveId, suiteId,
+ unitId|null, turnId|null, observedTimeNs, payload, artifacts[], dataSha256.
+Artifacts entries: schemaId, sha256 (64 lowercase hex), bytes, mediaType, encoding. Filename
+is DERIVED from sha256; references cannot contain arbitrary paths. dataSha256 is
+SHA-256 over canonical DATA without dataSha256 (same canonical JSON rule as EX-03).
+COMMIT line: schemaId, sequence, dataSha256, previousCommitHash, commitSha256;
+commitSha256 hashes canonical COMMIT without that last field. Genesis previous
+hash is SHA-256 of exact manifest bytes. Fixed 1 KiB maximum COMMIT frame.
+Payloads contain bounded facts/references, not repeated full suite/history copies.
+
+Manifest exact keys: schemaId, archiveId, suiteId, createdTimeNs, definitionSha256,
+format='data-commit-json-lines@1', durability='local-process-death-os-running', limits.
+Unknown manifest/frame fields reject. Each artifact-ref@1 has exact schemaId,
+sha256, bytes, mediaType, encoding; encoding is raw bytes or utf-8, never a path.
+Manifest binds definition hash, but no data artifact is trusted until its committed
+record validates it. Initial source/provenance is in the first committed record.
+Kinds and exact payload keys (Ref means a validated artifact-ref, not a filename):
+ suite-planned: definitionRef, planRef, initialProvenanceRef;
+ unit-planned: jobId|null, configurationIndex, repetition, profileAlias,
+               requestedOptionsRef, provenanceRef;
+ turn-planned: queryRef, requestedOptionsRef, attemptId;
+ request-evidence: attemptId, providerCallId, phase, bodyRef|null, length|null,
+                   sha256|null, mayHaveSent|null, responseHeadersObserved|null,
+                   responseBodyObserved|null, serverConsumption='unknown';
+ partial: attemptId, deltaRef, eventFrom, eventTo, answerOffset, reasoningOffset,
+          partial=true;
+ turn-completed: resultRef (turn-result@1, exact existing per-turn result@2 fields);
+ unit-outcome: resultRef (unit-summary@1: index/config/rep, actual Job outcome,
+               ordered turn-result refs/unstarted markers, reservation/lifetime);
+ suite-outcome: summaryRef (suite-summary@1: planned order, unit-summary refs,
+                observed suite outcome/timings, no copied transcripts);
+ cleanup-observed: component, observedOutcome, evidenceRef;
+ archive-seal: lastObservedSuiteStatus|null, terminalSequence|null,
+               finalizationObserved='not-yet-closed'.
+planRef is immutable ordered unit/turn IDs and not-started markers; queryRef holds
+exact actant.llm.messages@1 bytes plus declared format. partial@1 has exact
+answerDelta|null, reasoningDelta|null and availability flags; null differs from
+exposed empty text. turn-result@1 preserves EX-03 turn fields/options/timing/native/
+profile/cleanup without containing the entire conversation. Reader validates kind
+order, planned IDs, monotonic offsets and one selected attempt per turn. It does
+not accept arbitrary payload objects or execute stored descriptors.
+
+Writer creates/flushes/fsyncs manifest and journal before first launch. For a
+checkpoint, write each new immutable artifact exclusively, complete bytes, flush/
+os.fsync, close; only then append DATA, flush/fsync; append matching COMMIT, flush/
+fsync; return immutable ACK {archiveId, sequence, commitSha256, artifact digests}.
+Existing digest artifact may be reused only after exact bounded length/hash check;
+never rewrite an existing blob to repair corruption. Failed write poisons writer,
+no later commit/retry or deletion of earlier data. Partial os.write completion is
+not a second inference/record retry; no duplicate whole record appended on error.
+
+ACK promises fresh-process readability of the committed bytes and referenced
+artifacts under PROCESS DEATH with OS/filesystem still running, on the tested local
+filesystem. New-file directory ordering is checked before ACK; use directory fsync
+where supported, report Windows availability. File fsync is not universal directory,
+power-loss, network-filesystem, device-cache or hardware durability. No stronger
+claim without independent platform/filesystem testing. Atomic rename alone is
+explicitly insufficient; the current ManagedIo implementation is not this protocol.
+A complete on-disk COMMIT can exist even if the caller never received ACK (crash or
+fsync-return error). Reader labels commit-on-disk separately from ACK-observation
+unknown; never infers that an unseen caller acknowledged it or the server consumed
+its request. ACK before death is guaranteed readable; converse is NOT guaranteed.
+
+03. Checkpoints / lifecycle / rollback independence
+-----------------------------------------------------
+Launcher owns ArchiveWriter and its sole OS handles outside RuntimeHost/Job memory
+and ctx.io transactions. CodeEntry receives a host-minted UnitArchivePort via the
+explicit preparation payload (not JSON config), bound to this suite/unit/turn set.
+It can append only typed diagnostic checkpoints, not arbitrary filesystem paths.
+No Context/transaction/IO facade/session/grant is retained in writer/ports. Read-only
+diagnostic reader remains separate. Writer lives until final host cleanup evidence
+and archive seal attempts finish, then bounded flush/close; not saved as authority.
+
+Required sequence, with ACK gates:
+ suite-planned + immutable definition/ordered units/caps/initial provenance ACK
+   BEFORE RuntimeHost activation or first transition/admission;
+ unit-planned/Job identity ACK before invoking that unit's actual runJob;
+ turn-planned + exact App query/options artifact ACK before each ctx.llm.run;
+ request serialized / transport-attempt / observed transport phases via separately
+   reviewed private provider seam (see proposal; never reserialize App messages);
+ partial incremental ACKs under policy below, never replay partial history;
+ turn-completed ACK with exact answer/separate reasoning/native/profile/call-cleanup
+   BEFORE appending completed answer to history or allowing next turn;
+ unit-outcome ACK AFTER actual Job/lifetime boundary, BEFORE next transition/unit;
+ suite-outcome, signal cleanup, host/resource cleanup as later independent records;
+ archive-seal last logical checkpoint, then writer close attempt.
+Per-call/provider, Job, reservation queued-close/unavailable receipt, unit/suite and
+archive/signal/host outcomes remain independent. A turn ACK does not certify Job
+success. Failed Job rollback cannot erase earlier commits. UNKNOWN remains UNKNOWN.
+
+A seal is a validated on-disk terminal marker, not proof writer-close/ACK-return
+completed afterward. Close failure cannot reliably be recorded into its failed/
+closed destination. Caller returns separate archive-finalization diagnostics;
+fresh inspection labels unavailable final writer-close/ACK-return observations,
+never invents them from a seal. No rewriting earlier outcomes for cleanup failures.
+
+04. Bounded partial policy / worker / failure channel
+-------------------------------------------------------
+Proposed trusted defaults (finite ceilings in parentheses): archiveBytes=256 MiB
+(1 GiB); logicalRecords=8192 (65536); DATA frame=64 KiB (64 KiB); artifact=8 MiB
+(8 MiB); serialized request=2 MiB (8 MiB); pending serialized partial buffer=64 KiB
+(256 KiB); inspect return=16 MiB (64 MiB); observed deltas/turn=65536 (262144).
+Partial policy: flush at 64 nonempty events OR 4096 accumulated characters OR
+1 second since pending content, max 128 partial commits/turn (1024). Values are
+host-selected/narrowable; definitions cannot enlarge them. Reasoning-only content
+counts; null unavailable and exposed empty reasoning remain distinct. Repeated
+empty metadata need not be re-archived; total event cap still applies.
+
+One launcher-owned writer worker, one bounded partial buffer plus at most one
+in-flight batch and one mandatory command. No unbounded queue. Incremental deltas,
+not whole suite on every token. Mandatory calls wait for ACK while checking sticky
+failure/cancellation; worker drains partial content before completed-turn ACK.
+Flush timer runs even without new events. Maximum unacknowledged DATA is bounded
+by pending+one in-flight batch; event/character/time thresholds trigger a write,
+not an impossible wall-clock fsync guarantee. Default I/O acknowledgement deadline
+5 seconds (host max30) poisons/fails the execution if exceeded; cancellation is
+cooperative. Stalled OS write may remain pending, never force-kill IO thread or
+claim its data committed. Bounded close reports failed/pending/unknown as appropriate.
+
+Prelaunch reserve mandatory records plus maxPartial slots per scheduled turn,
+worst escaped query/body bounds, outputs, record frames and fixed provenance caps;
+reject impossible expansion before archive creation/model startup. Runtime event,
+fragmentation, disk/byte/buffer/record exhaustion stops truthfully, no truncation,
+old-record deletion or silent evidence downgrade. These bounds limit retained data,
+not Python RSS/available disk or provider-internal buffering. Default 2x2x2 fits.
+
+Required sink failure never escapes from streamObserver with raw path/error text.
+Observer catches failure, sets a sticky host archive-failure latch, requests ONLY
+that retained active Job's cooperative cancellation and returns. It does NOT rely
+on pipeline observer exceptions being fatal. First non-Exception exit is retained
+transiently by launcher failure channel before cleanup; never serialized. After
+call/before next turn/unit, explicitly inspect latch and require checkpoint ACK.
+Archive failure remains separate from resulting Cancelled Job/provider cleanup.
+Before launch failure prevents model IO; after failure no next admission, no retry,
+forced model/thread disposal or UNKNOWN repair. Poisoned writer cannot promise a
+record of its own failure; recover previous committed prefix as incomplete.
+
+All worker/handler/flush/close resources rooted before acquisition. Reuse R1/R2
+precedence pattern: capture first exit BEFORE teardown; attempt independent cleanup,
+record secondary archive flush/close and existing signal/host diagnostics separately.
+No archive failure can turn prior Job/turn success into fabricated failure/safety,
+or disguise primary cancellation/exception as success. No broad observer change.
+
+05. Read-only recovery / integrity / migration
+------------------------------------------------
+Dedicated stdlib-only reader, no RuntimeHost/Pack/driver construction. CLI proposed:
+ run/validate --definition FILE --host-config FILE --results PRIVATE_ARCHIVE_ROOT
+ inspect --archive DIR [--unit ID --turn ID --include-content]
+ recover --archive DIR      (read-only validated view, no mutation/truncation)
+ inspect --result FILE      (unchanged explicit historical JSON display).
+run outputs IDs/status/counts/committed sequence/path only. inspect/recover need no
+model/config/network or asset paths. Archived definitions/provenance are data only.
+
+Validate manifest schema/hard caps first, bounded frame lengths/counts, DATA/COMMIT
+sequence/hash chain/order and all referenced blobs' exact bytes/digests. Reject
+absolute/traversal/reparse/symlink reference escapes; fixed digest-derived filenames,
+regular files, bounded reads, no archived code execution. No protection claim
+against a hostile same-user concurrently mutating the filesystem; hashes are
+integrity checks, not authenticated signatures or resource authority.
+
+Empty journal/manifest-only archive: incomplete, no outcomes invented. Final missing
+LF/truncated frame or complete DATA lacking COMMIT: report torn/uncommitted tail,
+ignore it and preserve prior validated commits. A lone final empty line is reported
+as incomplete tail, never success. Interior blank/malformed frames, wrong chain/
+sequence/version, complete mismatched COMMIT or missing/corrupt referenced blob:
+explicit corrupt/invalid with last validated prefix and failure location, not a
+successful complete archive. Unreferenced blobs are bounded orphan diagnostics,
+not commits. A valid COMMIT whose ACK-return was unobserved is labeled accordingly.
+Missing suite terminal record never becomes success because a turn succeeded.
+Recover last OBSERVED Job/turn/partial state, unavailable terminal/resource/close
+facts as unknown; never probe processes, replay requests, restore handles or repair
+claims. Content reads are explicit, selected and capped; reject over-limit view
+rather than silently truncate successful evidence. Legacy JSON is not migrated.
+
+06. Source-backed feasibility / next review
+---------------------------------------------
+Proof-only App commit b5363ea5 adds two actual-runtime/synthetic-IO cases, no archive
+implementation/shared edits. Observer raises fixed OSError but Job still Succeeds
+and observerErrors records it; planned query bytes/digest differ from exact
+Request.data, which contains id_slot/cache_prompt/stream/max_tokens controls.
+Commands (own Python3.15.0b4/pytest9.2.0, embedded-home warning persists):
+ -k ex04_planning: 2 passed/138 deselected, 0.38s;
+ focused EX suite: 140 passed, 4.98s;
+ complete combined tests: 1919 passed, 17.56s; zero skips.
+Prefix: .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib --tb=short
+Arguments: tests/first_party/experimentRunner [-k ex04_planning], or tests.
+Changed test header5->6/AST/docstrings/diff/hook pass; no Ruff claim.
+
+Request Integration review of this exact protocol/caps/ownership/failure plan and
+separate narrow shared proposal BEFORE large App archive implementation/shared
+adoption. After approval implement actual writer/reader/crash/rollback/corruption/
+cap/path/failure tests, then adopt separately accepted complete platform evidence
+seam. Until then exact-provider provenance dependency remains OPEN, not mocked as
+real. Worker assets remain inaccessible; eight-call EX-04 real archive gate must
+be arranged separately by Integration on existing authorized assets. No new native
+crash/abort probe. EX-05/resume/comparison/recovery engine remain unassigned.

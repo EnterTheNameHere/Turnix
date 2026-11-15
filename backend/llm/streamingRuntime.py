@@ -1,14 +1,22 @@
-# file: backend/llm/streamingRuntime.py ; version: 7
+# file: backend/llm/streamingRuntime.py ; version: 13
 from __future__ import annotations
 
+import base64
 import hashlib
 import time
+import sys
+from contextlib import suppress, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
-from backend.llm.errors import LlmProviderProtocolError
+from backend.llm.executionSessions import (
+    LlmCallSession, LlmExecutionBindings, executionBoundary, helperScope, pipelineCancellation,
+)
+from backend.llm.errors import LlmProviderProtocolError, LlmUnsupportedExecutionError
 from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent, LlmStreamProvider
+from backend.llm.streamObservation import StreamObservation, StreamOutcome
+from backend.orchestration.cancellation import CancellationSignal, ExecutionCancelled
 from backend.processing.runtime import ProcessingRun, ProcessingStage, QueryItem, plainImmutableValue
 from backend.registration import Registration, RegistrationRegistry, RegistrationScope
 from backend.values.sentinels import MISSING
@@ -33,6 +41,7 @@ class LlmProviderRegistry:
     def __init__(self) -> None:
         """Creates an empty provider registry."""
         self._registry: RegistrationRegistry[LlmStreamProvider] = RegistrationRegistry()
+        self.executions = LlmExecutionBindings()
 
     def register(self, scope: RegistrationScope, *, ownerId: str, name: str, provider: LlmStreamProvider) -> None:
         """Stages one provider registration in the supplied registration scope."""
@@ -44,12 +53,25 @@ class LlmProviderRegistry:
         """Returns the published provider registration for a logical name."""
         return self._registry.require(name)
 
+    @contextmanager
+    def executionPublication(self):
+        """Serializes callback-free binding commits/revocations with scope withdrawal.
+
+        The trusted broker may only inspect exact registrations and mutate its
+        own tables inside this guard. Provider hooks, construction, participant
+        cleanup and lease callbacks must run after it exits. Lock order is this
+        registry lane before the broker lane, never the reverse.
+        """
+        with self._registry._lock:
+            yield tuple(self._registry._published.values())
+
     def require(self, name: str) -> LlmStreamProvider:
         """Returns the published provider implementation for a logical name."""
         return self.requireRegistration(name).value
 
     def unregisterOwnedBy(self, ownerId: str) -> None:
         """Removes all published providers owned by one CodeEntry instance."""
+        self.executions.revokeRegistration(self, ownerId)
         self._registry.unregisterOwnedBy(ownerId)
 
 
@@ -69,6 +91,8 @@ class StreamingLlmResult:
     durationNs: int
     providerMetadata: Mapping[str, ImmutableValue] = field(default_factory=dict)
     observerErrors: tuple[str, ...] = ()
+    executionEvidence: object | None = None
+    retainedContext: object | None = field(default=None, repr=False, compare=False)
 
     def timingSnapshot(self) -> dict[str, int]:
         """Returns JSON-compatible timing evidence for the provider execution span."""
@@ -91,6 +115,9 @@ class LlmProcessingPreview:
     providerOptions: Mapping[str, ImmutableValue]
     executionProfile: LlmExecutionProfile
     inputTokens: int | None
+    model: str | None = None
+    executionEvidence: object | None = None
+    previewBinding: object | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +163,7 @@ class LlmProcessingPipeline:
         self._capabilityInvoker = capabilityInvoker
         self._trace = trace
 
+    @executionBoundary
     def run(
         self,
         *,
@@ -144,12 +172,23 @@ class LlmProcessingPipeline:
         model: str | None = None,
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
+        streamObservation: StreamObservation | None = None,
+        cancellationSignal: CancellationSignal | None = None,
+        executionAccess=None,
+        session=None,
+        context=None,
+        _previewBinding=None,
     ) -> StreamingLlmResult:
-        """Runs one provider call without creating persistent ProcessingRun state."""
+        """Runs one provider call, optionally collecting disposable streamObservation evidence.
+
+        Observation begins only at provider entry, after profile resolution, and does
+        not replace streamObserver or change persistent ProcessingRun semantics.
+        """
         registration, provider, options, profile = self._resolveExecution(
             providerName=providerName,
             model=model,
             providerOptions=providerOptions,
+            cancellationSignal=cancellationSignal, executionAccess=executionAccess, session=session, context=context, preview=_previewBinding,
         )
         return self._streamResolved(
             registration=registration,
@@ -159,8 +198,11 @@ class LlmProcessingPipeline:
             query=query,
             model=model,
             streamObserver=streamObserver,
+            streamObservation=streamObservation,
+            cancellationSignal=cancellationSignal,
         )
 
+    @executionBoundary
     def prepareProcessing(
         self,
         *,
@@ -173,6 +215,10 @@ class LlmProcessingPipeline:
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         filterQueryItemsCapabilityId: str | None = None,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+        cancellationSignal: CancellationSignal | None = None,
+        executionAccess=None,
+        session=None,
+        context=None,
     ) -> LlmProcessingPreview:
         """Prepares the exact model-facing query without invoking the provider stream.
 
@@ -183,6 +229,8 @@ class LlmProcessingPipeline:
         """
         if self._state is None or self._capabilityInvoker is None:
             raise RuntimeError("prepareProcessing() requires committed state and a capability invoker.")
+        if context is not None:
+            raise LlmUnsupportedExecutionError("A preview does not allocate or reuse inference context state.")
         if type(memoryKey) is not str or not memoryKey or not memoryKey.replace("-", "").replace("_", "").isalnum() or not memoryKey.islower():
             raise ValueError("memoryKey must be a lowercase Value-address-safe identifier.")
 
@@ -190,10 +238,11 @@ class LlmProcessingPipeline:
         transaction = transactionBase.openTransaction()
         committed = False
         try:
-            registration, provider, options, profile = self._resolveExecution(
+            registration, _provider, options, profile = self._resolveExecution(
                 providerName=providerName,
                 model=model,
                 providerOptions=providerOptions,
+                cancellationSignal=cancellationSignal, executionAccess=executionAccess, session=session, context=context, profileOnly=True,
             )
             executionSnapshot = {
                 "providerName": providerName,
@@ -204,12 +253,13 @@ class LlmProcessingPipeline:
                 "metadata": plainImmutableValue(profile.metadata),
             }
             currentItemsAddress = f"processing/{memoryKey}/currentqueryitems"
+            self._raiseIfCancelled(cancellationSignal)
             previousSnapshots = self._loadCurrentQueryItems(
                 transaction=transaction,
                 memoryKey=memoryKey,
                 currentItemsAddress=currentItemsAddress,
             )
-            built = self._capabilityInvoker(
+            built = self._invokeStage(
                 buildQueryItemsCapabilityId,
                 {
                     "input": inputValue,
@@ -218,12 +268,13 @@ class LlmProcessingPipeline:
                 },
                 transaction,
             )
+            self._raiseIfCancelled(cancellationSignal)
             reusableItems = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
             self._stageReusableQueryItems(transaction, memoryKey=memoryKey, items=reusableItems)
 
             acceptedItems = reusableItems
             if filterQueryItemsCapabilityId is not None:
-                filtered = self._capabilityInvoker(
+                filtered = self._invokeStage(
                     filterQueryItemsCapabilityId,
                     {
                         "input": inputValue,
@@ -232,10 +283,11 @@ class LlmProcessingPipeline:
                     },
                     transaction,
                 )
+                self._raiseIfCancelled(cancellationSignal)
                 acceptedItems = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
                 self._requireFilteredSubset(reusableItems, acceptedItems)
 
-            builtQuery = self._capabilityInvoker(
+            builtQuery = self._invokeStage(
                 buildQueryCapabilityId,
                 {
                     "input": inputValue,
@@ -244,18 +296,25 @@ class LlmProcessingPipeline:
                 },
                 transaction,
             )
+            self._raiseIfCancelled(cancellationSignal)
             query = self._requireQuery(builtQuery)
             inputTokens: int | None = None
             estimator = profile.tokenEstimator
             if estimator is not None:
+                self._raiseIfCancelled(cancellationSignal)
                 measured = estimator.estimateInputTokens(query)
+                self._raiseIfCancelled(cancellationSignal)
                 if type(measured) is not int or measured < 0:
                     raise LlmProviderProtocolError(
                         f"Provider token estimator returned an invalid value: {measured!r}.",
                     )
                 inputTokens = measured
 
+            self._raiseIfCancelled(cancellationSignal)
+            if isinstance(_provider, LlmCallSession):
+                _provider.close()
             transaction.set(currentItemsAddress, [item.itemId for item in reusableItems])
+            self._raiseIfCancelled(cancellationSignal)
             transaction.commit()
             committed = True
             return LlmProcessingPreview(
@@ -265,16 +324,17 @@ class LlmProcessingPipeline:
                 providerName=providerName,
                 providerOwnerId=registration.ownerId,
                 providerOptions=options,
-                executionProfile=profile,
-                inputTokens=inputTokens,
+                executionProfile=_provider.profileSnapshot if isinstance(_provider, LlmCallSession) else profile,
+                inputTokens=inputTokens, model=_provider.model if isinstance(_provider, LlmCallSession) else model,
+                executionEvidence=_provider.evidence if isinstance(_provider, LlmCallSession) else None,
+                previewBinding=_provider.previewBinding if isinstance(_provider, LlmCallSession) else None,
             )
         finally:
             if not committed:
-                try:
+                with suppress(RuntimeError):
                     transaction.abort()
-                except RuntimeError:
-                    pass
 
+    @executionBoundary
     def runProcessing(
         self,
         *,
@@ -289,9 +349,18 @@ class LlmProcessingPipeline:
         completionCapabilityId: str | None = None,
         completionInput: object | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
+        streamObservation: StreamObservation | None = None,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+        cancellationSignal: CancellationSignal | None = None,
+        executionAccess=None,
+        session=None,
+        context=None,
     ) -> LlmProcessingResult:
-        """Runs and transactionally persists one complete LLM ProcessingRun."""
+        """Runs and transactionally persists one complete LLM ProcessingRun.
+
+        Optional streamObservation covers only the provider stream, not preparation,
+        completion capabilities or transaction success. Its evidence is not persisted.
+        """
         if self._state is None or self._capabilityInvoker is None:
             raise RuntimeError("runProcessing() requires committed state and a capability invoker.")
         if type(memoryKey) is not str or not memoryKey or not memoryKey.replace("-", "").replace("_", "").isalnum() or not memoryKey.islower():
@@ -308,7 +377,9 @@ class LlmProcessingPipeline:
                 providerName=providerName,
                 model=model,
                 providerOptions=providerOptions,
+                cancellationSignal=cancellationSignal, executionAccess=executionAccess, session=session, context=context,
             )
+            self._raiseIfCancelled(cancellationSignal)
             executionSnapshot = {
                 "providerName": providerName,
                 "providerOwnerId": registration.ownerId,
@@ -318,6 +389,7 @@ class LlmProcessingPipeline:
                 "metadata": plainImmutableValue(profile.metadata),
             }
 
+            self._raiseIfCancelled(cancellationSignal)
             previousSnapshots = self._loadCurrentQueryItems(
                 transaction=transaction,
                 memoryKey=memoryKey,
@@ -325,7 +397,7 @@ class LlmProcessingPipeline:
             )
 
             run.enterStage(ProcessingStage.BUILD_QUERY_ITEMS)
-            built = self._capabilityInvoker(
+            built = self._invokeStage(
                 buildQueryItemsCapabilityId,
                 {
                     "input": inputValue,
@@ -334,13 +406,14 @@ class LlmProcessingPipeline:
                 },
                 transaction,
             )
+            self._raiseIfCancelled(cancellationSignal)
             reusableItems = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
             self._stageReusableQueryItems(transaction, memoryKey=memoryKey, items=reusableItems)
 
             acceptedItems = reusableItems
             if filterQueryItemsCapabilityId is not None:
                 run.enterStage(ProcessingStage.FILTER_QUERY_ITEMS)
-                filtered = self._capabilityInvoker(
+                filtered = self._invokeStage(
                     filterQueryItemsCapabilityId,
                     {
                         "input": inputValue,
@@ -349,12 +422,13 @@ class LlmProcessingPipeline:
                     },
                     transaction,
                 )
+                self._raiseIfCancelled(cancellationSignal)
                 acceptedItems = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
                 self._requireFilteredSubset(reusableItems, acceptedItems)
             run.queryItems = acceptedItems
 
             run.enterStage(ProcessingStage.BUILD_QUERY)
-            builtQuery = self._capabilityInvoker(
+            builtQuery = self._invokeStage(
                 buildQueryCapabilityId,
                 {
                     "input": inputValue,
@@ -363,6 +437,7 @@ class LlmProcessingPipeline:
                 },
                 transaction,
             )
+            self._raiseIfCancelled(cancellationSignal)
             query = self._requireQuery(builtQuery)
 
             run.enterStage(ProcessingStage.PREPARE_PROVIDER_CALL)
@@ -374,10 +449,15 @@ class LlmProcessingPipeline:
                 query=query,
                 model=model,
                 streamObserver=streamObserver,
+                streamObservation=streamObservation,
                 processingRun=run,
+                cancellationSignal=cancellationSignal,
             )
 
+            self._raiseIfCancelled(cancellationSignal)
             run.enterStage(ProcessingStage.UPDATE_QUERY_ITEMS)
+            if llmResult.executionEvidence is not None:
+                executionSnapshot["admittedExecution"] = llmResult.executionEvidence.snapshot()
             transaction.set(currentItemsAddress, [item.itemId for item in reusableItems])
             transaction.set(
                 f"processing/{memoryKey}/runs/{run.processingRunId}",
@@ -403,7 +483,8 @@ class LlmProcessingPipeline:
             run.enterStage(ProcessingStage.COMPLETE)
             completionResult = None
             if completionCapabilityId is not None:
-                completionResult = self._capabilityInvoker(
+                self._raiseIfCancelled(cancellationSignal)
+                completionResult = self._invokeStage(
                     completionCapabilityId,
                     self._completionPayload(
                         run=run,
@@ -415,7 +496,9 @@ class LlmProcessingPipeline:
                     ),
                     transaction,
                 )
+                self._raiseIfCancelled(cancellationSignal)
 
+            self._raiseIfCancelled(cancellationSignal)
             transaction.commit()
             committed = True
             run.complete()
@@ -427,15 +510,64 @@ class LlmProcessingPipeline:
                 llm=llmResult,
                 completionResult=completionResult,
             )
+        except ExecutionCancelled:
+            run.cancel()
+            if not committed:
+                with suppress(RuntimeError):
+                    transaction.abort()
+            self._emitTrace("processing-run-cancelled", run, {})
+            raise
         except Exception:
             run.fail()
             if not committed:
-                try:
+                with suppress(RuntimeError):
                     transaction.abort()
-                except RuntimeError:
-                    pass
             self._emitTrace("processing-run-failed", run, {})
             raise
+
+    def _invokeStage(self, capabilityId, payload, transaction):
+        """Propagates only scoped estimation/cancellation through the runtime bridge."""
+        from backend.llm.executionSessions import _boundary
+        calls = _boundary.get()
+        signal = calls[-1].access.cancellationSignal if calls else pipelineCancellation()
+        with helperScope(signal):
+            return self._capabilityInvoker(capabilityId, payload, transaction)
+
+    @executionBoundary
+    def estimateInputTokens(self, *, providerName, query, model=None, providerOptions=None,
+                            cancellationSignal=None, executionAccess=None, session=None):
+        """Uses one admitted generation or an explicitly authorized live helper borrow."""
+        registration = self._providers.requireRegistration(providerName)
+        options = ImmutableValueFreezer().freezeMapping(providerOptions, "providerOptions")
+        borrowed = self._providers.executions.borrowEstimate(
+            self._providers, registration, executionAccess, model, options, query)
+        if borrowed is not None:
+            return borrowed
+        _, provider, _, profile = self._resolveExecution(providerName=providerName, model=model,
+            providerOptions=options, cancellationSignal=cancellationSignal,
+            executionAccess=executionAccess, session=session, profileOnly=True)
+        if profile.tokenEstimator is None:
+            raise RuntimeError("LLM provider does not expose an input-token estimator.")
+        result = profile.tokenEstimator.estimateInputTokens(query)
+        self._raiseIfCancelled(cancellationSignal)
+        if type(result) is not int or result < 0:
+            raise LlmProviderProtocolError("Provider token estimator returned an invalid value.")
+        if isinstance(provider, LlmCallSession):
+            provider.close()
+        return result
+
+    def runPreview(self, preview, *, executionAccess=None, session=None, context=None,
+                   cancellationSignal=None, streamObserver=None, streamObservation=None):
+        """Reacquires and validates controlled preview provenance before provider IO."""
+        if not isinstance(preview, LlmProcessingPreview):
+            raise TypeError("Expected an LlmProcessingPreview.")
+        if preview.previewBinding is None:
+            raise LlmUnsupportedExecutionError("Unbound preview has no controlled execution provenance.")
+        return self.run(providerName=preview.providerName, query=preview.query, model=preview.model,
+            providerOptions=preview.providerOptions, executionAccess=executionAccess,
+            session=session, context=context, _previewBinding=preview.previewBinding,
+            cancellationSignal=cancellationSignal, streamObserver=streamObserver,
+            streamObservation=streamObservation)
 
     def _loadCurrentQueryItems(
         self,
@@ -455,8 +587,10 @@ class LlmProcessingPipeline:
         for itemId in currentIds:
             address = self._queryItemAddress(memoryKey, itemId)
             snapshot = transaction.load(address)
+            if snapshot is MISSING:
+                raise RuntimeError(f"Committed QueryItem {itemId!r} is missing.")
             if not isinstance(snapshot, dict):
-                raise RuntimeError(f"Committed QueryItem {itemId!r} is missing or invalid.")
+                raise TypeError(f"Committed QueryItem {itemId!r} must be an object.")
             if snapshot.get("itemId") != itemId:
                 raise RuntimeError(f"Committed QueryItem identity mismatch at {address!r}.")
             snapshots.append(snapshot)
@@ -504,8 +638,6 @@ class LlmProcessingPipeline:
             evidence["payloadBytes"] = len(encoded)
             evidence["payloadSha256"] = hashlib.sha256(encoded).hexdigest()
         elif type(query.payload) is bytes:
-            import base64
-
             evidence["payloadBase64"] = base64.b64encode(query.payload).decode("ascii")
             evidence["payloadBytes"] = len(query.payload)
             evidence["payloadSha256"] = hashlib.sha256(query.payload).hexdigest()
@@ -539,6 +671,7 @@ class LlmProcessingPipeline:
                 },
                 "timing": llmResult.timingSnapshot(),
                 "providerMetadata": plainImmutableValue(llmResult.providerMetadata),
+                "executionEvidence": None if llmResult.executionEvidence is None else llmResult.executionEvidence.snapshot(),
                 "observerErrors": list(llmResult.observerErrors),
                 "query": {
                     "formatId": llmResult.query.formatId,
@@ -555,6 +688,8 @@ class LlmProcessingPipeline:
         providerName: str,
         model: str | None,
         providerOptions: Mapping[str, ImmutableValue] | None,
+        cancellationSignal: CancellationSignal | None = None,
+        executionAccess=None, session=None, context=None, preview=None, profileOnly=False,
     ) -> tuple[
         Registration[LlmStreamProvider],
         LlmStreamProvider,
@@ -562,10 +697,17 @@ class LlmProcessingPipeline:
         LlmExecutionProfile,
     ]:
         """Resolves provider registration, immutable options, and execution profile."""
+        self._raiseIfCancelled(cancellationSignal)
         registration = self._providers.requireRegistration(providerName)
         provider = registration.value
         options = ImmutableValueFreezer().freezeMapping(providerOptions, "providerOptions")
-        profile = provider.getExecutionProfile(model=model, providerOptions=options)
+        call = self._providers.executions.admit(self._providers, registration, executionAccess,
+            options=options, model=model, session=session, context=context, preview=preview, profileOnly=profileOnly)
+        if call is None:
+            profile = provider.getExecutionProfile(model=model, providerOptions=options)
+        else:
+            provider, profile = call, call.profile
+        self._raiseIfCancelled(cancellationSignal)
         if not isinstance(profile, LlmExecutionProfile):
             raise LlmProviderProtocolError("Provider getExecutionProfile() returned an invalid value.")
         return registration, provider, options, profile
@@ -580,65 +722,142 @@ class LlmProcessingPipeline:
         query: LlmQuery,
         model: str | None,
         streamObserver: Callable[[LlmStreamEvent], None] | None,
+        streamObservation: StreamObservation | None = None,
         processingRun: ProcessingRun | None = None,
+        cancellationSignal: CancellationSignal | None = None,
     ) -> StreamingLlmResult:
-        """Consumes one provider stream and measures its complete execution span.
-
-        The wall-clock endpoints and monotonic duration bracket provider.stream()
-        creation through validation of its terminal completed event. Query
-        construction, execution-profile resolution, ProcessingRun persistence,
-        and completion handling are outside this timing boundary. Synchronous
-        stream observers execute inside the boundary because they participate in
-        consumption/backpressure of the provider stream.
         """
-        request = LlmCallRequest(query=query, model=model, providerOptions=options)
+        Consumes one provider stream and measures its complete execution span.
+
+        Cancellation request is checked before provider entry, between stream
+        events, and after provider exit. Provider exceptions raised while a
+        cancellation request is active are normalized to ExecutionCancelled so
+        caller lifecycle code does not misclassify intentional stop as failure.
+        """
+        self._raiseIfCancelled(cancellationSignal)
+        request = LlmCallRequest(
+            query=query,
+            model=provider.model if isinstance(provider, LlmCallSession) else model,
+            providerOptions=options,
+            cancellationSignal=cancellationSignal,
+        )
         parts: list[str] = []
         completed = False
         finalMetadata: Mapping[str, ImmutableValue] = {}
         observerErrors: list[str] = []
         startedTimeNs = time.time_ns()
         startedMonotonicNs = time.monotonic_ns()
-        stream = provider.stream(request)
-        for index, event in enumerate(stream):
-            if not isinstance(event, LlmStreamEvent):
-                raise LlmProviderProtocolError(f"Provider yielded non-LlmStreamEvent at index {index}.")
-            if completed:
-                raise LlmProviderProtocolError("Provider emitted an event after completion.")
+        observationClaim = None
+        outcome = StreamOutcome.CLOSED
+        if streamObservation is not None:
+            with suppress(Exception):
+                observationClaim = streamObservation.begin()
+        try:
+            try:
+                stream = provider.stream(request)
+                for index, event in enumerate(stream):
+                    self._raiseIfCancelled(cancellationSignal)
+                    if isinstance(provider, LlmCallSession):
+                        provider.requireValid()
+                    self._validateStreamEvent(event=event, index=index, completed=completed)
+                    if processingRun is not None:
+                        processingRun.enterStage(ProcessingStage.STREAM_EVENT)
+                    if event.eventType == "delta":
+                        parts.append(event.text)
+                        if observationClaim is not None and event.text:
+                            try:
+                                observationClaim.recordText(event.text)
+                            except Exception as err:  # noqa: BLE001 - optional measurement never changes delivery.
+                                with suppress(Exception):
+                                    observationClaim.fail(err)
+                    elif event.eventType == "completed":
+                        completed = True
+                        finalMetadata = event.metadata
+                    else:
+                        self._raiseUnsupportedStreamEvent(event)
+                    if streamObserver is not None:
+                        try:
+                            streamObserver(event)
+                        except Exception as err:  # noqa: BLE001 - observer failure is non-authoritative evidence only.
+                            observerErrors.append(f"{type(err).__qualname__}: {err}")
+                            self._emitObserverFailure(processingRun, err)
+            except ExecutionCancelled:
+                raise
+            except Exception as err:
+                if cancellationSignal is not None and cancellationSignal.requested:
+                    raise ExecutionCancelled("Provider execution stopped after cancellation request.") from err
+                raise
+
+            self._raiseIfCancelled(cancellationSignal)
+            if not completed:
+                raise LlmProviderProtocolError("Provider stream ended without a completed event.")
+            if isinstance(provider, LlmCallSession):
+                provider.requireValid()
+                provider.close()
+            endedMonotonicNs = time.monotonic_ns()
+            endedTimeNs = time.time_ns()
             if processingRun is not None:
-                processingRun.enterStage(ProcessingStage.STREAM_EVENT)
-            if event.eventType == "delta":
-                parts.append(event.text)
-            elif event.eventType == "completed":
-                completed = True
-                finalMetadata = event.metadata
-            else:
-                raise LlmProviderProtocolError(f"Unsupported provider event {event.eventType!r}.")
-            if streamObserver is not None:
-                try:
-                    streamObserver(event)
-                except Exception as err:
-                    observerErrors.append(f"{type(err).__qualname__}: {err}")
-                    self._emitObserverFailure(processingRun, err)
-        if not completed:
-            raise LlmProviderProtocolError("Provider stream ended without a completed event.")
-        endedMonotonicNs = time.monotonic_ns()
-        endedTimeNs = time.time_ns()
-        if processingRun is not None:
-            processingRun.enterStage(ProcessingStage.PARSE_RESPONSE)
-        return StreamingLlmResult(
-            query=request.query,
-            model=request.model,
-            providerName=registration.name,
-            providerOwnerId=registration.ownerId,
-            providerOptions=request.providerOptions,
-            executionProfile=profile,
-            rawText="".join(parts),
-            startedTimeNs=startedTimeNs,
-            endedTimeNs=endedTimeNs,
-            durationNs=endedMonotonicNs - startedMonotonicNs,
-            providerMetadata=finalMetadata,
-            observerErrors=tuple(observerErrors),
+                processingRun.enterStage(ProcessingStage.PARSE_RESPONSE)
+            result = StreamingLlmResult(
+                query=request.query,
+                model=request.model,
+                providerName=registration.name,
+                providerOwnerId=registration.ownerId,
+                providerOptions=request.providerOptions,
+                executionProfile=provider.profileSnapshot if isinstance(provider, LlmCallSession) else profile,
+                executionEvidence=provider.evidence if isinstance(provider, LlmCallSession) else None,
+                retainedContext=provider.retainedContext if isinstance(provider, LlmCallSession) else None,
+                rawText="".join(parts),
+                startedTimeNs=startedTimeNs,
+                endedTimeNs=endedTimeNs,
+                durationNs=endedMonotonicNs - startedMonotonicNs,
+                providerMetadata=finalMetadata,
+                observerErrors=tuple(observerErrors),
+            )
+            outcome = StreamOutcome.COMPLETED
+            return result
+        except ExecutionCancelled:
+            outcome = StreamOutcome.CANCELLED
+            raise
+        except Exception:
+            outcome = StreamOutcome.FAILED
+            raise
+        finally:
+            try:
+                if isinstance(provider, LlmCallSession):
+                    provider.close(sys.exception())
+            finally:
+                if observationClaim is not None:
+                    with suppress(Exception):
+                        observationClaim.finish(outcome)
+
+    @staticmethod
+    def _validateStreamEvent(
+        *,
+        event: object,
+        index: int,
+        completed: bool,
+    ) -> None:
+        """Validates one provider event before generic stream handling."""
+        if not isinstance(event, LlmStreamEvent):
+            raise LlmProviderProtocolError(
+                f"Provider yielded non-LlmStreamEvent at index {index}.",
+            )
+        if completed:
+            raise LlmProviderProtocolError("Provider emitted an event after completion.")
+
+    @staticmethod
+    def _raiseUnsupportedStreamEvent(event: LlmStreamEvent) -> None:
+        """Raises protocol failure for an unsupported provider event kind."""
+        raise LlmProviderProtocolError(
+            f"Unsupported provider event {event.eventType!r}.",
         )
+
+    @staticmethod
+    def _raiseIfCancelled(cancellationSignal: CancellationSignal | None) -> None:
+        """Raises the execution cancellation outcome when a request is active."""
+        if cancellationSignal is not None:
+            cancellationSignal.raiseIfRequested()
 
     @staticmethod
     def _requireQueryItems(value: object, *, stage: str) -> tuple[QueryItem, ...]:
@@ -687,7 +906,7 @@ class LlmProcessingPipeline:
             attributes["processingRunId"] = run.processingRunId
         try:
             self._trace("stream-observer-failed", attributes)
-        except Exception:
+        except Exception:  # noqa: BLE001 - tracing must never alter inference semantics.
             return
 
     def _emitTrace(self, reason: str, run: ProcessingRun, extra: dict[str, object]) -> None:
@@ -704,7 +923,7 @@ class LlmProcessingPipeline:
                     **extra,
                 },
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - tracing must never alter ProcessingRun semantics.
             return
 
 

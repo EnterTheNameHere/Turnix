@@ -1,0 +1,498 @@
+ACTANT COORDINATION PROTOCOL
+============================
+
+01. PURPOSE
+-----------
+
+01.01. Multiple independently contextualized AI conversations may work on different
+parts of Actant without sharing live conversational context.
+
+01.02. This coordination system provides repository-resident routing, state, mail,
+and continuation information so those conversations can coordinate without relying
+on chat memory.
+
+01.03. It is not a replacement for design documents, implementation source, Git
+history, or issue tracking. It carries the minimum durable context needed for one
+workstream to understand another workstream's current material state, requirements,
+messages, ownership, and continuation point.
+
+02. COORDINATION REF
+--------------------
+
+02.01. The canonical coordination ref is:
+
+    actant-integration
+
+02.02. Working branch and coordination ref are different concepts. A conversation
+may implement on another branch while reading and publishing coordination material
+on the canonical coordination ref.
+
+02.03. Every coordination read/write MUST explicitly use the coordination ref. Do
+not inherit the current implementation branch implicitly.
+
+02.04. Using actant-integration as the coordination ref does not make Integration
+the semantic owner of all coordination material. Ownership is declared per
+workstream/document/message.
+
+03. WORKSTREAMS
+---------------
+
+03.01. A workstream is an independently contextualized implementation or analysis
+area with a declared purpose, owner, working branch when applicable, state document,
+handoff document when applicable, and mailbox.
+
+03.02. A workstream does not need a dedicated Git branch when its work is purely
+coordination, intake, or another activity for which a branch adds no value.
+
+03.03. Creating a new message or idea does not imply creating a new workstream.
+Workstream creation is a routing decision made when the idea requires sustained,
+independently owned continuation.
+
+04. MAIL MODES
+-------------
+
+04.01. ADDRESSED MAIL has a known recipient workstream. It is written to that
+recipient's inbox.
+
+04.02. INTAKE MAIL records an idea, requirement, finding, or question whose owner is
+not yet established. It is written to ai-workflow/mail/intake/.
+
+04.03. Intake may be resolved by assigning it to an existing workstream, creating a
+new workstream, handling it immediately as a small task, deferring it, or rejecting
+it as unnecessary.
+
+04.04. A dedicated dispatcher/intake conversation may perform routing, but direct
+workstream-to-workstream mail remains valid when the recipient is already known.
+The dispatcher is therefore optional infrastructure, not a mandatory hop.
+
+05. MESSAGE SEMANTICS
+---------------------
+
+05.01. Messages SHOULD be immutable after publication except for correction of a
+clear factual/formatting error. Responses are new messages or durable state updates.
+Git history preserves chronology.
+
+05.02. A message SHOULD identify:
+
+- sender or source;
+- recipient, or UNASSIGNED for intake;
+- subject;
+- purpose/context;
+- requested action or information;
+- ownership expectation if known;
+- blocking status if relevant;
+- relevant branch/ref/source/tests;
+- completion/report-back expectation when relevant.
+
+05.03. Messages are operational communication. Durable facts discovered while
+handling them belong in STATE or KNOWLEDGE rather than remaining available only by
+reading old mail.
+
+05.04. Once a message is handled, the recipient SHOULD move or supersede it into
+its archive area. Inbox membership therefore represents outstanding coordination,
+not historical completeness.
+
+06. MAIL ROUTING
+---------------
+
+06.01. Canonical mail roots are:
+
+    ai-workflow/mail/intake/
+    ai-workflow/mail/integration/inbox/
+    ai-workflow/mail/integration/archive/
+    ai-workflow/mail/materialization-test/inbox/
+    ai-workflow/mail/materialization-test/archive/
+    ai-workflow/mail/evil-analysis/inbox/
+    ai-workflow/mail/evil-analysis/archive/
+
+06.02. Additional workstreams MUST receive equivalent recipient-based mailbox
+locations and be added to ai-workflow/index.txt.
+
+06.03. Mail is routed by recipient, not by the branch/thread where the message was
+created.
+
+06.04. The legacy path development/coordination/materialization-test/messages/
+contains historical coordination traffic created before this protocol. Treat it as
+legacy evidence; do not use it for new mail.
+
+07. STATE CONTRACT
+------------------
+
+07.01. Every active workstream MUST have a current STATE document, either dedicated
+or represented by an explicitly named shared state document.
+
+07.02. State describes what is materially true now, not a chronological diary.
+Replace obsolete claims; Git preserves history.
+
+07.03. Workstream state SHOULD make the following discoverable when relevant:
+
+Identity
+- workstream ID;
+- purpose;
+- owner;
+- working branch/ref and parent relationship.
+
+Current position
+- current implementation status;
+- verified/exercised behavior;
+- incomplete behavior;
+- temporary substitutions/workarounds;
+- relevant synchronization point.
+
+Provides
+- capabilities/contracts other workstreams may rely on.
+
+Requires
+- unresolved dependencies or requirements on other workstreams.
+
+Current objective
+- the work presently being pursued.
+
+Open coordination
+- outstanding incoming/outgoing message references when they materially affect
+  continuation.
+
+Continuation
+- the next meaningful action if work resumes.
+
+07.04. Application state emphasizes application implementation and Actant pressure.
+Integration state emphasizes available shared/internal capabilities, known gaps, and
+consumer-facing contracts.
+
+08. THREAD START BARRIER
+------------------------
+
+08.01. Before substantial work in a new or resumed conversation:
+
+1. Read ai-workflow/index.txt from the canonical coordination ref.
+2. Read ai-workflow/coordination-protocol.txt.
+3. Identify the workstream and its declared working branch/ref.
+4. Read the workstream's current STATE.
+5. Read its HANDOFF if one exists.
+6. Read current messages in that workstream's inbox.
+7. Read only cross-workstream state/knowledge needed for the immediate work.
+8. Verify recorded branch/synchronization position against repository reality.
+9. Reconcile materially stale state before compounding implementation on it.
+
+08.02. An intake/dispatcher conversation instead reads the registry and intake,
+then routes each item without silently becoming its implementation owner unless
+that ownership is the explicit routing decision.
+
+09. THREAD FINISH BARRIER
+-------------------------
+
+09.01. Before reporting substantial work as finished, handed off, or safely paused,
+check:
+
+1. Implementation is materialized/committed at the stated ref where applicable.
+2. Required verification/test results are reflected in STATE.
+3. STATE still describes what is materially true now.
+4. Provides/Requires changed by the work are updated.
+5. Outgoing requirements/messages are written to the correct recipient mailbox.
+6. Handled incoming mail is archived/resolved.
+7. Durable facts discovered through mail are promoted into STATE/KNOWLEDGE.
+8. HANDOFF identifies unfinished work and exact next action when continuation is
+   still required.
+9. The shared index/workstream registry reflects any added, moved, split, or retired
+   workstream/document/mailbox.
+10. Only after those checks should the conversation report completion to the user.
+
+09.02. Pausing unfinished work uses the same barrier; the difference is that HANDOFF
+must preserve the remaining objective, material position, uncertainty, and next
+action.
+
+09.03. For tracked multi-step work, update ai-workflow/board.txt at meaningful
+assignment, design-review, implementation, blocker, correction, verification and
+acceptance transitions. Name the actual owner, state, next actor and evidence ref.
+This is a readable projection of workstream STATE/KNOWLEDGE, mail and repository
+reality, not independent authority. Reconcile discrepancies; do not fabricate
+progress or silently assume an agent session is active.
+
+09.04. After a substantial finish/handoff or a newly identified blocker, show the
+user a compact completion snapshot: DONE (verified recent change), NOW (relevant
+step and its true status), NEXT (owner and next action/blocker). Link the board
+for detail. This user-facing summary is not itself the durable record. A task may
+contain independently reviewed and parallel steps; implementation reports and
+Integration acceptance remain distinct. If a required board update cannot be
+published, explicitly report that limitation rather than showing stale status as
+current.
+
+10. OWNERSHIP AND AUTHORITY
+---------------------------
+
+10.01. Mail does not create design authority. DA/DD/ODA/IS and successor design
+material retain their established authority.
+
+10.02. Mail does not create implementation ownership merely because a thread wrote
+the first description of an idea. Ownership follows the workstream/component that
+should semantically own the solution.
+
+10.03. STATE is the current coordination view, repository implementation is the
+material evidence, and design documents remain design authority. When these differ,
+investigate and classify the difference rather than silently choosing whichever was
+read first.
+
+
+11. DELEGATED IMPLEMENTATION AND INTEGRATION ACCEPTANCE
+-------------------------------------------------------
+
+11.01. The Integration workstream is the primary maintainer of coherent shared
+Actant implementation: scope/delegation, dependency coordination, shared-contract
+review, cross-workstream verification, branch integration, and current integrated
+capability state. Integration MAY directly implement focused changes when that
+is the clearest or least costly route; it is not obliged to be the primary author
+of every shared feature. Architecture/design authority stays with the applicable
+design corpus and explicitly accepted working design decisions, not Integration's
+implementation convenience.
+
+11.02. Implementation work can be performed by ChatGPT Work, Codex, chat-based
+agents, humans, or other tools. Neither task identity nor routing/acceptance
+semantics depend on one tool, its session, local/cloud filesystem, or ability
+to execute tests. Record actual access and verification; do not assert runtime
+execution or local environment access without evidence.
+
+11.03. Integration SHOULD delegate bounded independent scopes when useful.
+A delegated assignment SHOULD record, to the degree applicable:
+- desired behavior and explicit non-goals;
+- semantic owner/implementer workstream and working branch/ref;
+- source and interface ownership, expected integration branch;
+- accepted architectural/design inputs, with exact refs/paths and any known
+  supersession or working-design status;
+- dependencies and provided/required contracts;
+- relevant Architectural Tests, normal verification and expected evidence;
+- reporting and design-escalation expectations.
+An assignment is NOT permission to rewrite all adjacent framework design or
+alter unrelated workstream-owned interfaces.
+
+11.04. Prefer existing addressed mail and STATE/HANDOFF to publish assignments,
+questions and results. A separate new workstream or branch is warranted only
+when scope/continuation justifies it. Direct addressed communication between
+implementers remains valid; Integration must be kept informed when a change
+affects shared APIs, assignment boundaries, cross-workstream dependencies, or
+integration sequencing. Integration is not a mandatory relay for every message.
+
+11.05. Keep the following distinctions explicit in STATE/mail as appropriate:
+- proposed or awaiting assignment;
+- owned/in progress;
+- locally implemented/committed;
+- verified to the extent actually exercised;
+- integrated into the stated shared ref;
+- accepted as a compatible platform capability.
+These are evidence-bearing descriptions, NOT a mandatory lifecycle enum,
+global status machine, or assumption that every task passes through each
+description. A worker's local completion report is not Integration acceptance.
+Name exact refs/commits and tests where material. Integration should
+independently inspect compatibility and evidence rather than rely only on
+worker self-report; execution of tests may be delegated or user-assisted.
+
+11.06. Implementation choices can be made locally within accepted semantics.
+When a worker detects contradiction, missing architectural guarantees,
+unworkable decomposition, or design/implementation divergence, it MUST report
+concrete evidence and affected contracts. Integration may rescope assignments
+and negotiate implementation boundaries. It must NOT silently change accepted
+architecture or weaken correct Architectural Tests to accept an optimization.
+Route genuinely new architectural decisions back to their design owner; preserve
+safe partial implementation and accurately report what remains unresolved.
+
+11.07. If multiple branches contribute shared changes, Integration is responsible
+for coordinating synchronization, reviewing conflicts, establishing compatibility,
+running or arranging applicable integration verification, and reporting which
+capabilities actually work together at a named integration ref. A merge alone is
+not proof of behavioral integration or architectural conformance. Tests tied to
+architectural guarantees should survive refactors; correct an inaccurate test
+only against the accepted design, never just to make code pass.
+
+11.08. Design transition remains explicit. Existing authoritative documents,
+newer confirmed superseding design areas, and accepted non-authoritative
+working checkpoints must not be conflated. Assignments may cite a working
+checkpoint as the agreed source for a specific design area, clearly stating
+its status and any legacy conflict; this does not automatically supersede
+all historical DA/IS material. Ambiguous precedence must be resolved with the
+design owner before relying on it. Coordination files do not themselves
+promote a checkpoint into a canonical specification.
+
+11.09. Changes to Integration's coordination role do not revoke semantic
+ownership of application-specific iteration by application workstreams, or
+require all direct requests to pass through Integration. Shared framework and
+reusable provider implementation remains ultimately integrated through the
+shared branch with explicit cross-workstream synchronization.
+
+12. BRANCH ROLES, SYNCHRONIZATION, AND CAPABILITY ADOPTION
+---------------------------------------------------------
+
+12.01. Integration is the long-lived shared platform line (backend, reusable
+first-party Packs, contracts, shared tests and eventual distribution). Application
+lines are independently continuing consumers of that platform. Bounded implementer
+branches may be short-lived and retired after their contributions are accepted.
+This is a logical ownership arrangement; an implementer may branch from the
+appropriate application or Integration baseline. No task requires its own branch.
+
+12.02. Application development currently uses long-lived branches but may later
+move to separate repositories. State and assignments SHOULD name repository,
+branch/ref and baseline commit explicitly when ambiguity matters. The coordination
+ref remains actant-integration in the current repository until deliberately moved;
+do not assume repository separation has already occurred. Preserve an interface-
+and-dependency-based workflow that survives future repository boundaries.
+
+12.03. At every start/resume barrier, read the canonical coordination index,
+protocol, workstream STATE/HANDOFF and current inbox BEFORE continuing previously
+issued instructions. Compare new mail and shared-state changes with the current
+assignment. Messages are not automatically higher authority than user instructions.
+When new information materially conflicts with, supersedes or expands the
+assignment beyond existing authority, STOP before doing the affected work and
+inform the user, describing the mismatch and asking for direction. Relevant
+nonconflicting updates may be incorporated without unnecessary interruption.
+Do not silently ignore an unexpected Integration instruction.
+
+12.04. After reconciling authority, compare the workstream's known base commit
+against current Integration. If Integration advanced, inspect what changed and
+synchronize safely when applicable before substantive implementation. Rebase,
+merge, cherry-pick or equivalent explicit synchronization are possible; no one
+operation is mandated. Do not overwrite uncommitted work, rewrite shared
+published history, force-push, or resolve substantive conflicts without proper
+authority. If synchronization cannot safely proceed, preserve work and report
+the blocker. Record the tested baseline and resulting ref.
+
+12.05. Repeat relevant coordination and synchronization checks at meaningful
+handoff, delegation, integration and long-running implementation boundaries;
+a one-time conversation-start check does not establish perpetual currency.
+
+12.06. Describe capability status by producer and consumer boundary, not one
+project-wide binary completion flag. Distinguish (when relevant): backend
+facility implemented; first-party Pack/provider adopted; application integrated;
+specific behavior exercised at named refs. A capability available in backend
+does not imply Packs use it, and a Pack update does not imply every application
+has synchronized or been verified. Preserve explicit Provides/Requires and
+adoption dependencies, without introducing mandatory status enums.
+
+12.07. Integration coordinates who owns follow-on adoption, and what is needed
+before consumer work may rely on a capability. Implementation availability is
+not itself an assignment. Branch updates alone do not authorize changes of scope.
+Temporary implementer branches may be retired after accepted integration, but
+decisions, test evidence, and unresolved obligations must survive in durable
+coordination/design materials and version history.
+
+12.08. PLATFORM AND APPLICATION ARTIFACT BOUNDARY. The Actant platform repository
+line, actant-integration, owns internal backend code, reusable first-party Packs,
+shared contracts, platform tests, and platform distribution tooling. An
+Application's exclusive AppPackage/AppPacks, private definitions/configurations,
+runtime/result formats, examples, tests and Application-only tooling belong to
+that Application's workstream and branch, NOT to actant-integration. An AppPack
+does not become platform code by being accepted, tested by Integration, or
+currently located under a directory called first-party.
+
+12.09. Treat long-lived Application branches as stand-ins for INDEPENDENT
+APPLICATION REPOSITORIES. This is a temporary source-hosting convenience, not
+permission to include AppPackages in the Actant platform distribution. A later
+move to separate repositories should change transport/hosting, not semantic
+ownership, contracts, or the direction of dependency: Applications consume
+Actant; Actant does not consume or vendor an Application's exclusive contents.
+
+12.10. Classification is based on intended audience and semantic ownership:
+functionality intended to be available to arbitrary Actant Applications belongs
+to platform backend/reusable first-party internals, even if only one Application
+uses it today. Functionality exclusively serving an Application stays with that
+Application, even if someone could hypothetically reuse it later. Generic code
+discovered by an Application is a candidate for explicit extraction/review, not
+automatic promotion. Do not classify by file path, original author, branch of
+review, number of current consumers, or test success alone.
+
+12.11. INTEGRATION ACCEPTANCE IS NOT SOURCE IMPORT. Integration independently
+reviews Application changes, compatible consumption of shared contracts, and
+test/real evidence, recording accepted Application commits and Provides/Requires
+in canonical coordination. It must not automatically cherry-pick, merge or
+copy Application-exclusive files/tests into actant-integration. Only reviewed
+platform-owned changes may be integrated into the platform source. A successful
+Application review can accept the Application ON ITS OWN REF.
+
+12.12. STANDARD APPLICATION PLATFORM IMPORT. Each Application branch normally
+contains the complete current Actant platform source from actant-integration:
+backend/, reusable first-party/ Packs (including the llama.cpp driver), and
+other platform-owned tooling/tests needed by that revision, alongside its own
+separately owned AppPackage. The branch is a combined self-contained working
+checkout, not an AppPackage-only snapshot requiring a separately installed
+platform. Synchronize the platform as the standard development procedure and
+record its exact baseline/ref. Copying platform files does not transfer their
+semantic ownership to the Application.
+
+12.13. Synchronization is asymmetric in OWNERSHIP, not platform completeness.
+Application branches import platform content downstream while retaining their
+exclusive AppPackage files. Git operations may be selective to safely achieve
+that complete platform baseline; "selective" is not permission to routinely
+import only a subset of Actant. Prevent historical Integration-side AppPackage
+deletions from propagating into Application-owned files. Integration must not
+merge whole Application branches upstream. A genuinely reusable fix discovered
+by an Application is reviewed as a platform-only patch before downstream
+adoption. Record source refs, ownership and tests.
+
+12.14. Platform tests exercise platform contracts and Application tests remain
+with their Application. Test the combined Application branch with its imported
+platform by default. Separate-root external composition may be tested as an
+additional compatibility scenario, but is NOT a prerequisite for the current
+branch-based development model. Integration records Application acceptance by
+its own ref without importing exclusive source into the platform.
+
+12.15. The historically integrated EX-01/02 source at be092fd is an ownership
+mismatch, not a precedent. Preserve the accepted behavior/evidence and the EX
+AppPackage on actant-experiment-runner. Reconcile by ensuring that Application
+branch has the current full platform, then removing only the nine EX-exclusive
+files from actant-integration in a reviewed forward commit. Do not require
+separate-platform loader/bootstrap changes merely for this reconciliation.
+Do not delete/move files under this documentation-only decision; record and
+verify exact post-reconciliation platform and combined Application refs.
+
+Recorded EX reconciliation: direct user approval authorized the reviewed source
+change after this policy decision. Complete-platform Application ref 4b375a3
+(imported b59363c) preserves EX; platform e3024b8 removes nine exclusive files.
+Actual verification/limits: knowledge/experiment-runner-source-reconciliation.txt.
+This completion grants no authority for unrelated source changes or App migration.
+
+13. GENERATED TEST ARTIFACTS AND RETAINED EVIDENCE
+-------------------------------------------------
+
+13.01. Generated test output is DISPOSABLE BY DEFAULT. Logs, screenshots,
+traces, reports, diagnostic dumps and result files produced by a test run
+SHOULD remain outside tracked source and SHOULD NOT be committed simply
+because they were generated. Use local ignored output paths or appropriate
+CI artifact storage with a stated retention period. Avoid committing
+secrets, private data, machine-local paths or other sensitive observations.
+
+13.02. Deliberate test inputs are different from generated outputs.
+Required fixtures, golden/reference files, controlled snapshots and
+other inputs actually consumed by subsequent tests MAY be tracked and
+maintained with their tests. A generated file is not automatically a
+fixture just because it sits in the repository or under tests/.
+
+13.03. Selected outputs MAY be retained as evidence when they establish
+a material acceptance decision, document a difficult-to-reproduce
+failure, or record supervised/physical validation not fully reproducible
+by ordinary deterministic tests. Retention MUST be a deliberate decision,
+not a side effect of running the suite. Prefer a concise repository
+acceptance/verification record pointing to immutable or durably retained
+evidence rather than bulk-committing arbitrary generated files.
+
+13.04. Retained evidence SHOULD identify the exact source commit/ref,
+test definition or command, relevant environment, observed result,
+limitations and evidence location. Where practical, record a content
+digest so the referenced bytes can be checked. Ensure that the storage
+and retention policy are appropriate; an expiring artifact URL alone
+is not durable evidence. Do not imply a test passed, a result is current,
+or evidence was independently verified without supporting observation.
+
+13.05. Historic test products are records of the execution that
+produced them, NOT current test fixtures unless verified to be consumed.
+Do not rewrite recorded output merely to match a new product name,
+schema, expected outcome or implementation. New runs produce new
+evidence. If old outputs are moved or archived, preserve provenance
+and meaningful references; do not silently erase material acceptance
+or failure history.
+
+13.06. Test cleanup and source migration SHOULD distinguish (a) active
+test code and required fixtures, (b) routine disposable execution
+artifacts, and (c) deliberately retained historical evidence. The
+presence of generated outputs in Git is not itself justification to
+retain that practice or an authorization to delete existing evidence.
+Changes to historical evidence retention require their own reviewed
+decision. Test execution MUST NOT automatically update tracked
+verification artifacts unless those artifacts are intentionally
+maintained test inputs under an explicit contract.

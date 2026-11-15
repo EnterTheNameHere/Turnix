@@ -1,4 +1,4 @@
-# file: tests/first_party/materializationTest/test_exporter.py ; version: 2
+# file: tests/first_party/materializationTest/test_exporter.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
@@ -83,7 +83,7 @@ class _Ctx:
         self.io = _Io(prompts, sections)
         self.identity = SimpleNamespace(applicationId="app-1", applicationRunId="run-9")
         self.config = {
-            "strategy": "actant-native",
+            "strategy": "tertalis-native",
             "promptsFile": "C:/app/prompts.json",
             "questionnaireDirectory": "C:/app/questionnaire",
             "outputDirectory": "C:/results",

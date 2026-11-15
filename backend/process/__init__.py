@@ -1,5 +1,5 @@
-# file: backend/process/__init__.py ; version: 1
-"""Actant-mediated external process execution."""
+# file: backend/process/__init__.py ; version: 3
+"""Tertalis-mediated external process execution."""
 
 from backend.process.runtime import (
     ProcessExecutionError,
@@ -8,6 +8,8 @@ from backend.process.runtime import (
     ProcessToolDefinition,
     ProcessToolRegistry,
 )
+from backend.process.capture import (PreparedProcess, ProcessRequest, ProcessOutcome,
+    CapturedStream, ProcessCleanup, ProcessOperationError, ProcessCancelled, ProcessCleanupPendingError)
 
 __all__ = [
     "ProcessExecutionError",
@@ -15,4 +17,6 @@ __all__ = [
     "ProcessRunner",
     "ProcessToolDefinition",
     "ProcessToolRegistry",
+    "PreparedProcess", "ProcessRequest", "ProcessOutcome", "CapturedStream",
+    "ProcessCleanup", "ProcessOperationError", "ProcessCancelled", "ProcessCleanupPendingError",
 ]

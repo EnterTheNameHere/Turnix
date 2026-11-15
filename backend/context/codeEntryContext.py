@@ -1,22 +1,25 @@
-# file: backend/context/codeEntryContext.py ; version: 22
+# file: backend/context/codeEntryContext.py ; version: 30
 from __future__ import annotations
 
+from contextlib import suppress
 from copy import deepcopy
+import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from backend.core.immutableValue import ImmutableValueFreezer
-from backend.llm.errors import LlmProviderProtocolError
-from backend.llm.llmTypes import LlmExecutionProfile, LlmQuery
+from backend.llm.llmTypes import LlmQuery
+from backend.observation import ObservationFacade, ObservationOwner, ObservationSession
 from backend.process.context import ProcessFacade
 from backend.process.runtime import ProcessRunner, ProcessToolRegistry
+from backend.process.capture import ProcessInvocation
 from backend.values.committed import ValueState
 from backend.workspace.context import WorkspaceFacade
 from backend.workspace.runtime import EphemeralWorkspace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
+
     from backend.capabilities.runtime import CapabilityHandler, CapabilityRegistry
     from backend.core.immutableValue import ImmutableValue
     from backend.io.managedIo import ManagedIo, ManagedIoTransaction
@@ -28,6 +31,7 @@ if TYPE_CHECKING:
         LlmProviderRegistry,
         StreamingLlmResult,
     )
+    from backend.orchestration.cancellation import CancellationSignal
     from backend.registration import RegistrationScope
     from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
@@ -35,57 +39,57 @@ __all__ = ["CodeEntryContext", "CodeEntryIdentity"]
 
 
 class _IoFacade:
-    """Invocation-bound facade over Actant-mediated filesystem I/O."""
+    """Invocation-bound facade over Tertalis-mediated filesystem I/O."""
 
     def __init__(self, *, io: ManagedIo | ManagedIoTransaction, requireValid: Callable[[], None]) -> None:
         """Binds one managed-I/O view to the owning invocation lifetime."""
         self._io = io
         self._requireValid = requireValid
 
-    def observeFile(self, path, *, contentHash: bool = False) -> dict[str, object]:
-        """Returns JSON-compatible Actant source-observation evidence."""
+    def observeFile(self, path: str | Path, *, contentHash: bool = False) -> dict[str, object]:
+        """Returns JSON-compatible Tertalis source-observation evidence."""
         self._requireValid()
         return self._io.observeFile(path, contentHash=contentHash).snapshot()
 
-    def readObservedText(self, path) -> dict[str, object]:
+    def readObservedText(self, path: str | Path) -> dict[str, object]:
         """Returns exact UTF-8 text together with its source observation."""
         self._requireValid()
         value, observation = self._io.readObservedText(path)
         return {"value": value, "observation": observation.snapshot()}
 
-    def readObservedLines(self, path) -> dict[str, object]:
+    def readObservedLines(self, path: str | Path) -> dict[str, object]:
         """Returns exact UTF-8 lines together with their source observation."""
         self._requireValid()
         value, observation = self._io.readObservedLines(path)
         return {"value": value, "observation": observation.snapshot()}
 
-    def readObservedJson(self, path) -> dict[str, object]:
-        """Returns JSON together with its Actant source observation."""
+    def readObservedJson(self, path: str | Path) -> dict[str, object]:
+        """Returns JSON together with its Tertalis source observation."""
         self._requireValid()
         value, observation = self._io.readObservedJson(path)
         return {"value": value, "observation": observation.snapshot()}
 
-    def readText(self, path):
+    def readText(self, path: str | Path) -> str:
         """Reads UTF-8 text through the invocation's managed-I/O view."""
         self._requireValid()
         return self._io.readText(path)
 
-    def readJson(self, path):
+    def readJson(self, path: str | Path) -> dict[str, object]:
         """Reads JSON through the invocation's managed-I/O view."""
         self._requireValid()
         return self._io.readJson(path)
 
-    def readLines(self, path):
+    def readLines(self, path: str | Path) -> tuple[str, ...]:
         """Reads UTF-8 lines through the invocation's managed-I/O view."""
         self._requireValid()
         return self._io.readLines(path)
 
-    def writeTextAtomic(self, path, text: str) -> None:
+    def writeTextAtomic(self, path: str | Path, text: str) -> None:
         """Requests an atomic text write through the managed-I/O view."""
         self._requireValid()
         self._io.writeTextAtomic(path, text)
 
-    def writeJsonAtomic(self, path, value: object) -> None:
+    def writeJsonAtomic(self, path: str | Path, value: object) -> None:
         """Requests an atomic JSON write through the managed-I/O view."""
         self._requireValid()
         self._io.writeJsonAtomic(path, value)
@@ -114,7 +118,7 @@ class _MemoryTransactionFacade:
         return self._transaction.state(address)
 
     def metadata(self, address: str) -> dict[str, object] | None:
-        """Returns generic Actant metadata visible through this transaction."""
+        """Returns generic Tertalis metadata visible through this transaction."""
         self._requireValid()
         return self._transaction.metadata(address)
 
@@ -138,7 +142,7 @@ class _MemoryTransactionFacade:
         if self._transaction.state(address) is not expectedState:
             return False
         metadata = self._transaction.metadata(address)
-        return isinstance(metadata, dict) and metadata.get("formatId") == "actant.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
+        return isinstance(metadata, dict) and metadata.get("formatId") == "tertalis.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether PRESENT state matches producer and validity."""
@@ -165,7 +169,7 @@ class _MemoryTransactionFacade:
             raise TypeError("Value validity metadata must be an object or null.")
         if provenance is not None and not isinstance(provenance, dict):
             raise TypeError("Value provenance metadata must be an object or null.")
-        return {"formatId": "actant.derived-value-metadata@1", "producer": deepcopy(self._producer), "validity": {} if validity is None else deepcopy(validity), "provenance": {} if provenance is None else deepcopy(provenance)}
+        return {"formatId": "tertalis.derived-value-metadata@1", "producer": deepcopy(self._producer), "validity": {} if validity is None else deepcopy(validity), "provenance": {} if provenance is None else deepcopy(provenance)}
 
     def openTransaction(self) -> "_MemoryTransactionFacade":
         """Opens a nested invocation-owned speculative transaction."""
@@ -213,7 +217,7 @@ class _MemoryFacade:
         return self._state.revisionId(address)
 
     def metadata(self, address: str) -> dict[str, object] | None:
-        """Returns generic Actant metadata for the visible revision."""
+        """Returns generic Tertalis metadata for the visible revision."""
         self._requireValid()
         return self._state.metadata(address)
 
@@ -237,7 +241,7 @@ class _MemoryFacade:
         if self._state.state(address) is not expectedState:
             return False
         metadata = self._state.metadata(address)
-        return isinstance(metadata, dict) and metadata.get("formatId") == "actant.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
+        return isinstance(metadata, dict) and metadata.get("formatId") == "tertalis.derived-value-metadata@1" and metadata.get("producer") == self._producer and metadata.get("validity") == validity
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether PRESENT state matches producer and validity."""
@@ -253,10 +257,8 @@ class _MemoryFacade:
     def close(self) -> None:
         """Best-effort aborts unresolved transactions owned by this invocation."""
         for transaction in reversed(self._openedTransactions):
-            try:
-                transaction._transaction.abort()
-            except RuntimeError:
-                pass
+            with suppress(RuntimeError):
+                transaction.abort()
         self._openedTransactions.clear()
 
 
@@ -285,10 +287,36 @@ class _CapabilityFacade:
         return self._invoker(capabilityId, payload)
 
 
+class _CancellationFacade:
+    """Invocation-scoped read/check access to the owning execution cancellation signal."""
+
+    def __init__(
+        self,
+        *,
+        signal: CancellationSignal | None,
+        requireValid: Callable[[], None],
+    ) -> None:
+        """Binds cancellation observation to this invocation lifetime."""
+        self._signal = signal
+        self._requireValid = requireValid
+
+    @property
+    def requested(self) -> bool:
+        """Reports whether cancellation has been requested for the owning work."""
+        self._requireValid()
+        return self._signal is not None and self._signal.requested
+
+    def raiseIfRequested(self) -> None:
+        """Raises the execution cancellation outcome when a request is active."""
+        self._requireValid()
+        if self._signal is not None:
+            self._signal.raiseIfRequested()
+
+
 class _LlmFacade:
     """Invocation-scoped gateway to registered LLM providers and processing."""
 
-    def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope, pipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, requireValid: Callable[[], None], allowRegistration: bool) -> None:
+    def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope, pipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, requireValid: Callable[[], None], allowRegistration: bool, cancellationSignal: CancellationSignal | None = None, observationOwner: ObservationOwner | None = None, executionAccess=None) -> None:
         """Binds LLM authority to one CodeEntry invocation and memory view."""
         self._ownerId = ownerId
         self._registry = registry
@@ -297,6 +325,9 @@ class _LlmFacade:
         self._memory = memory
         self._requireValid = requireValid
         self._allowRegistration = allowRegistration
+        self._cancellationSignal = cancellationSignal
+        self._observationOwner = observationOwner
+        self._executionAccess = executionAccess
 
     def registerProvider(self, name: str, provider: LlmStreamProvider) -> None:
         """Registers an LLM provider when this invocation permits registration."""
@@ -305,38 +336,70 @@ class _LlmFacade:
             raise RuntimeError("LLM provider registration is not available in this invocation Context.")
         self._registry.register(self._scope, ownerId=self._ownerId, name=name, provider=provider)
 
-    def estimateInputTokens(self, *, providerName: str, query: LlmQuery, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None) -> int:
-        """Returns provider/model-aware input-token usage without inference."""
+    def profile(self, *, providerName, model=None):
+        """Looks up a host-approved profile without granting transition authority."""
+        self._requireValid()
+        return self._registry.executions.profile(self._registry, self._executionAccess, providerName, model)
+
+    def transitionProfile(self, profile):
+        """Requests an explicitly host-granted idle transition; Busy is immediate."""
+        self._requireValid()
+        return self._registry.executions.transition(self._executionAccess, profile)
+
+    def reserveConversation(self, profile):
+        """Reserves exclusive admission without retaining this invocation Context."""
+        self._requireValid()
+        return self._registry.executions.reserve(self._executionAccess, profile)
+
+    def estimateInputTokens(self, *, providerName, query, model=None, providerOptions=None, session=None):
+        """Estimates in the admitted scope, including narrowly granted helper borrowing."""
         self._requireValid()
         if not isinstance(query, LlmQuery):
             raise TypeError("query must be an LlmQuery.")
-        registration = self._registry.requireRegistration(providerName)
-        options = ImmutableValueFreezer().freezeMapping(providerOptions, "providerOptions")
-        profile = registration.value.getExecutionProfile(model=model, providerOptions=options)
-        if not isinstance(profile, LlmExecutionProfile):
-            raise LlmProviderProtocolError("Provider getExecutionProfile() returned an invalid value.")
-        estimator = profile.tokenEstimator
-        if estimator is None:
-            raise RuntimeError(f"LLM provider {providerName!r} does not expose an input-token estimator.")
-        result = estimator.estimateInputTokens(query)
-        if type(result) is not int or result < 0:
-            raise LlmProviderProtocolError(f"LLM provider {providerName!r} token estimator returned an invalid value: {result!r}.")
-        return result
+        return self._pipeline.estimateInputTokens(providerName=providerName, query=query,
+            model=model, providerOptions=providerOptions, session=session,
+            executionAccess=self._executionAccess, cancellationSignal=self._cancellationSignal)
 
-    def run(self, *, providerName: str, query: LlmQuery, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None) -> StreamingLlmResult:
-        """Runs one provider-neutral query through the registered provider."""
+    def runPreview(self, preview, *, session=None, context=None):
+        """Revalidates the exact preview generation with fresh invocation authority."""
         self._requireValid()
-        return self._pipeline.run(providerName=providerName, query=query, model=model, providerOptions=providerOptions, streamObserver=streamObserver)
+        return self._pipeline.runPreview(preview, session=session, context=context,
+            executionAccess=self._executionAccess, cancellationSignal=self._cancellationSignal)
 
-    def prepareProcessing(self, *, memoryKey: str, inputValue: object, buildQueryItemsCapabilityId: str, buildQueryCapabilityId: str, providerName: str, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, filterQueryItemsCapabilityId: str | None = None) -> LlmProcessingPreview:
+    def run(self, *, providerName: str, query: LlmQuery, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None, observation: ObservationSession | None = None, session=None, context=None) -> StreamingLlmResult:
+        """Runs a query with an optional same-application, single-use observation.
+
+        Invocation authority is required even for independently owned sessions.
+        Every pipeline exit stops RUN collection; explicit APPLICATION ownership
+        survives. Optional observation never supplies execution authority.
+        """
+        self._requireValid()
+        streamObservation = None if observation is None else observation.forExecution(self._observationOwner)
+        try:
+            return self._pipeline.run(providerName=providerName, query=query, model=model, providerOptions=providerOptions, streamObserver=streamObserver, cancellationSignal=self._cancellationSignal, executionAccess=self._executionAccess, session=session, context=context, streamObservation=streamObservation)
+        finally:
+            if observation is not None:
+                observation.finishExecution()
+
+    def prepareProcessing(self, *, memoryKey: str, inputValue: object, buildQueryItemsCapabilityId: str, buildQueryCapabilityId: str, providerName: str, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, filterQueryItemsCapabilityId: str | None = None, session=None, context=None) -> LlmProcessingPreview:
         """Prepares the exact model-facing query without provider inference."""
         self._requireValid()
-        return self._pipeline.prepareProcessing(memoryKey=memoryKey, inputValue=inputValue, buildQueryItemsCapabilityId=buildQueryItemsCapabilityId, buildQueryCapabilityId=buildQueryCapabilityId, filterQueryItemsCapabilityId=filterQueryItemsCapabilityId, providerName=providerName, model=model, providerOptions=providerOptions, memoryView=self._memory)
+        return self._pipeline.prepareProcessing(memoryKey=memoryKey, inputValue=inputValue, buildQueryItemsCapabilityId=buildQueryItemsCapabilityId, buildQueryCapabilityId=buildQueryCapabilityId, filterQueryItemsCapabilityId=filterQueryItemsCapabilityId, providerName=providerName, model=model, providerOptions=providerOptions, memoryView=self._memory, cancellationSignal=self._cancellationSignal, executionAccess=self._executionAccess, session=session, context=context)
 
-    def runProcessing(self, *, memoryKey: str, inputValue: object, buildQueryItemsCapabilityId: str, buildQueryCapabilityId: str, providerName: str, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, filterQueryItemsCapabilityId: str | None = None, completionCapabilityId: str | None = None, completionInput: object | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None) -> LlmProcessingResult:
-        """Runs one transactional LLM ProcessingRun against this memory view."""
+    def runProcessing(self, *, memoryKey: str, inputValue: object, buildQueryItemsCapabilityId: str, buildQueryCapabilityId: str, providerName: str, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, filterQueryItemsCapabilityId: str | None = None, completionCapabilityId: str | None = None, completionInput: object | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None, observation: ObservationSession | None = None, session=None, context=None) -> LlmProcessingResult:
+        """Runs transactional processing with optional same-application observation.
+
+        RUN collection ends after completion/transaction work, on every exit.
+        The recorded stream outcome describes only the provider span and may
+        differ from the eventual ProcessingRun or Job outcome.
+        """
         self._requireValid()
-        return self._pipeline.runProcessing(memoryKey=memoryKey, inputValue=inputValue, buildQueryItemsCapabilityId=buildQueryItemsCapabilityId, buildQueryCapabilityId=buildQueryCapabilityId, filterQueryItemsCapabilityId=filterQueryItemsCapabilityId, completionCapabilityId=completionCapabilityId, completionInput=completionInput, providerName=providerName, model=model, providerOptions=providerOptions, streamObserver=streamObserver, memoryView=self._memory)
+        streamObservation = None if observation is None else observation.forExecution(self._observationOwner)
+        try:
+            return self._pipeline.runProcessing(memoryKey=memoryKey, inputValue=inputValue, buildQueryItemsCapabilityId=buildQueryItemsCapabilityId, buildQueryCapabilityId=buildQueryCapabilityId, filterQueryItemsCapabilityId=filterQueryItemsCapabilityId, completionCapabilityId=completionCapabilityId, completionInput=completionInput, providerName=providerName, model=model, providerOptions=providerOptions, streamObserver=streamObserver, memoryView=self._memory, cancellationSignal=self._cancellationSignal, executionAccess=self._executionAccess, session=session, context=context, streamObservation=streamObservation)
+        finally:
+            if observation is not None:
+                observation.finishExecution()
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,7 +424,7 @@ class CodeEntryIdentity:
 class CodeEntryContext:
     """Fresh invocation-scoped gateway supplied to Pack CodeEntry code."""
 
-    def __init__(self, *, identity: CodeEntryIdentity, packRoot: Path, io: ManagedIo | ManagedIoTransaction, capabilities: CapabilityRegistry, llmProviders: LlmProviderRegistry, llmPipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, registrationScope: RegistrationScope, config: dict[str, object], capabilityInvoker: Callable[[str, object | None], object], process: ProcessFacade | None = None, workspace: EphemeralWorkspace | None = None, allowRegistration: bool = False) -> None:
+    def __init__(self, *, identity: CodeEntryIdentity, packRoot: Path, io: ManagedIo | ManagedIoTransaction, capabilities: CapabilityRegistry, llmProviders: LlmProviderRegistry, llmPipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, registrationScope: RegistrationScope, config: dict[str, object], capabilityInvoker: Callable[[str, object | None], object], process: ProcessFacade | None = None, workspace: EphemeralWorkspace | None = None, allowRegistration: bool = False, cancellationSignal: CancellationSignal | None = None, observationOwner: ObservationOwner | None = None, executionAccess=None) -> None:
         """Creates one call-specific authority context from runtime-owned facilities.
 
         Production ApplicationRuntime construction supplies process authority and
@@ -373,16 +436,26 @@ class CodeEntryContext:
         self.packRoot = packRoot
         self.config = deepcopy(config)
         self._valid = True
+        self._executionAccess = executionAccess
         self._workspace = workspace or EphemeralWorkspace()
         self.io = _IoFacade(io=io, requireValid=self.requireValid)
         self.workspace = WorkspaceFacade(workspace=self._workspace, requireValid=self.requireValid)
         self.process = process or ProcessFacade(runner=ProcessRunner(ProcessToolRegistry()), requireValid=self.requireValid)
+        self._processInvocation = ProcessInvocation(identity, cancellationSignal, self._workspace)
+        self.process._bind(self._processInvocation)
         self.memory = _MemoryFacade(state=memory, requireValid=self.requireValid, producer=identity.producerSnapshot())
+        self.cancellation = _CancellationFacade(signal=cancellationSignal, requireValid=self.requireValid)
         self.capabilities = _CapabilityFacade(ownerId=identity.codeEntryInstanceId, registry=capabilities, scope=registrationScope, invoker=capabilityInvoker, requireValid=self.requireValid, allowRegistration=allowRegistration)
-        self.llm = _LlmFacade(ownerId=identity.codeEntryInstanceId, registry=llmProviders, scope=registrationScope, pipeline=llmPipeline, memory=memory, requireValid=self.requireValid, allowRegistration=allowRegistration)
+        self.observations = ObservationFacade(observationOwner, self.requireValid)
+        self.llm = _LlmFacade(ownerId=identity.codeEntryInstanceId, registry=llmProviders, scope=registrationScope, pipeline=llmPipeline, memory=memory, requireValid=self.requireExecution, allowRegistration=allowRegistration, cancellationSignal=cancellationSignal, observationOwner=observationOwner, executionAccess=executionAccess)
+
+    def requireExecution(self):
+        """Compose sticky process quarantine with existing invocation/LLM authority."""
+        self.requireValid()
+        self.process._runner.requireReady()
 
     def requireValid(self) -> None:
-        """Rejects use after Actant has ended this invocation turn."""
+        """Rejects use after Tertalis has ended this invocation turn."""
         if not self._valid:
             raise RuntimeError("CodeEntryContext is no longer valid.")
 
@@ -390,6 +463,29 @@ class CodeEntryContext:
         """Ends invocation authority and releases invocation-owned resources."""
         if not self._valid:
             return
-        self.memory.close()
-        self._workspace.close()
+        primary = sys.exception()
         self._valid = False
+        self._processInvocation.valid.clear()
+        if self.process._prepared is not None and not self.process._prepared._used:
+            self.process._prepared._environment = None
+        self.process._prepared = None
+        errors = []
+        actions = [self.observations.close, self.memory.close, self._workspace.close]
+        if self._executionAccess is not None:
+            actions.insert(0, self._executionAccess.close)
+        for action in actions:
+            try:
+                action()
+            except BaseException as error:
+                errors.append(error)
+        if errors:
+            if primary is not None:
+                try:
+                    primary.invocationCleanupFailed = True
+                except BaseException:
+                    pass
+            else:
+                critical = next((e for e in errors if not isinstance(e, Exception)), None)
+                if critical is not None:
+                    raise critical
+                raise ExceptionGroup("Invocation cleanup failed.", errors)

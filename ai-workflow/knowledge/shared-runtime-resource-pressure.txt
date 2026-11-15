@@ -1,0 +1,316 @@
+ACTANT SHARED RUNTIME / RESOURCE PRESSURE
+========================================
+
+Status
+------
+Implementation-pressure working material. This document is durable integration
+knowledge, not authoritative DA/IS specification. It records independently exposed
+requirements and current architectural direction before implementation chooses the
+concrete abstraction.
+
+Sources
+-------
+The current pressure is independently exposed by:
+
+- Actant Completion
+  ai-workflow/mail/integration/inbox/
+  2026-09-17-completion-ingress-and-model-residency.txt
+
+- AI Buddy
+  ai-workflow/mail/integration/inbox/
+  2026-09-17-ai-buddy-shared-host-and-concurrency.txt
+
+Relevant existing material includes current RuntimeHost/ApplicationRuntime ownership,
+the first-party llama.cpp provider, LlmProcessingPipeline, telemetry, DA-19 Job
+semantics, DA-28 RuntimeHost semantics, and IS-03..IS-06 host/client/startup material.
+Those design documents are inputs, not preservation requirements where live pressure
+reveals a better shape.
+
+01. ESTABLISHED PRESSURE
+------------------------
+
+01.01. RuntimeHost already owns the lifetime registry for zero or more simultaneously
+active ApplicationRuntime instances and is the natural upper boundary for shared
+running-host facilities.
+
+01.02. Current ApplicationRuntime ownership is too low for expensive resources whose
+semantics cross applications. Each ApplicationRuntime currently owns its own
+LlmProviderRegistry, PackLoader, process-tool registry, capability registry, and loaded
+CodeEntries.
+
+01.03. The original first-party llama.cpp CodeEntry owned a driver per application.
+Managed lifetime is now shared through RuntimeHost SharedServiceRegistry leases;
+application-local provider facades reuse a compatible driver. This resolves duplicate
+lifetime ownership, not residency/execution arbitration. Different named profiles in
+one shared catalog can still invoke unguarded stop/start while other work is active.
+
+01.04. Completion, AI Buddy, and Materialization Test create concrete coexistence
+pressure:
+
+- Completion may remain logically available and latency-sensitive;
+- AI Buddy may remain logically available with mixed interactive/opportunistic work;
+- Materialization Test may temporarily request a large/heavy model;
+- all may need the same finite RAM/VRAM/CPU/GPU resources.
+
+01.05. Applications must not become separate Actant universes which independently own
+cross-application scarce resources merely because they have separate ApplicationRuntime
+instances.
+
+02. OWNERSHIP DIRECTION
+----------------------
+
+02.01. Preserve application-local semantic execution and authoritative state.
+ApplicationRuntime remains the execution environment for one ApplicationRun.
+
+02.02. Introduce host-owned/shared runtime services for facilities whose semantic
+lifetime is above one ApplicationRuntime.
+
+02.03. RuntimeHost should own or compose those services as part of the running-host
+boundary, but substantial domains should remain separate service objects rather than
+turning RuntimeHost itself into a monolithic manager.
+
+02.04. Do not solve shared model pressure as a RuntimeHost-specific llama.cpp manager.
+The shared contract should describe model/execution residency and acquisition in
+provider-neutral terms. llama.cpp is one realization of that contract.
+
+02.05. An application-local provider registration/facade may remain useful. Semantic
+availability to an application and physical ownership of shared provider/runtime
+resources are separate concerns. A provider facade may delegate expensive execution to
+a host-owned service.
+
+02.06. The target shape is directionally:
+
+    RuntimeHost
+        ApplicationRuntime registry
+        shared host services
+            model/execution residency authority
+            future other cross-application services
+        eventual ingress/dispatch boundary
+
+    ApplicationRuntime A -- provider facade --+
+    ApplicationRuntime B -- provider facade --+--> shared model execution service
+    ApplicationRuntime C -- provider facade --+
+
+03. MODEL / EXECUTION RESIDENCY
+------------------------------
+
+03.01. Shared model/runtime authority needs enough information to represent configured
+execution resources, currently resident resources, active acquisitions/executions, and
+requesting Application/ApplicationRun identity.
+
+03.02. Immediate proving-ground operations may use llama.cpp's practical replacement
+mechanism: stop the managed server and start the requested model/server again.
+
+03.03. That mechanism must not become the provider-neutral semantic contract. Other
+providers may hold multiple models, use external servers, use cloud execution, or have
+different release/materialization mechanics.
+
+03.04. The shared layer should eventually support at least acquisition, release,
+replacement/unload, and observation. Scheduling/arbitration policy is a later layer
+unless implementation requires a minimal deterministic policy.
+
+03.05. SharedServiceRegistry remains a lifetime/compatibility mechanism. It must not
+become the model scheduler, VRAM policy engine, Job owner, or provider-specific
+residency controller.
+
+03.06. The next provider-neutral layer is a scarce execution-resource boundary above
+shared service lifetime and below application semantics. Its responsibility is to
+coordinate model/runtime residency and active execution claims on one controlled
+execution resource.
+
+Directionally:
+
+    Application / Job
+        execution demand
+            |
+            v
+    model execution resource
+        resident model/runtime
+        active execution claims
+        compatibility/contention
+            |
+            v
+    provider residency adapter
+        llama.cpp first
+        concrete load/unload/execute mechanics
+
+03.07. The first demand shape needs only enough identity to explain ownership and
+contention:
+
+- requesting applicationRunId;
+- requesting Job identity/cancellation signal where a Job exists;
+- provider/resource identity;
+- requested model identity.
+
+Do not add generic priority classes, queue weights, VRAM scores, or retry semantics
+before a concrete consumer requires them.
+
+03.08. The first deterministic arbitration behavior is intentionally narrow:
+
+- no model resident -> materialize the requested model and execute;
+- same compatible model resident -> acquire execution on that residency;
+- incompatible model resident but idle -> replace/unload residency automatically,
+  then materialize the requested model;
+- incompatible model resident with active execution -> expose typed contention rather
+  than silently preempting, killing, queueing, or choosing a winner.
+
+The contention result/error must carry enough evidence to identify requested residency,
+current residency, and active owning work/application identity where available.
+
+03.09. Active-work preemption, when later justified by policy, must compose through Job
+cancellation rather than bypassing it:
+
+    policy/resource pressure
+        -> request cancellation on owning Job
+        -> Job/provider cancellation path stops execution
+        -> execution claim releases
+        -> resource becomes idle
+        -> residency replacement may proceed
+
+The resource arbiter must not terminate provider execution behind the Job lifecycle and
+then reconstruct a cancellation outcome after the fact.
+
+03.10. Provider-specific mechanisms remain below the generic resource contract.
+llama.cpp may realize replacement through server/model stop/start. Another provider may
+hold several models concurrently, use a remote endpoint, or release resources
+differently. The generic contract describes residency/claims/contention, not
+llama.cpp process mechanics.
+
+03.11. Machine telemetry is deliberately not authoritative for the first arbitration
+slice. Controlled residency gives stronger knowledge about Actant-owned resources than
+free-VRAM heuristics. Later policy may combine:
+
+    known Actant residency
+    + machine telemetry
+    + model/resource requirements
+
+to decide whether multiple residencies may coexist.
+
+03.12. Machine telemetry remains separate:
+
+    telemetry
+        what is the machine doing?
+
+    controlled-resource observation
+        what servers/models/resources does Actant own or know it controls?
+
+    demand
+        which applications/work request resources?
+
+    policy
+        what should Actant do about contention?
+
+Telemetry may inform policy later but does not own resource policy.
+
+04. EXTERNAL INGRESS / ADDRESSABILITY
+------------------------------------
+
+04.01. Completion establishes a concrete need for externally initiated work against an
+already-running Actant application.
+
+04.02. Incoming work targets Actant/the Application first, not a model provider. Model
+acquisition is a downstream execution concern.
+
+04.03. Therefore logical application availability/addressability must be independent of
+expensive model residency and, eventually, independent of full ApplicationRuntime
+residency.
+
+04.04. Existing DA-28 and IS-04/IS-05 direction remains useful: entry/command/client
+surfaces should compose shared RuntimeHost operations without becoming runtime
+authority themselves.
+
+04.05. Completion may initially use a narrow application-owned transport adapter as a
+proving surface, but it must not define the final shared transport/host authority or
+expose llama.cpp directly as the application boundary.
+
+05. CANCELLATION / INTERRUPTION
+------------------------------
+
+05.01. Completion and AI Buddy independently require cancellation that can reach active
+provider execution rather than merely marking the eventual result stale.
+
+05.02. Cancellation is a reusable execution/Job concern, not application-specific
+llama.cpp control.
+
+05.03. Preserve distinctions between:
+
+- result/request staleness: the result is no longer useful;
+- cancellation requested: the owner asks active work to stop;
+- execution stopped: the underlying execution actually ceased;
+- terminal Job outcome: governed by Job semantics.
+
+05.04. DA-19 already owns Job cancellation, timeout, supersession, progress, and
+execution-stop semantics. Any implementation-level cancellation signal/token should
+materialize those semantics rather than create a competing LLM-only lifecycle model.
+
+05.05. Provider-specific cancellation realization may differ. Applications should not
+own the low-level abort mechanism.
+
+06. AI BUDDY SCHEDULER PRESSURE
+-------------------------------
+
+06.01. AI Buddy additionally exposes possible reusable concepts such as bounded
+execution slices, runnable/waiting continuation, latency classes, interruptible work,
+and scheduled wake.
+
+06.02. This pressure is currently less independently corroborated than shared model
+residency/cancellation. Do not prematurely materialize a generic scheduler until AI
+Buddy experiments produce a concrete reusable contract.
+
+07. IMPLEMENTATION ORDER
+------------------------
+
+The current preferred sequencing is:
+
+1. DONE: host-owned shared service lifetime and compatible managed llama.cpp sharing;
+2. DONE: reusable Job-owned execution cancellation through provider execution;
+3. NEXT: provider-neutral execution-resource contract with residency + active claims;
+4. llama.cpp realization of idle replacement and explicit active contention;
+5. exercise Completion / Materialization Test / AI Buddy pressure against that seam;
+6. only then add waiting, cancellation-based preemption, priority, queueing, telemetry-
+   informed coexistence, or broader scheduling where concrete pressure requires it;
+7. host ingress/dispatch sufficient for an already-running/suspended application to be
+   addressed remains the following independent host-surface concern.
+
+This ordering is working direction, not frozen design. Implementation may expose a
+better boundary and should update this document rather than preserve a weak early
+shape.
+
+
+08. ARBITRATION INVARIANTS
+--------------------------
+
+The next implementation should preserve these boundaries:
+
+    SharedServiceRegistry
+        owns compatible shared service lifetime
+
+    execution resource
+        arbitrates residency and active claims
+
+    Job
+        owns cancellation request and terminal outcome
+
+    provider adapter / driver
+        performs concrete execution and residency operations
+
+    telemetry
+        observes machine state
+
+    policy
+        decides preemption/priority only once such policy is actually defined
+
+The first arbitration slice should make contention safe and observable, not attempt to
+solve the eventual scheduler.
+
+09. EXPERIMENT CONFIGURATION TRANSITION REVIEW (2026-11-02)
+---------------------------------------------------------
+See knowledge/experiment-runner-transitions-review.txt for full inspected ref,
+source/test findings and two deterministic fake-IO reproductions. The new pressure
+requires full startup profile/auxiliary identity, an optional exclusive experiment
+reservation, and a claim spanning profile resolution, token estimation and streaming.
+The earlier automatic-idle-replacement direction is not approval of a concrete
+transition API or catalog authority. Review A/B/C direction is now accepted with
+the minimal-guarantee decision addendum; ER-01/02/03 are prepared but unassigned,
+ER-04 remains a separate assets gate. Existing shared registry/driver do not satisfy
+these constraints unchanged. No runtime arbitration implementation is claimed.

@@ -1,14 +1,21 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 7
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 12
 from __future__ import annotations
 
+from contextvars import ContextVar
+from contextlib import contextmanager
+from backend.llm.errors import LlmExecutionOwnershipError
+
+import importlib.util
 import json
 import math
 import subprocess
+import sys
 import time
 import urllib.request as urlRequest
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from urllib.error import HTTPError, URLError
 
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
@@ -21,15 +28,27 @@ from backend.llm.llmTypes import (
 )
 
 _LOAD_MODES = frozenset({"auto", "none", "mmap", "mlock", "mmap+mlock", "dio"})
-_FIRST_CLASS_FLAGS = frozenset(
-    {
-        "--parallel", "-np", "--ctx-size", "-c", "--n-gpu-layers", "-ngl",
-        "--threads", "-t", "--threads-batch", "-tb", "--batch-size", "-b",
-        "--ubatch-size", "-ub", "--kv-unified", "--no-kv-unified",
-        "--kv-offload", "--no-kv-offload", "--cache-type-k", "--cache-type-v",
-        "--flash-attn", "--n-cpu-moe", "--load-mode", "--mmproj",
-    }
-)
+
+
+def _loadConfiguration() -> ModuleType:
+    """Load the provider-local configuration helper independently of Pack import paths."""
+    name = "tertalisLlamaCppConfiguration"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("configuration.py"))
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load llama.cpp configuration support.")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+_configuration = _loadConfiguration()
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +64,87 @@ class LlamaCppOptions:
     seed: int | None = None
     timeoutSeconds: float = 120.0
     reasoningEffort: str | None = None
+    chatTemplateKwargs: Mapping[str, ImmutableValue] | None = None
+    reasoningFormat: str | None = None
+
+    def __post_init__(self) -> None:
+        """Freeze request template controls and reject competing request authorities.
+
+        Request effort overrides startup effort upstream. Within this request it
+        cannot also be supplied as a template kwarg. Effort 'none' disables
+        thinking and therefore conflicts with explicit enable_thinking=true.
+        Other effort strings and enable_thinking=false remain independent.
+        """
+        if self.reasoningEffort is not None and (
+            type(self.reasoningEffort) is not str or not self.reasoningEffort.strip()
+        ):
+            raise ValueError("llama.cpp provider option 'reasoningEffort' must be non-empty text.")
+        if self.reasoningFormat is not None and (
+            type(self.reasoningFormat) is not str
+            or self.reasoningFormat not in {"none", "auto", "deepseek", "deepseek-legacy"}
+        ):
+            raise ValueError("reasoningFormat must be none, auto, deepseek or deepseek-legacy.")
+        if self.chatTemplateKwargs is None:
+            return
+        try:
+            _configuration.validateKwargs(self.chatTemplateKwargs)
+            kwargs = ImmutableValueFreezer().freezeMapping(self.chatTemplateKwargs)
+        except (TypeError, ValueError):
+            raise ValueError("chatTemplateKwargs must be a finite JSON object with valid reasoning keys.") from None
+        if self.reasoningEffort is not None and "reasoning_effort" in kwargs:
+            raise ValueError("reasoningEffort and template reasoning_effort duplicate request authority.")
+        if self.reasoningEffort == "none" and kwargs.get("enable_thinking") is True:
+            raise ValueError("reasoningEffort=none conflicts with enable_thinking=true.")
+        object.__setattr__(self, "chatTemplateKwargs", kwargs)
+
+
+def _templateControls(options: LlamaCppOptions) -> dict[str, object]:
+    """Materialize fresh identical template controls for inference and estimation.
+
+    No server-only fields or full request bodies enter automatic profile metadata.
+    Returned mutable JSON containers have no aliases to the parsed immutable options.
+    """
+    result: dict[str, object] = {}
+    if options.reasoningEffort is not None:
+        result["reasoning_effort"] = options.reasoningEffort
+    if options.reasoningFormat is not None:
+        result["reasoning_format"] = options.reasoningFormat
+    if options.chatTemplateKwargs is not None:
+        result["chat_template_kwargs"] = _configuration.jsonValue(options.chatTemplateKwargs)
+    return result
+
+
+def _estimationMetadata() -> dict[str, ImmutableValue]:
+    """Describe the estimation method and its source/binary verification boundary."""
+    return {
+        "method": "apply-template/tokenize", "templateControls": "matched-request",
+        "sourceCommit": _configuration.SOURCE_COMMIT,
+        "effectiveHonor": "unverified-binary-and-template",
+        "failurePolicy": "raise-without-fallback-count",
+    }
+
+
+def _tokenizePayload(prompt: str, controls: Mapping[str, ImmutableValue]) -> dict[str, object]:
+    """Tokenize the rendered prompt with the same external model selection, when explicit."""
+    result: dict[str, object] = {
+        "content": prompt, "add_special": False, "parse_special": True, "with_pieces": False,
+    }
+    if "model" in controls:
+        result["model"] = controls["model"]
+    return result
+
+
+def _tokenCount(response: Mapping[str, object]) -> int:
+    """Require a real token-ID list before claiming a rendered-prompt token count."""
+    tokens = response.get("tokens")
+    if type(tokens) is not list or any(type(token) is not int or token < 0 for token in tokens):
+        raise LlmProviderProtocolError("llama.cpp /tokenize response must contain a token-ID list.")
+    return len(tokens)
 
 
 @dataclass(frozen=True, slots=True)
 class LlamaCppModel:
-    """Effective validated launch configuration for one resident model."""
+    """Frozen requested launch settings, not proof of model/backend effective behavior."""
 
     name: str
     modelPath: Path
@@ -69,15 +164,22 @@ class LlamaCppModel:
     loadMode: str | None
     parallelSlots: int
     extraArgs: tuple[str, ...]
+    startup: Mapping[str, ImmutableValue]
+    requested: Mapping[str, ImmutableValue]
+    inputs: tuple[ImmutableValue, ...]
+    speculation: Mapping[str, ImmutableValue]
 
     def launchProfile(self) -> dict[str, ImmutableValue]:
-        """Returns stable JSON-compatible evidence of effective launch settings."""
+        """Project only allowlisted requested scalars for automatic metadata.
+
+        Paths, arbitrary strings, kwargs and extraArgs belong to the driver's
+        private configurationEvidence accessor. This projection proves no honor.
+        """
         profile: dict[str, ImmutableValue] = {
-            "modelPath": str(self.modelPath),
             "parallelSlots": self.parallelSlots,
+            "semantics": "requested-not-effective",
         }
         optional = {
-            "mmprojPath": None if self.mmprojPath is None else str(self.mmprojPath),
             "contextWindowTokens": self.contextWindowTokens,
             "gpuLayers": self.gpuLayers,
             "threads": self.threads,
@@ -86,35 +188,43 @@ class LlamaCppModel:
             "ubatchSize": self.ubatchSize,
             "unifiedKv": self.unifiedKv,
             "kvOffload": self.kvOffload,
-            "cacheTypeK": self.cacheTypeK,
-            "cacheTypeV": self.cacheTypeV,
             "flashAttention": self.flashAttention,
             "cpuMoeLayers": self.cpuMoeLayers,
             "loadMode": self.loadMode,
         }
         profile.update({key: value for key, value in optional.items() if value is not None})
-        if self.extraArgs:
-            profile["extraArgs"] = self.extraArgs
+        for key in ("moeCacheMiB", "cpuMoe", "serverReasoning", "serverReasoningBudget",
+                    "serverReasoningFormat", "serverReasoningPreserve", "specMethods",
+                    "draftMaxTokens", "draftMinTokens", "draftUbatchSize", "draftGpuLayers",
+                    "draftSampling", "draftBackendSampling", "draftPMin", "draftPSplit"):
+            if self.startup[key] is not None:
+                profile[key] = self.startup[key]
         return profile
 
 
 class LlamaCppTokenEstimator:
-    """Exact text/plain query estimator backed by the active llama.cpp model."""
+    """Count the server-rendered text/plain prompt; pinned endpoint honor is required."""
 
-    def __init__(self, *, driver: "LlamaCppDriver", timeoutSeconds: float) -> None:
-        """Binds estimation to one driver and request timeout."""
+    def __init__(self, *, driver: "LlamaCppDriver", timeoutSeconds: float,
+                 options: LlamaCppOptions | None = None, model: str | None = None) -> None:
+        """Bind immutable request template controls and external model routing to estimation."""
         self._driver = driver
         self._timeoutSeconds = timeoutSeconds
+        controls = _templateControls(LlamaCppOptions() if options is None else options)
+        if not driver.manageServer and model is not None:
+            controls["model"] = model
+        self._controls = ImmutableValueFreezer().freezeMapping(controls)
 
     def estimateInputTokens(self, query: LlmQuery) -> int:
-        """Returns the exact token count after llama.cpp chat-template expansion."""
+        """Count the returned rendered prompt or raise; never substitute a different template."""
         if query.formatId != "text/plain" or type(query.payload) is not str:
             raise ValueError(
                 "llama.cpp token estimation supports exact-string text/plain queries only."
             )
         templated = self._driver.postJson(
             "/apply-template",
-            {"messages": [{"role": "user", "content": query.payload}]},
+            {"messages": [{"role": "user", "content": query.payload}],
+             **_configuration.jsonValue(self._controls)},
             timeoutSeconds=self._timeoutSeconds,
         )
         prompt = templated.get("prompt")
@@ -124,20 +234,10 @@ class LlamaCppTokenEstimator:
             )
         tokenized = self._driver.postJson(
             "/tokenize",
-            {
-                "content": prompt,
-                "add_special": False,
-                "parse_special": True,
-                "with_pieces": False,
-            },
+            _tokenizePayload(prompt, self._controls),
             timeoutSeconds=self._timeoutSeconds,
         )
-        tokens = tokenized.get("tokens")
-        if not isinstance(tokens, list):
-            raise LlmProviderProtocolError(
-                "llama.cpp /tokenize response does not contain a tokens list."
-            )
-        return len(tokens)
+        return _tokenCount(tokenized)
 
 
 class LlamaCppStreamProvider:
@@ -157,12 +257,12 @@ class LlamaCppStreamProvider:
         options = _parseInferenceOptions(providerOptions)
         selected = self.driver.ensureModel(model)
         metadata: dict[str, ImmutableValue] = {
-            "baseUrl": self.driver.baseUrl,
             "timeoutSeconds": options.timeoutSeconds,
             "managedServer": self.driver.manageServer,
+            "configurationEvidence": self.driver.configurationSummary(model),
+            "tokenEstimation": _estimationMetadata(),
         }
         if selected is not None:
-            metadata["activeModel"] = selected.name
             metadata["launchProfile"] = selected.launchProfile()
         return LlmExecutionProfile(
             contextWindowTokens=(
@@ -173,14 +273,16 @@ class LlamaCppStreamProvider:
             tokenEstimator=LlamaCppTokenEstimator(
                 driver=self.driver,
                 timeoutSeconds=options.timeoutSeconds,
+                options=options,
+                model=model,
             ),
             metadata=metadata,
         )
 
     def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
         """Streams one OpenAI-compatible chat-completions request from llama.cpp."""
-        selected = self.driver.ensureModel(request.model)
         options = _parseInferenceOptions(request.providerOptions)
+        self.driver.ensureModel(request.model)
         payload = _buildPayload(
             request,
             options,
@@ -197,14 +299,13 @@ class LlamaCppStreamProvider:
             with urlRequest.urlopen(httpRequest, timeout=options.timeoutSeconds) as response:
                 yield from _readEvents(response)
         except HTTPError as err:
-            active = "" if selected is None else f" for model {selected.name!r}"
             raise LlmProviderConnectionError(
-                f"llama.cpp returned HTTP {err.code} for {endpoint}{active}."
-            ) from err
-        except (URLError, TimeoutError) as err:
+                f"llama.cpp returned HTTP {err.code} for chat completions."
+            ) from None
+        except (URLError, TimeoutError):
             raise LlmProviderConnectionError(
-                f"Failed communicating with llama.cpp at {endpoint}."
-            ) from err
+                "Failed communicating with llama.cpp for chat completions."
+            ) from None
 
 
 def _optionalFloat(
@@ -254,7 +355,7 @@ def _parseInferenceOptions(source: Mapping[str, ImmutableValue]) -> LlamaCppOpti
     """Parses the complete supported request-level llama.cpp option set."""
     allowed = {
         "temperature", "maxTokens", "topP", "topK", "minP", "repeatPenalty",
-        "seed", "timeoutSeconds", "reasoningEffort",
+        "seed", "timeoutSeconds", "reasoningEffort", "chatTemplateKwargs", "reasoningFormat",
     }
     unknown = set(source) - allowed
     if unknown:
@@ -274,6 +375,8 @@ def _parseInferenceOptions(source: Mapping[str, ImmutableValue]) -> LlamaCppOpti
         seed=_optionalInt(source, "seed"),
         timeoutSeconds=120.0 if timeout is None else timeout,
         reasoningEffort=reasoning,
+        chatTemplateKwargs=source.get("chatTemplateKwargs"),
+        reasoningFormat=source.get("reasoningFormat"),
     )
 
 
@@ -283,7 +386,7 @@ def _buildPayload(
     *,
     includeRequestedModel: bool,
 ) -> dict[str, object]:
-    """Builds one exact OpenAI-compatible request payload from Actant options."""
+    """Builds one exact OpenAI-compatible request payload from Tertalis options."""
     if request.query.formatId != "text/plain":
         raise ValueError(
             "llama.cpp proving-ground provider supports only text/plain, not "
@@ -302,58 +405,78 @@ def _buildPayload(
         ("max_tokens", options.maxTokens), ("top_p", options.topP),
         ("top_k", options.topK), ("min_p", options.minP),
         ("repeat_penalty", options.repeatPenalty), ("seed", options.seed),
-        ("reasoning_effort", options.reasoningEffort),
     )
     for key, value in mappings:
         if value is not None:
             payload[key] = value
+    payload.update(_templateControls(options))
     return payload
 
 
+def _reasoningMetadata(content: str) -> dict[str, ImmutableValue]:
+    """Identify private provider-reported reasoning text, separate from ordinary answer text."""
+    return {"schemaId": "tertalis.llamaCpp.reasoning@1", "content": content,
+            "source": "delta.reasoning_content"}
+
+
 def _readEvents(response) -> Iterator[LlmStreamEvent]:
-    """Parses llama.cpp SSE bytes into provider-neutral stream events."""
+    """Preserve single-choice answer deltas and separate private reasoning evidence.
+
+    Reasoning-only chunks yield metadata deltas with empty text. Completed metadata
+    holds the concatenated reasoning for pipeline result/completion/persistence
+    retrieval; no backend event/schema change or passive observation export occurs.
+    A finish reason does not terminate early: trailing usage/timings before [DONE]
+    still belong to the completed evidence. Malformed/truncated streams fail closed.
+    """
     finalMetadata: dict[str, ImmutableValue] = {}
+    reasoningParts: list[str] = []
+    reasoningSeen = False
     for rawLine in response:
         if not isinstance(rawLine, bytes):
             raise LlmProviderProtocolError("llama.cpp stream produced a non-bytes line.")
         try:
             line = rawLine.decode("utf-8", errors="strict").rstrip("\r\n")
-        except UnicodeDecodeError as err:
-            raise LlmProviderProtocolError("llama.cpp stream contained invalid UTF-8.") from err
+        except UnicodeDecodeError:
+            raise LlmProviderProtocolError("llama.cpp stream contained invalid UTF-8.") from None
         if not line or not line.startswith("data:"):
             continue
         data = line[5:].strip()
         if data == "[DONE]":
+            if reasoningSeen:
+                finalMetadata["llamaCppReasoning"] = _reasoningMetadata("".join(reasoningParts))
             yield LlmStreamEvent(eventType="completed", metadata=finalMetadata)
             return
         try:
             chunk = json.loads(data)
-        except json.JSONDecodeError as err:
-            raise LlmProviderProtocolError("llama.cpp stream contained invalid JSON.") from err
+        except json.JSONDecodeError:
+            raise LlmProviderProtocolError("llama.cpp stream contained invalid JSON.") from None
         if not isinstance(chunk, dict):
             raise LlmProviderProtocolError("llama.cpp stream chunk must be a JSON object.")
         if "error" in chunk:
-            raise LlmProviderProtocolError(
-                f"llama.cpp stream reported an error: {chunk['error']!r}."
-            )
+            raise LlmProviderProtocolError("llama.cpp stream reported a provider error.")
         metadataSource = {
             key: chunk[key]
-            for key in ("model", "usage", "timings", "system_fingerprint")
+            for key in ("model", "usage", "timings", "system_fingerprint", "reasoning_format")
             if key in chunk
         }
-        metadata = ImmutableValueFreezer().freezeMapping(
-            metadataSource,
-            "llamaCppStreamMetadata",
-        )
-        finalMetadata.update(metadata)
         choices = chunk.get("choices", [])
         if not isinstance(choices, list):
             raise LlmProviderProtocolError("llama.cpp stream choices must be a list.")
         text = ""
+        reasoning = None
         if choices:
+            if len(choices) != 1:
+                raise LlmProviderProtocolError("llama.cpp stream must contain a single choice.")
             choice = choices[0]
             if not isinstance(choice, dict):
                 raise LlmProviderProtocolError("llama.cpp stream choice must be an object.")
+            if "index" in choice and (type(choice["index"]) is not int or choice["index"] != 0):
+                raise LlmProviderProtocolError("llama.cpp stream choice index must be zero.")
+            finish = choice.get("finish_reason")
+            if finish is not None:
+                if type(finish) is not str:
+                    raise LlmProviderProtocolError("llama.cpp finish_reason must be text or null.")
+                metadataSource["finish_reason"] = finish
             delta = choice.get("delta")
             if delta is not None:
                 if not isinstance(delta, dict):
@@ -363,8 +486,23 @@ def _readEvents(response) -> Iterator[LlmStreamEvent]:
                     if not isinstance(content, str):
                         raise LlmProviderProtocolError("llama.cpp stream content must be text.")
                     text = content
-        if text or metadata:
-            yield LlmStreamEvent(eventType="delta", text=text, metadata=metadata)
+                reasoning = delta.get("reasoning_content")
+                if reasoning is not None:
+                    if type(reasoning) is not str:
+                        raise LlmProviderProtocolError("llama.cpp reasoning_content must be text or null.")
+                    reasoningSeen = True
+                    reasoningParts.append(reasoning)
+        try:
+            metadata = ImmutableValueFreezer().freezeMapping(metadataSource, "llamaCppStreamMetadata")
+        except (TypeError, ValueError):
+            raise LlmProviderProtocolError("llama.cpp stream contained invalid metadata.") from None
+        finalMetadata.update(metadata)
+        eventMetadata = dict(metadata)
+        if reasoning is not None:
+            eventMetadata["llamaCppReasoning"] = _reasoningMetadata(reasoning)
+        if text or eventMetadata:
+            yield LlmStreamEvent(eventType="delta", text=text, metadata=eventMetadata)
+    raise LlmProviderProtocolError("llama.cpp stream ended without [DONE].")
 
 
 def _positiveInt(value: object, name: str) -> int:
@@ -417,31 +555,78 @@ def _optionalLoadMode(value: object, name: str) -> str | None:
 
 def _stringList(value: object, name: str) -> tuple[str, ...]:
     """Validates a JSON-style list of exact strings."""
-    if not isinstance(value, list) or not all(type(item) is str for item in value):
+    if not isinstance(value, (list, tuple)) or not all(type(item) is str for item in value):
         raise ValueError(f"{name} must be a list of strings.")
     return tuple(value)
 
 
 def _rejectFirstClassArgs(extraArgs: tuple[str, ...], name: str) -> None:
     """Rejects escape-hatch flags whose authority belongs to structured fields."""
-    for argument in extraArgs:
-        flag = argument.split("=", 1)[0]
-        if flag in _FIRST_CLASS_FLAGS:
-            raise ValueError(
-                f"{name} contains first-class flag {flag!r}; use its structured setting."
-            )
+    _configuration.inspectExtraArgs(extraArgs, name)
+
+
+_driverAccess = ContextVar("tertalis.llama.driver-access", default=None)
+
+
+@contextmanager
+def _driverScope(driver):
+    """Adapter-only scope for an owned driver; ordinary managed consumers reject."""
+    if driver._authority is None:
+        raise LlmExecutionOwnershipError("Managed llama.cpp requires an admitted adapter ticket.")
+    token = _driverAccess.set(driver._authority)
+    try:
+        yield
+    finally:
+        _driverAccess.reset(token)
+
+
+class _ManagedFacade:
+    """Fail-closed managed registration pending an exact trusted host binding."""
+
+    requiresControlledComposition = True
+
+    def __init__(self, config, *, structured=False):
+        """Freeze requested JSON only; host catalog owns environment and launch inputs."""
+        self.requestedConfiguration = _configuration.freeze(config)
+        self.structured = structured
+
+    def getExecutionProfile(self, **kwargs):
+        """Direct managed profile resolution never falls back to unbound execution."""
+        raise LlmExecutionOwnershipError("Managed llama.cpp requires trusted host composition and admission.")
+
+    def stream(self, request):
+        """Only the installed execution adapter may enter managed transport."""
+        raise LlmExecutionOwnershipError("Managed llama.cpp requires trusted host composition and admission.")
 
 
 class LlamaCppDriver:
     """Long-lived CodeEntry-owned llama-server and model-residency manager."""
 
-    def __init__(self, config: Mapping[str, object]) -> None:
-        """Validates driver configuration without starting a managed server."""
-        self.config = dict(config)
+    def __init__(self, config: Mapping[str, object], *, _authority=None) -> None:
+        """Validate inputs; only adapter-issued drivers can perform managed IO."""
+        self._authority = _authority
+        self._prepared = _configuration.prepare(config)
+        self.config = self._prepared.values
         manageValue = self.config.get("manageServer", False)
         if type(manageValue) is not bool:
             raise TypeError("llamaCpp.manageServer must be a boolean.")
         self.manageServer = manageValue
+        timeout = self.config.get("startupTimeoutSeconds", 120.0)
+        if type(timeout) not in {int, float} or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("llamaCpp.startupTimeoutSeconds must be a positive finite number.")
+        self.startupTimeoutSeconds = float(timeout)
+        self.capabilityCheck = self.config.get("capabilityCheck", "none")
+        if self.capabilityCheck not in ("none", "required"):
+            raise ValueError("llamaCpp.capabilityCheck must be none or required.")
+        if not self.manageServer:
+            if self.capabilityCheck != "none":
+                raise ValueError("External server capabilities cannot be certified by a local executable.")
+            sources = [self.config]
+            rawModels = self.config.get("models")
+            if isinstance(rawModels, Mapping):
+                sources.extend(raw for raw in rawModels.values() if isinstance(raw, Mapping))
+            if any(source.get(key) is not None for source in sources for key in _configuration.NEW_FIELDS):
+                raise ValueError("New startup controls require managed mode; configure the external server separately.")
         hostValue = self.config.get("host", "127.0.0.1")
         if type(hostValue) is not str or not hostValue.strip():
             raise ValueError("llamaCpp.host must be a non-empty string.")
@@ -456,8 +641,8 @@ class LlamaCppDriver:
         self.baseUrl = baseUrl.strip().rstrip("/")
         if self.manageServer and self.baseUrl != managedBaseUrl:
             raise ValueError(
-                "Managed llama.cpp baseUrl must identify the server Actant launches at "
-                f"{managedBaseUrl!r}; received {self.baseUrl!r}."
+                "Managed llama.cpp baseUrl must identify the server Tertalis launches at "
+                "the configured host/port."
             )
         self.externalContextWindowTokens = _optionalPositiveInt(
             self.config.get("contextWindowTokens"),
@@ -468,10 +653,10 @@ class LlamaCppDriver:
             executableValue = self.config.get("executable")
             if type(executableValue) is not str or not executableValue:
                 raise ValueError("Managed llama.cpp requires llamaCpp.executable.")
-            self.executable = Path(executableValue).resolve()
+            self.executable = self._prepared.resolvePath(executableValue)
             if not self.executable.is_file():
                 raise FileNotFoundError(
-                    f"llama-server executable does not exist: {self.executable}."
+                    "llama-server executable does not exist."
                 )
         self.models = self._buildModels()
         defaultValue = self.config.get("defaultModel")
@@ -488,7 +673,13 @@ class LlamaCppDriver:
         else:
             self.defaultModel = None
         self.process: subprocess.Popen[bytes] | None = None
+        self._stopAttempted = False
         self.activeModelName: str | None = None
+        self._automaticConfigEvidence = self._prepared.automaticConfig
+        self._launches: dict[str, object] = {}
+        self._launchGeneration = 0
+        self._buildEvidence = _configuration.freeze({"status": "unverified" if self.manageServer else "external-unverified",
+            "sourceCommit": _configuration.SOURCE_COMMIT})
 
     def _modelValue(self, raw: Mapping[str, object], key: str) -> object:
         """Resolves one model field over its top-level driver default."""
@@ -507,29 +698,29 @@ class LlamaCppDriver:
             if type(nameValue) is not str or not nameValue:
                 raise ValueError("llamaCpp.defaultModel must be a non-empty string.")
             source = {nameValue: {"modelPath": modelPath}}
-        if not isinstance(source, dict):
+        if not isinstance(source, Mapping):
             raise ValueError("llamaCpp.models must be an object keyed by model name.")
         models: dict[str, LlamaCppModel] = {}
         for name, raw in source.items():
             if type(name) is not str or not name:
                 raise ValueError("llamaCpp.models keys must be non-empty strings.")
-            if not isinstance(raw, dict):
-                raise ValueError(f"llamaCpp.models[{name!r}] must be an object.")
-            prefix = f"llamaCpp.models[{name!r}]"
+            if not isinstance(raw, Mapping):
+                raise ValueError("llamaCpp.models entries must be objects.")
+            prefix = "llamaCpp.models entry"
             modelPathValue = raw.get("modelPath")
             if type(modelPathValue) is not str or not modelPathValue:
                 raise ValueError(f"{prefix}.modelPath is required.")
-            modelPath = Path(modelPathValue).resolve()
+            modelPath = self._prepared.resolvePath(modelPathValue)
             if self.manageServer and not modelPath.is_file():
-                raise FileNotFoundError(f"llama.cpp model does not exist: {modelPath}.")
+                raise FileNotFoundError("llama.cpp model does not exist.")
             mmprojValue = self._modelValue(raw, "mmprojPath")
             mmprojPath: Path | None = None
             if mmprojValue is not None:
                 if type(mmprojValue) is not str or not mmprojValue:
                     raise ValueError(f"{prefix}.mmprojPath must be a non-empty string.")
-                mmprojPath = Path(mmprojValue).resolve()
+                mmprojPath = self._prepared.resolvePath(mmprojValue)
                 if self.manageServer and not mmprojPath.is_file():
-                    raise FileNotFoundError(f"llama.cpp mmproj does not exist: {mmprojPath}.")
+                    raise FileNotFoundError("llama.cpp mmproj does not exist.")
             parallelValue = (
                 raw["parallelSlots"] if "parallelSlots" in raw
                 else self.config.get("parallelSlots", 1)
@@ -540,6 +731,49 @@ class LlamaCppDriver:
             )
             extra = _stringList(extraValue, f"{prefix}.extraArgs")
             _rejectFirstClassArgs(extra, f"{prefix}.extraArgs")
+            fields = (
+                "modelPath", "mmprojPath", "contextWindowTokens", "gpuLayers", "threads",
+                "threadsBatch", "batchSize", "ubatchSize", "unifiedKv", "kvOffload",
+                "cacheTypeK", "cacheTypeV", "flashAttention", "cpuMoeLayers", "loadMode",
+                "parallelSlots", "extraArgs", *_configuration.NEW_FIELDS,
+            )
+            resolved = {key: self._modelValue(raw, key) for key in fields}
+            resolved.update(modelPath=modelPathValue, host=self.host, port=self.port,
+                            parallelSlots=parallelValue, extraArgs=extra)
+            startup = _configuration.parseStartup(resolved)
+            if self.manageServer:
+                _configuration.validateEnvironment(self._prepared.environment, resolved, extra)
+                speculation = _configuration.validateSpeculation(resolved, self._prepared, extra)
+            else:
+                speculation = _configuration.freeze({"status": "external-unverified", "effectiveHonor": "unverified"})
+                selectedExtra, _unknown = _configuration.inspectExtraArgs(extra)
+                if selectedExtra.get("--jinja") == "--no-jinja" and any(startup.values()):
+                    raise ValueError("Template controls require enabled Jinja.")
+            provenance = {key: {"value": resolved[key], "source": "model" if key in raw else
+                "driver" if key in self.config else "omitted",
+                "specified": key in raw or key in self.config} for key in fields}
+            inputs = [{"role": "target", "configuredPath": modelPathValue,
+                       "resolvedPath": str(modelPath), "contentSha256": None}]
+            if mmprojPath is not None:
+                inputs.append({"role": "mmproj", "configuredPath": mmprojValue,
+                               "resolvedPath": str(mmprojPath), "contentSha256": None})
+            effectiveSpeculation = speculation.get("resolvedInputs", {})
+            draftPath = effectiveSpeculation.get("draftModelPath")
+            if draftPath is not None:
+                resolvedDraft = self._prepared.resolvePath(draftPath)
+                if not resolvedDraft.is_file():
+                    raise FileNotFoundError("Speculative auxiliary model does not exist as a local file.")
+                inputs.append({"role": "draft", "configuredPath": draftPath,
+                               "resolvedPath": str(resolvedDraft), "contentSha256": None})
+                if startup["draftModelPath"] is not None:
+                    startup = _configuration.freeze(dict(startup) | {"draftModelPath": str(resolvedDraft)})
+            selectedExtra, _unknown = _configuration.inspectExtraArgs(extra)
+            template = selectedExtra.get("--chat-template-file")
+            if template is None and self.manageServer:
+                template = self._prepared.environment["LLAMA_ARG_CHAT_TEMPLATE_FILE"]
+            if template is not None:
+                inputs.append({"role": "template", "configuredPath": template,
+                               "resolvedPath": str(self._prepared.resolvePath(template)), "contentSha256": None})
             models[name] = LlamaCppModel(
                 name=name,
                 modelPath=modelPath,
@@ -586,16 +820,29 @@ class LlamaCppDriver:
                 ),
                 parallelSlots=_positiveInt(parallelValue, f"{prefix}.parallelSlots"),
                 extraArgs=extra,
+                startup=startup,
+                requested=_configuration.freeze(provenance),
+                inputs=_configuration.freeze(inputs),
+                speculation=speculation,
             )
+            if models[name].cpuMoeLayers is not None and models[name].cpuMoeLayers > 2147483647:
+                raise ValueError("cpuMoeLayers must fit a signed 32-bit integer.")
         return models
 
+    def _requireManagedAccess(self):
+        """Reject raw managed IO, including saved estimators and substrate callers."""
+        if self.manageServer and (self._authority is None or _driverAccess.get() is not self._authority):
+            raise LlmExecutionOwnershipError("Managed llama.cpp requires an admitted adapter ticket.")
+
     def start(self) -> None:
-        """Starts the configured default model when Actant owns the server."""
+        """Starts the configured default model when Tertalis owns the server."""
+        self._requireManagedAccess()
         if self.manageServer:
             self.ensureModel(self.defaultModel)
 
     def ensureModel(self, model: str | None) -> LlamaCppModel | None:
         """Ensures the requested managed model is resident and returns its profile."""
+        self._requireManagedAccess()
         if not self.models:
             return None
         selectedName = self.defaultModel if model is None else model
@@ -603,8 +850,8 @@ class LlamaCppDriver:
             raise RuntimeError("llama.cpp has no model selected.")
         try:
             selected = self.models[selectedName]
-        except KeyError as err:
-            raise LookupError(f"llama.cpp model is not configured: {selectedName!r}.") from err
+        except KeyError:
+            raise LookupError("llama.cpp model is not configured.") from None
         if not self.manageServer:
             return selected
         if (
@@ -613,9 +860,7 @@ class LlamaCppDriver:
             and self.process.poll() is None
         ):
             return selected
-        self.stop()
-        self._startModel(selected)
-        return selected
+        raise LlmExecutionOwnershipError("Managed residency requires an explicit authorized transition.")
 
     def _serverArgs(self, model: LlamaCppModel) -> list[str]:
         """Materializes the exact llama-server argv for one effective model profile."""
@@ -637,32 +882,165 @@ class LlamaCppDriver:
                 args += [flag, str(value)]
         if model.unifiedKv is True:
             args.append("--kv-unified")
-        # False is llama.cpp's default, so omission preserves the requested state.
+        elif model.unifiedKv is False:
+            args.append("--no-kv-unified")
         if model.kvOffload is not None:
             args.append("--kv-offload" if model.kvOffload else "--no-kv-offload")
         if model.flashAttention is not None:
             args += ["--flash-attn", "on" if model.flashAttention else "off"]
         if model.mmprojPath is not None:
             args += ["--mmproj", str(model.mmprojPath)]
+        args.extend(_configuration.startupArgs(model.startup))
         args.extend(model.extraArgs)
         return args
 
+    def _selectedModel(self, model: str | None) -> LlamaCppModel | None:
+        """Resolve a configured model for evidence without acquiring residency."""
+        if not self.models:
+            return None
+        try:
+            return self.models[self.defaultModel if model is None else model]
+        except KeyError:
+            raise LookupError("llama.cpp model is not configured.") from None
+
+    def checkCapabilities(self, model: str | None = None, *, refresh: bool = False) -> Mapping[str, ImmutableValue]:
+        """Explicitly probe advertised pinned startup surface without starting a model.
+
+        Results contain private executable/help evidence. A successful result proves
+        only advertised flags and a reported source prefix, never effective honor.
+        """
+        if not self.manageServer or self.executable is None:
+            raise ValueError("A local probe cannot certify an external server.")
+        selected = self._selectedModel(model)
+        if selected is not None:
+            self._checkSpeculationConfig(selected)
+        result = dict(_configuration.probeCapabilities(self.executable, refresh=refresh,
+                      environment=self._prepared.launchEnvironment(),
+                      workingDirectory=self._prepared.workingDirectory))
+        required = []
+        if selected is not None:
+            args = self._serverArgs(selected)
+            if selected.extraArgs:
+                args = args[:-len(selected.extraArgs)]
+            index = 1
+            byFlag = {flag: item for item in _configuration.OPTIONS for flag in item[0]}
+            while index < len(args):
+                flag = args[index]
+                aliases, arity, _owner, _environment = byFlag[flag]
+                longFlag = flag if flag.startswith("--") else next(alias for alias in aliases if alias.startswith("--"))
+                required.append(longFlag)
+                index += 1 + arity
+        for aliases, _arity, _owner, environmentName in _configuration.OPTIONS:
+            if environmentName is None:
+                continue
+            negativeName = _configuration.NEGATIVE_ENV.get(environmentName)
+            hasNegative = negativeName is not None and self._prepared.environment[negativeName] is not None
+            if hasNegative or self._prepared.environment[environmentName] is not None:
+                longFlags = [flag for flag in aliases if flag.startswith("--")]
+                selectedFlag = (
+                    next((flag for flag in longFlags if flag.startswith("--no-")), longFlags[0])
+                    if hasNegative else longFlags[0]
+                )
+                required.append(selectedFlag)
+        missing = sorted(set(required) - set(result.get("advertisedFlags", ())))
+        result.update(requiredFlags=tuple(required), missingFlags=tuple(missing))
+        if result["status"] == "advertised-pinned-surface" and missing:
+            result["status"] = "missing-flags"
+        self._buildEvidence = _configuration.freeze(result)
+        return self._buildEvidence
+
+    def _checkSpeculationConfig(self, model: LlamaCppModel) -> None:
+        """Recheck hidden config absence immediately before probe/launch, without restart policy."""
+        self._automaticConfigEvidence = _configuration.freeze(
+            _configuration.automaticConfig(self._prepared.environment, self._prepared.workingDirectory))
+        if model.speculation["status"] not in {"omitted-unverified", "external-unverified"}:
+            _configuration.validateAutomaticConfig(self._prepared)
+
+    def configurationEvidence(self, model: str | None = None) -> Mapping[str, ImmutableValue]:
+        """Return a private immutable configuration snapshot without probing or startup.
+
+        Contains paths, complete argv, arbitrary kwargs, budget messages and possibly
+        credentials supplied as extraArgs. Callers must explicitly select retention;
+        do not indiscriminately log this value or attach it to generic metadata.
+        Paths identify inputs, not their contents. Unknown effective behavior remains
+        separate from requested configuration and concrete launch evidence.
+        """
+        selected = self._selectedModel(model)
+        requested = {} if selected is None else selected.requested
+        inputs = () if selected is None else selected.inputs
+        profileId = _configuration.identity({"requested": requested, "inputs": inputs,
+            "executable": None if self.executable is None else str(self.executable),
+            "environment": self._prepared.environment if self.manageServer else {},
+            "managed": self.manageServer, "baseUrl": self.baseUrl,
+            "capabilityCheck": self.capabilityCheck,
+            "workingDirectory": self._prepared.workingDirectory if self.manageServer else None,
+            "automaticConfigAtAcquisition": self._prepared.automaticConfig if self.manageServer else ()})
+        launch = {"status": "not-launched" if self.manageServer else "external-unapplied",
+                  "actualArgv": None, "generation": None}
+        if selected is not None:
+            launch.update(self._launches.get(selected.name, {}))
+        launch["plannedArgv"] = tuple(self._serverArgs(selected)) if self.manageServer and selected is not None else None
+        return _configuration.freeze({"schemaId": _configuration.SCHEMA, "profileId": profileId,
+            "mode": "managed" if self.manageServer else "external",
+            "requested": requested, "inputs": inputs, "launch": launch,
+            "relevantEnvironment": self._prepared.environment if self.manageServer else {},
+            "automaticConfig": self._automaticConfigEvidence if self.manageServer else (),
+            "speculation": {"status": "external-unverified"} if selected is None else selected.speculation,
+            "build": self._buildEvidence, "configuredExecutable": None if self.executable is None else str(self.executable),
+            "userReportedBuild": {"version": "0.8.0-dev", "build": 12031, "commit": "060b2fea4",
+                "provenance": "assignment-user-report-not-binary-verification"},
+            "providerReportedEffective": {"status": "unknown-unqueried"},
+            "extraArgsCertification": "uncertified" if selected is not None and selected.extraArgs else "not-used"})
+
+    def configurationSummary(self, model: str | None = None) -> Mapping[str, ImmutableValue]:
+        """Project safe evidence status/identity without paths, argv or arbitrary strings."""
+        evidence = self.configurationEvidence(model)
+        return _configuration.freeze({key: evidence[key] for key in ("schemaId", "profileId", "mode")} | {
+            "buildStatus": evidence["build"]["status"],
+            "launchStatus": evidence["launch"]["status"],
+            "speculationStatus": evidence["speculation"]["status"],
+            "effectiveBehavior": "unverified", "extraArgsCertification": evidence["extraArgsCertification"]})
+
     def _startModel(self, model: LlamaCppModel) -> None:
         """Starts one managed llama-server and waits until its health endpoint is ready."""
+        self._requireManagedAccess()
         args = self._serverArgs(model)
-        self.process = subprocess.Popen(args, stdin=subprocess.DEVNULL)
-        self.activeModelName = model.name
+        self._checkSpeculationConfig(model)
+        if self.capabilityCheck == "required":
+            result = self.checkCapabilities(model.name)
+            if result["status"] != "advertised-pinned-surface":
+                raise ValueError("Required llama.cpp capability check failed; inspect private configuration evidence.")
+        else:
+            observed = _configuration.executableIdentity(self.executable)
+            previous = dict(self._buildEvidence)
+            if previous.get("executable") != observed:
+                previous = {"status": "unverified", "sourceCommit": _configuration.SOURCE_COMMIT}
+            self._buildEvidence = _configuration.freeze(previous | {"executable": observed})
+        environment = self._prepared.launchEnvironment()
+        self._launchGeneration += 1
+        launch = {"generation": self._launchGeneration, "status": "launch-failed", "actualArgv": None,
+                  "environment": self._prepared.environment, "build": self._buildEvidence,
+                  "automaticConfig": self._automaticConfigEvidence,
+                  "workingDirectory": self._prepared.workingDirectory}
+        self._launches[model.name] = _configuration.freeze(launch)
         try:
-            timeoutValue = self.config.get("startupTimeoutSeconds", 120.0)
-            if type(timeoutValue) not in {int, float}:
-                raise ValueError("llamaCpp.startupTimeoutSeconds must be numeric.")
-            self._waitReady(float(timeoutValue))
+            self.process = subprocess.Popen(args, stdin=subprocess.DEVNULL, env=environment,
+                                            cwd=self._prepared.workingDirectory)
+            launch.update(status="started", actualArgv=tuple(args))
+            self._launches[model.name] = _configuration.freeze(launch)
+            self.activeModelName = model.name
+            self._waitReady(self.startupTimeoutSeconds)
+            launch["status"] = "ready"
+            self._launches[model.name] = _configuration.freeze(launch)
         except Exception:
+            launch["status"] = "launch-failed" if launch["actualArgv"] is None else "startup-failed"
+            self._launches[model.name] = _configuration.freeze(launch)
             self.stop()
-            raise
+            raise LlmProviderConnectionError("Managed llama.cpp startup failed.") from None
 
     def _waitReady(self, timeoutSeconds: float) -> None:
         """Waits for managed-server health or raises on timeout/early process exit."""
+        self._requireManagedAccess()
         if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
             raise ValueError(
                 "llamaCpp.startupTimeoutSeconds must be a positive finite number."
@@ -694,6 +1072,7 @@ class LlamaCppDriver:
         timeoutSeconds: float,
     ) -> dict[str, object]:
         """Posts one JSON request to llama.cpp and requires an object response."""
+        self._requireManagedAccess()
         if type(endpoint) is not str or not endpoint.startswith("/"):
             raise ValueError("llama.cpp endpoint must be an absolute HTTP path.")
         if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
@@ -709,12 +1088,12 @@ class LlamaCppDriver:
                 raw = response.read()
         except HTTPError as err:
             raise LlmProviderConnectionError(
-                f"llama.cpp returned HTTP {err.code} for {endpoint}."
-            ) from err
-        except (URLError, TimeoutError) as err:
+                f"llama.cpp returned HTTP {err.code} for a JSON operation."
+            ) from None
+        except (URLError, TimeoutError):
             raise LlmProviderConnectionError(
-                f"Failed communicating with llama.cpp at {endpoint}."
-            ) from err
+                "Failed communicating with llama.cpp for a JSON operation."
+            ) from None
         try:
             decoded = json.loads(raw.decode("utf-8", errors="strict"))
         except (UnicodeDecodeError, json.JSONDecodeError) as err:
@@ -728,17 +1107,45 @@ class LlamaCppDriver:
         return decoded
 
     def stop(self) -> None:
-        """Stops the managed server, escalating to kill after the grace period."""
-        process, self.process = self.process, None
+        """Stop only the owned child, retaining ownership until exit is confirmed."""
+        self._requireManagedAccess()
+        process = self.process
+        if process is not None and process.poll() is None:
+            if self._stopAttempted:
+                raise LlmProviderConnectionError("Managed llama.cpp stop disposition is unknown.")
+            self._stopAttempted = True
+            process.terminate()
+            try:
+                process.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5.0)
+        if process is not None and process.poll() is None:
+            raise LlmProviderConnectionError("Managed llama.cpp process exit is unconfirmed.")
+        self.process = None
+        self._stopAttempted = False
+        if self.activeModelName is not None and self.activeModelName in self._launches:
+            launch = dict(self._launches[self.activeModelName])
+            if launch["status"] == "ready":
+                launch["status"] = "stopped"
+                self._launches[self.activeModelName] = _configuration.freeze(launch)
         self.activeModelName = None
-        if process is None or process.poll() is not None:
-            return
-        process.terminate()
+
+
+def _managedFacade(config):
+    """Canonicalize facade identity when the substrate itself is the CodeEntry."""
+    name = "tertalisFirstPartyLlamaCppImplementation"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
         try:
-            process.wait(timeout=10.0)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5.0)
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+    return module._ManagedFacade(config)
 
 
 def onLoad(ctx):
@@ -746,6 +1153,13 @@ def onLoad(ctx):
     config = ctx.config.get("llamaCpp", {})
     if not isinstance(config, dict):
         raise ValueError("llamaCpp configuration must be an object.")
+    manage = config.get("manageServer", False)
+    if type(manage) is not bool:
+        raise TypeError("llamaCpp.manageServer must be a boolean.")
+    if manage:
+        facade = _managedFacade(config)
+        ctx.llm.registerProvider("llama.cpp", facade)
+        return facade
     driver = LlamaCppDriver(config)
     try:
         driver.start()

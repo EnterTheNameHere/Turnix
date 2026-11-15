@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 9
+# file: tests/backend/context/test_codeEntryContext.py ; version: 10
 import pytest
 
 from pathlib import Path
@@ -211,7 +211,7 @@ def test_memory_write_stamps_current_code_entry_producer_metadata() -> None:
     transaction.commit()
 
     assert memory.metadata("derived/value") == {
-        "formatId": "actant.derived-value-metadata@1",
+        "formatId": "tertalis.derived-value-metadata@1",
         "producer": {
             "packId": "pack",
             "packVersion": "1.0.0",

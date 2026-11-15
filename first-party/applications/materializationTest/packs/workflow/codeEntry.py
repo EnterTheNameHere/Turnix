@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 9
+# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 10
 from __future__ import annotations
 
 import hashlib
@@ -285,7 +285,7 @@ def _buildQuery(_ctx, payload):
     return LlmQuery(
         formatId="text/plain",
         payload="\n\n".join(item.content for item in items),
-        metadata={"application": "materializationTest", "phase": phase, "strategy": "actant-native"},
+        metadata={"application": "materializationTest", "phase": phase, "strategy": "tertalis-native"},
     )
 
 
@@ -458,12 +458,12 @@ def _runQuestionnaire(ctx, *, prompts: Mapping[str, object], questions: tuple[st
 
 
 def _run(ctx, payload):
-    """Run the complete Actant-native benchmark through questionnaire evidence."""
+    """Run the complete Tertalis-native benchmark through questionnaire evidence."""
     request = {} if payload is None else _requireMapping(payload, "Materialization run request")
     strategy = _requireString(ctx.config.get("strategy"), "strategy")
-    if strategy not in {"classic", "actant-native"}:
-        raise ValueError("strategy must be 'classic' or 'actant-native'.")
-    if strategy != "actant-native":
+    if strategy not in {"classic", "tertalis-native"}:
+        raise ValueError("strategy must be 'classic' or 'tertalis-native'.")
+    if strategy != "tertalis-native":
         raise NotImplementedError("Classic strategy is scaffolded but not materialized yet.")
     prompts = _promptDefinitions(ctx)
     questions = _loadQuestionnaire(ctx)
@@ -581,7 +581,7 @@ def _describe(ctx, _payload):
         "questionnaireQuestionCount": len(questions),
         "promptKeys": list(prompts),
         "analyzers": [name for name, _toolName, _arguments in analyzers],
-        "processExecution": "Actant ctx.workspace + ctx.process",
+        "processExecution": "Tertalis ctx.workspace + ctx.process",
     }
 
 

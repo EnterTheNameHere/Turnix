@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/packs/workflow/exporter.py ; version: 2
+# file: first-party/applications/materializationTest/packs/workflow/exporter.py ; version: 3
 from __future__ import annotations
 
 from pathlib import Path
@@ -233,6 +233,6 @@ def onLoad(ctx):
     """Register the portable evidence-export capability for this Pack load.
 
     Args:
-        ctx: Registration-enabled CodeEntryContext supplied by Actant.
+        ctx: Registration-enabled CodeEntryContext supplied by Tertalis.
     """
     ctx.capabilities.register("materializationTest.export@1", _export)
