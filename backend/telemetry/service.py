@@ -1,4 +1,4 @@
-# file: backend/telemetry/service.py ; version: 7
+# file: backend/telemetry/service.py ; version: 8
 from __future__ import annotations
 
 import math
@@ -348,7 +348,7 @@ class TelemetryService:
         exits without collecting. Existing workers remain the sole collector.
         """
         if self.collectionIntervalSeconds is not None and self._thread is None:
-            worker = Thread(target=self._samplingLoop, name="actant-telemetry", daemon=True)
+            worker = Thread(target=self._samplingLoop, name="tertalis-telemetry", daemon=True)
             self._thread = worker
             try:
                 worker.start()

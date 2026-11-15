@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/run.py ; version: 7
+# file: tools/executionResourceValidation/run.py ; version: 8
 """Explicit ER-04 local validation; never downloads models or bypasses managed admission."""
 from __future__ import annotations
 
@@ -474,7 +474,7 @@ def observe_browser(validation, viewer, config, folder):
 
 def execute(config, folder, phases):
     """Run explicitly selected phases and return separate public/private outcomes and ownership."""
-    summary = {'schema': 'actant.er04.validation@1', 'phases': {}, 'limits': [
+    summary = {'schema': 'tertalis.er04.validation@1', 'phases': {}, 'limits': [
         'No physical retained-reuse or required freshness guarantee.', 'No universal thinking toggle or bitwise determinism.',
         'Abort quiescence may remain unknown; no forced process recovery.']}
     assets = inspect_assets(config)

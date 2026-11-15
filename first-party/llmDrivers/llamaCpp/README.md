@@ -33,7 +33,7 @@ from backend.save import ApplicationStore
 from backend.packs.runtime import PackResolver, ManualActivationPlan
 
 repo = Path.cwd()
-app = Path("C:/actant/example-packs/example")
+app = Path("C:/tertalis/example-packs/example")
 path = repo / "first-party/llmDrivers/llamaCpp/executionAdapter.py"
 spec = importlib.util.spec_from_file_location("hostLlamaComposition", path)
 adapter = importlib.util.module_from_spec(spec)
@@ -49,7 +49,7 @@ provider = adapter.EntrySelector.fromSource("llmDrivers.llamaCpp", "0.3.0", "dri
 composer = adapter.LlamaCppComposition(domainId="primary-llama",
     catalog=adapter.LlamaCppCatalog.fromConfig(config), providerEntries=(provider,),
     grants=(adapter.LlamaCppGrant(caller, (None, "A"), True),))
-host = RuntimeHost(applicationStore=ApplicationStore("C:/actant/example-saves"),
+host = RuntimeHost(applicationStore=ApplicationStore("C:/tertalis/example-saves"),
     packResolver=PackResolver(roots=(repo / "first-party", app.parent)),
     providerComposers=(composer,))
 host.start()
@@ -305,7 +305,7 @@ is an observation before launch/probe, not an OS attestation of loaded bytes.
 Changing files during the observation/launch window remains a limitation.
 
 `driver.configurationEvidence(model=None)` returns an immutable **private** snapshot
-with schema `actant.llamaCpp.configuration@1` and no probe/startup side effects:
+with schema `tertalis.llamaCpp.configuration@1` and no probe/startup side effects:
 
 - requested resolved values, omission/null distinction and driver/model provenance;
 - target/mmproj/template input roles and configured/resolved paths, with null
@@ -386,7 +386,7 @@ The fragment is in:
 
 ```python
 event.metadata["llamaCppReasoning"] == {
-    "schemaId": "actant.llamaCpp.reasoning@1",
+    "schemaId": "tertalis.llamaCpp.reasoning@1",
     "content": "exact provider reasoning fragment",
     "source": "delta.reasoning_content",
 }

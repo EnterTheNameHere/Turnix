@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/requestEvidence.py ; version: 2
+# file: first-party/llmDrivers/llamaCpp/requestEvidence.py ; version: 3
 """Host-only private inference evidence; scopes locate, never grant execution.
 
 Sinks synchronously return True after their own durable acknowledgement. No sink
@@ -37,7 +37,7 @@ class RequestEvidence:
     contentType: str = "application/json"
     encoding: str = "utf-8"
     serverConsumption: str = "unknown"
-    schemaId: str = "actant.llamaCpp.requestEvidence@1"
+    schemaId: str = "tertalis.llamaCpp.requestEvidence@1"
 
 
 class _Scope:

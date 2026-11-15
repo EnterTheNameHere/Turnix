@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_recordFactory.py ; version: 2
+# file: tests/backend/tracing/test_recordFactory.py ; version: 3
 from __future__ import annotations
 
 import pytest
@@ -18,7 +18,7 @@ from backend.tracing.recordFactory import TraceRecordFactory
 def _createParentlessEvent(
     factory: TraceRecordFactory,
     *,
-    origin: str | None = "actant.test",
+    origin: str | None = "tertalis.test",
 ) -> TraceRecord:
     definition = TRACE_EVENT.getDefinition()
     generated = definition.event
@@ -43,7 +43,7 @@ def _createParentlessEvent(
 def _createRootSpanStart(
     factory: TraceRecordFactory,
     *,
-    origin: str | None = "actant.test",
+    origin: str | None = "tertalis.test",
 ) -> TraceRecord:
     definition = TRACE_SPAN.getDefinition()
     generated = definition.started
@@ -112,7 +112,7 @@ def testRejectedAttributesDoNotConsumeProducerSequence() -> None:
             attributes={"unsupported": object()},
             exceptionSnapshot=None,
             spanContext=None,
-            origin="actant.test",
+            origin="tertalis.test",
             causedBy=(),
             correlations=TraceCorrelationContext(),
         )

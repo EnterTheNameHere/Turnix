@@ -1,4 +1,4 @@
-# file: backend/tracing/tracer.py ; version: 6
+# file: backend/tracing/tracer.py ; version: 7
 from __future__ import annotations
 
 import contextlib
@@ -85,7 +85,7 @@ __all__: list[str] = [
 ]
 
 
-_TRACE_INTERNAL_ORIGIN = "actant.tracing"
+_TRACE_INTERNAL_ORIGIN = "tertalis.tracing"
 _HEALTH_TRANSITION_DRAIN_LIMIT = 256
 
 TRACE_SPAN_ABANDONED = TraceEventType(
@@ -660,12 +660,12 @@ class Tracer:
     def correlations(
         self,
         *,
-        actantRunId: Uuid7Id | UNSET | None = UNSET,
+        tertalisRunId: Uuid7Id | UNSET | None = UNSET,
         applicationId: Uuid7Id | UNSET | None = UNSET,
         applicationRunId: Uuid7Id | UNSET | None = UNSET,
     ) -> TraceCorrelationScope:
         """
-        Creates a scope overriding Actant-owned correlation identities.
+        Creates a scope overriding Tertalis-owned correlation identities.
 
         UNSET inherits the ambient value, None explicitly clears it, and a
         Uuid7Id installs a replacement value.
@@ -676,8 +676,8 @@ class Tracer:
         after this tracer closes.
 
         Args:
-            actantRunId:
-                Actant-run override.
+            tertalisRunId:
+                Tertalis-run override.
             applicationId:
                 Application override.
             applicationRunId:
@@ -693,7 +693,7 @@ class Tracer:
         """
         return TraceCorrelationScope(
             runtimeContext=self._runtimeContext,
-            actantRunId=actantRunId,
+            tertalisRunId=tertalisRunId,
             applicationId=applicationId,
             applicationRunId=applicationRunId,
         )

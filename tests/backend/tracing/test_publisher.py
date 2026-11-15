@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_publisher.py ; version: 3
+# file: tests/backend/tracing/test_publisher.py ; version: 4
 from __future__ import annotations
 
 from io import StringIO
@@ -142,7 +142,7 @@ class ClosingDestination:
 
 def testNewDestinationReceivesDefinitionsBeforeLaterRecords() -> None:
     first = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(first,))
+    tracer = Tracer(origin="tertalis.test", destinations=(first,))
     tracer.event(TraceEventType(name="pipeline.ready")).emit()
 
     second = CollectingDestination()
@@ -171,7 +171,7 @@ def testDestinationFailuresStayLocalAndOtherDestinationsReceiveRecord(
     emergencyStream = StringIO()
     collector = CollectingDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(FailingDestination(), collector),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
@@ -192,7 +192,7 @@ def testDestinationCannotRecursivelyPublishOrdinaryTracing() -> None:
     emergencyStream = StringIO()
     collector = CollectingDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
@@ -218,7 +218,7 @@ def testDestinationCannotEndActiveSpanDuringPublication() -> None:
     collector = CollectingDestination()
     recursive = RecursiveSpanEndDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector, recursive),
     )
     span = tracer.span().start()
@@ -245,7 +245,7 @@ def testDestinationCannotCloseTracerDuringPublication() -> None:
     emergencyStream = StringIO()
     collector = CollectingDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
@@ -298,7 +298,7 @@ def testRemovedAndReaddedDestinationReceivesCurrentDefinitionsAgain() -> None:
     collector = CollectingDestination()
     keeper = CollectingDestination()
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(collector, keeper),
     )
     initialCount = len(collector.definitions)
@@ -314,7 +314,7 @@ def testFailedDefinitionDeliveryIsRetriedBeforeLaterRecord() -> None:
     eventType = TraceEventType(name="publisher.retry-definition")
     destination = ToggleTargetDefinitionDestination(eventType.name)
     tracer = Tracer(
-        origin="actant.test",
+        origin="tertalis.test",
         destinations=(destination,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
@@ -377,7 +377,7 @@ def testPublisherRejectsRecordWithUnregisteredDefinition() -> None:
         type=generated.label,
         traceTypeDefinitionId=definition.traceTypeDefinitionId,
         level=generated.level,
-        origin="actant.test",
+        origin="tertalis.test",
     )
 
     with pytest.raises(TraceInvariantError):
@@ -391,7 +391,7 @@ def testDefinitionDeliveryProcessControlBaseExceptionPropagates() -> None:
 
     with pytest.raises(KeyboardInterrupt):
         Tracer(
-            origin="actant.test",
+            origin="tertalis.test",
             destinations=(destination,),
         )
 

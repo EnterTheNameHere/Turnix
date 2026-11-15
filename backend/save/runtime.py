@@ -1,4 +1,4 @@
-# file: backend/save/runtime.py ; version: 4
+# file: backend/save/runtime.py ; version: 5
 from __future__ import annotations
 
 import json
@@ -17,7 +17,7 @@ class SaveBundle:
 
     SaveBundle contains a persistence representation of authoritative committed
     state. It does not make state authoritative: values are included only after
-    they have crossed Actant's commit boundary.
+    they have crossed Tertalis's commit boundary.
 
     SaveBundle identity is distinct from Application identity. A new generation
     is a new immutable snapshot object with the same saveBundleId/applicationId
@@ -37,7 +37,7 @@ class SaveBundle:
     generation: int
     _committedStateSnapshot: dict[str, object]
 
-    _FORMAT_ID = "actant.save-bundle@1"
+    _FORMAT_ID = "tertalis.save-bundle@1"
 
     def __post_init__(self) -> None:
         if type(self.saveBundleId) is not str or not self.saveBundleId:

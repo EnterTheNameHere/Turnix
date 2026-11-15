@@ -1,4 +1,4 @@
-# file: backend/llm/executionSessions.py ; version: 7
+# file: backend/llm/executionSessions.py ; version: 8
 """Trusted LLM composition over ER-01, with no provider-specific realization.
 
 Binding/owner creation and adapter evidence are backend hooks, never Pack grants.
@@ -339,11 +339,11 @@ class LlmMutationScope:
         self.receipts.clear()
 
 
-_mutation = ContextVar("actant.llm.mutation", default=None)
-_boundary = ContextVar("actant.llm.call-boundary", default=None)
-_boundaryCancellation = ContextVar("actant.llm.call-cancellation", default=None)
-_helper = ContextVar("actant.llm.helper-estimation", default=None)
-_lifetime = ContextVar("actant.llm.lifetime-boundary", default=None)
+_mutation = ContextVar("tertalis.llm.mutation", default=None)
+_boundary = ContextVar("tertalis.llm.call-boundary", default=None)
+_boundaryCancellation = ContextVar("tertalis.llm.call-cancellation", default=None)
+_helper = ContextVar("tertalis.llm.helper-estimation", default=None)
+_lifetime = ContextVar("tertalis.llm.lifetime-boundary", default=None)
 
 
 def lifetimeBoundary(method):

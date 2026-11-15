@@ -1,7 +1,7 @@
-# file: backend/tracing/errors.py ; version: 4
+# file: backend/tracing/errors.py ; version: 5
 from __future__ import annotations
 
-from backend.core.errors import ActantError, CoreInvariantError
+from backend.core.errors import PlatformError, CoreInvariantError
 
 __all__: list[str] = [
     "TraceBuilderConsumedError",
@@ -24,7 +24,7 @@ __all__: list[str] = [
 ]
 
 
-class TraceError(ActantError):
+class TraceError(PlatformError):
     """Base class for tracing-domain exceptions."""
 
 

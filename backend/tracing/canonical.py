@@ -1,4 +1,4 @@
-# file: backend/tracing/canonical.py ; version: 2
+# file: backend/tracing/canonical.py ; version: 3
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -19,7 +19,7 @@ _BMP_CODE_POINT_MAX = 0xFFFF
 
 def canonicalJson(value: object) -> str:
     """
-    Returns Actant canonical JSON for deterministic tracing identities.
+    Returns Tertalis canonical JSON for deterministic tracing identities.
 
     The portable tracing profile accepts only null, exact booleans, exact
     integers, exact strings, non-string sequences, and mappings with exact

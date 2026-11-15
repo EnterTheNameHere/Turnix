@@ -1,4 +1,4 @@
-# file: backend/llm/providerComposition.py ; version: 4
+# file: backend/llm/providerComposition.py ; version: 5
 """Trusted activation composition, distinct from execution admission and Jobs."""
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from weakref import WeakKeyDictionary
 
 from backend.llm.errors import LlmExecutionOwnershipError, LlmExecutionCleanupError
 
-_invocation = ContextVar("actant.composition.invocation", default=False)
-_lifecycle = ContextVar("actant.composition.lifecycle", default=False)
+_invocation = ContextVar("tertalis.composition.invocation", default=False)
+_lifecycle = ContextVar("tertalis.composition.lifecycle", default=False)
 _effectTables = WeakKeyDictionary()
 _effectTablesLane = RLock()
 

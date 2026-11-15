@@ -1,4 +1,4 @@
-# file: backend/values/layer.py ; version: 4
+# file: backend/values/layer.py ; version: 5
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -24,7 +24,7 @@ __all__: list[str] = [
 
 class ValueLayer(ABC):
     """
-    Defines one resolution layer in the Actant Value System.
+    Defines one resolution layer in the Tertalis Value System.
 
     A ValueLayer contributes values to one logical Value System view. A layer
     may have at most one parent. Resolution first asks the current layer for

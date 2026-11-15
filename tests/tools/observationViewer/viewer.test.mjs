@@ -61,7 +61,7 @@ test('unknown timing has no fabricated placement', () => {
   assert.equal(graphSeries(parseSnapshot(raw), 'cpu').length, 0);
 });
 for (const [name, mutate] of [
-  ['version', r => r.schemaId = 'actant.observation-publication@2'], ['clock', r => r.clock.kind = 'wall'],
+  ['version', r => r.schemaId = 'tertalis.observation-publication@2'], ['clock', r => r.clock.kind = 'wall'],
   ['timestamp number', r => r.hardware[0].collectionStartNs = 2**60], ['invalid decimal', r => r.stream.originNs = '1.2'],
   ['regressing interval', r => r.hardware[0].collectionEndNs = '0'], ['wrong unit', r => r.stream.windows[0].charactersPerSecond.unit = 'tokens/second'],
   ['oversized history', r => r.hardware = Array(513).fill(r.hardware[0])], ['bad availability', r => r.hardware[0].gpu.gpuUtilizationPercent.value = 0],

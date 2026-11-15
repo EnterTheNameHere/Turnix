@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 11
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 12
 # ruff: noqa: INP001
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from backend.core.immutableValue import ImmutableValue
 
 
-_IMPLEMENTATION_NAME = "actantFirstPartyLlamaCppImplementation"
+_IMPLEMENTATION_NAME = "tertalisFirstPartyLlamaCppImplementation"
 _IMPLEMENTATION_PATH = Path(__file__).with_name("codeEntry.py")
 
 
@@ -71,7 +71,7 @@ class _LlamaCppRuntimeState:
 
 
 def _messagesForQuery(query: LlmQuery) -> list[dict[str, str]]:
-    """Maps one supported Actant query to exact llama.cpp chat messages."""
+    """Maps one supported Tertalis query to exact llama.cpp chat messages."""
     if query.formatId == "text/plain":
         if type(query.payload) is not str:
             raise TypeError("text/plain LlmQuery payload must be an exact built-in string.")
@@ -79,7 +79,7 @@ def _messagesForQuery(query: LlmQuery) -> list[dict[str, str]]:
     if query.formatId == LLM_MESSAGES_FORMAT_ID:
         return LlmMessages.fromPayload(query.payload).snapshot()
     raise ValueError(
-        "llama.cpp supports text/plain and actant.llm.messages@1, not "
+        "llama.cpp supports text/plain and tertalis.llm.messages@1, not "
         f"{query.formatId!r}.",
     )
 
@@ -191,7 +191,7 @@ class LlamaCppStreamProvider:
         )
         unregisterCancellation = None
         try:
-            response = urlRequest.urlopen(  # noqa: S310 - provider endpoint is explicitly configured by Actant.
+            response = urlRequest.urlopen(  # noqa: S310 - provider endpoint is explicitly configured by Tertalis.
                 httpRequest,
                 timeout=options.timeoutSeconds,
             )
@@ -226,7 +226,7 @@ def _buildPayload(
     *,
     includeRequestedModel: bool,
 ) -> dict[str, object]:
-    """Builds an OpenAI-compatible payload from the exact Actant query messages."""
+    """Builds an OpenAI-compatible payload from the exact Tertalis query messages."""
     payload: dict[str, object] = {
         "messages": _messagesForQuery(request.query),
         "stream": True,

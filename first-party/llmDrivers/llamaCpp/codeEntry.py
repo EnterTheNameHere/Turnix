@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 11
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 12
 from __future__ import annotations
 
 from contextvars import ContextVar
@@ -32,7 +32,7 @@ _LOAD_MODES = frozenset({"auto", "none", "mmap", "mlock", "mmap+mlock", "dio"})
 
 def _loadConfiguration() -> ModuleType:
     """Load the provider-local configuration helper independently of Pack import paths."""
-    name = "actantLlamaCppConfiguration"
+    name = "tertalisLlamaCppConfiguration"
     if name in sys.modules:
         return sys.modules[name]
     spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("configuration.py"))
@@ -386,7 +386,7 @@ def _buildPayload(
     *,
     includeRequestedModel: bool,
 ) -> dict[str, object]:
-    """Builds one exact OpenAI-compatible request payload from Actant options."""
+    """Builds one exact OpenAI-compatible request payload from Tertalis options."""
     if request.query.formatId != "text/plain":
         raise ValueError(
             "llama.cpp proving-ground provider supports only text/plain, not "
@@ -415,7 +415,7 @@ def _buildPayload(
 
 def _reasoningMetadata(content: str) -> dict[str, ImmutableValue]:
     """Identify private provider-reported reasoning text, separate from ordinary answer text."""
-    return {"schemaId": "actant.llamaCpp.reasoning@1", "content": content,
+    return {"schemaId": "tertalis.llamaCpp.reasoning@1", "content": content,
             "source": "delta.reasoning_content"}
 
 
@@ -565,7 +565,7 @@ def _rejectFirstClassArgs(extraArgs: tuple[str, ...], name: str) -> None:
     _configuration.inspectExtraArgs(extraArgs, name)
 
 
-_driverAccess = ContextVar("actant.llama.driver-access", default=None)
+_driverAccess = ContextVar("tertalis.llama.driver-access", default=None)
 
 
 @contextmanager
@@ -641,7 +641,7 @@ class LlamaCppDriver:
         self.baseUrl = baseUrl.strip().rstrip("/")
         if self.manageServer and self.baseUrl != managedBaseUrl:
             raise ValueError(
-                "Managed llama.cpp baseUrl must identify the server Actant launches at "
+                "Managed llama.cpp baseUrl must identify the server Tertalis launches at "
                 "the configured host/port."
             )
         self.externalContextWindowTokens = _optionalPositiveInt(
@@ -835,7 +835,7 @@ class LlamaCppDriver:
             raise LlmExecutionOwnershipError("Managed llama.cpp requires an admitted adapter ticket.")
 
     def start(self) -> None:
-        """Starts the configured default model when Actant owns the server."""
+        """Starts the configured default model when Tertalis owns the server."""
         self._requireManagedAccess()
         if self.manageServer:
             self.ensureModel(self.defaultModel)
@@ -1134,7 +1134,7 @@ class LlamaCppDriver:
 
 def _managedFacade(config):
     """Canonicalize facade identity when the substrate itself is the CodeEntry."""
-    name = "actantFirstPartyLlamaCppImplementation"
+    name = "tertalisFirstPartyLlamaCppImplementation"
     module = sys.modules.get(name)
     if module is None:
         spec = importlib.util.spec_from_file_location(name, Path(__file__))
