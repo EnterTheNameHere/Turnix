@@ -52,3 +52,42 @@ Application's own `setup.bat` or `setup.ps1` separately after root setup. Those
 scripts own local templates and user-file preservation and should check existing
 platform prerequisites; they do not invoke root setup. Platform checkouts need
 no Application source to provision tools.
+
+## Development checks
+
+The commands below run from the repository root after successful root setup.
+They use the repository-local default Python installation rather than a
+machine-global Python:
+
+```powershell
+.\python-embedded\python.exe -X frozen_modules=off -m pytest tests
+.\python-embedded\python.exe -X frozen_modules=off .\scripts\verify_tools.py
+.\python-embedded\Scripts\ruff.exe --version
+.\python-embedded\Scripts\ty.exe --version
+```
+
+The pytest command runs the repository's test suite; it does not launch an
+application. Some tests require Windows or additional external prerequisites,
+and may be skipped or require further configuration. Running setup does not
+itself mean repository-wide tests, formatting or static analysis have passed.
+Check and report the actual results for the revision you are working with.
+
+For the explicitly selected 3.14 fallback, invoke the corresponding
+`python.exe` at the `-EmbedDir` you configured; do not assume it resides at
+the default path. Consult the relevant test, application or workstream
+documentation for any additional real-model or operating-system checks.
+
+## Application checkouts
+
+In a checkout that includes a separately owned application, preserve the
+platform/application setup distinction. Execute the root `setup.bat` or
+`setup.ps1` first, and then the application-owned
+`first-party/applications/<name>/setup.bat` or `setup.ps1`, if provided.
+Launch using the application's own `run.bat`, if provided. The root platform
+scripts never discover, configure, or run the application. Consult the
+application's README and setup instructions for local settings, dependencies,
+optional assets, and required services.
+
+For an overview of the platform and its present development status, see
+`README.md`. AI contributors should start with `AGENTS.md` as well as the
+repository's coordination protocol.
