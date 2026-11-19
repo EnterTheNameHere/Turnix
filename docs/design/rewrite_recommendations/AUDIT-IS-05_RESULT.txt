@@ -1,0 +1,745 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-05 RUNTIME HOST STARTUP MODES
+==============================================================================
+
+Document title:
+    IS-05 - Runtime Host Startup Modes
+
+Target IS path:
+    docs/design/IS-05_RUNTIME_HOST_STARTUP_MODES.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-05
+    DOC_FILE: docs/design/IS-05_RUNTIME_HOST_STARTUP_MODES.txt
+    DOC_REV: 1
+    DOC_GIT: aba165d
+    GitHub blob SHA seen by assistant:
+        96c0394409bb6e2ee54e8f2694e70f6ebd3edfd6
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-05_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-05 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-05 because the IS-05 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-05 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-05_RUNTIME_HOST_STARTUP_MODES.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, mode-result, and authority-boundary fixes.
+
+    IS-05 is a useful concrete implementation specification for RuntimeHost
+    startup-mode classification, request normalization, mode selection,
+    mode-specific entry flows, startup result envelopes, workspace ownership
+    relation, command-surface relation, and trace mapping.
+
+    It should not be rewritten from scratch. Its core invariant is correct:
+    startup modes are entry workflows over shared Kernel-mediated runtime
+    operations, not separate runtime semantics.
+
+    The main required fixes are current-model terminology updates around
+    AppInstance / SavePack and stronger language preventing startup mode,
+    test mode, launcher mode, one-shot mode, or startup result projection from
+    becoming authority or separate semantics.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-05 correctly defines concrete startup-mode behavior and leaves
+    RuntimeHost, Kernel authority, committed state, persistence, Application /
+    ApplicationRun lifecycle, RPC, View, adapter authority, OrchestrationUnit,
+    workspace ownership, command-surface flow, shell syntax, launcher behavior,
+    terminal rendering, LAN pairing, and authentication to owning documents.
+
+2. Strong shared-operation invariant.
+
+    The document correctly states that startup mode selection determines how
+    Turnix is entered, but does not define separate runtime semantics.
+
+    Startup modes are treated as entry workflows over shared Kernel-mediated
+    runtime operations.
+
+3. Good mode-category discipline.
+
+    startupMode values are semantic categories, not final CLI names, flags,
+    desktop launcher actions, or service-wrapper names.
+
+4. Good normalization boundary.
+
+    Startup request normalization captures invocation and requested-mode data but
+    does not grant authority, acquire workspace ownership, create a RuntimeHost,
+    or create an AppInstance.
+
+    This boundary should be preserved, with AppInstance translated to the current
+    Application / ApplicationRun model.
+
+5. Good workspace ownership separation.
+
+    Startup modes that require writable workspace ownership use IS-03. Connect
+    mode and read-only inspection modes avoid writable ownership unless the
+    request explicitly permits the necessary behavior.
+
+    The document correctly forbids silent fallback from connect mode to a new
+    writable host and silent stale-owner takeover.
+
+6. Good command-surface separation.
+
+    Startup modes that receive or dispatch commands use IS-04. Startup mode
+    selection is not command acceptance, command acceptance is not startup mode
+    success, and startup readiness is not command success.
+
+7. Good mode-specific safety boundaries.
+
+    serve mode does not silently expose internet-accessible runtime control
+    surfaces.
+
+    test mode may bypass human prompts only with explicit policy or decision
+    fixtures, and those fixtures do not become production defaults.
+
+    launcher mode does not make browser frontend state authoritative.
+
+8. Good startup-result projection boundary.
+
+    oneShotCommand mode may project command result status into startup result
+    status only as an explicit startup-mode surface, while the underlying command
+    result remains command-domain evidence under IS-04.
+
+9. Good trace/evidence separation.
+
+    Startup mode trace evidence does not replace RuntimeHost lifecycle,
+    workspace ownership, command, AppInstance, Job, adapter, RPC, UI,
+    OrchestrationUnit, transaction, or Window evidence.
+
+    This should be preserved with AppInstance translated to current terms.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-05 still uses AppInstance in several places:
+
+        - startup modes must not create separate AppInstance semantics
+        - AppInstance lifecycle or runtime identity semantics
+        - startup mode success is not AppInstance success
+        - startupRequestId is distinct from appInstanceId
+        - normalization does not create an AppInstance
+        - startup mode that creates or starts an AppInstance uses DA-20
+        - interactiveHost / serve readiness does not imply AppInstance readiness
+        - launcher mode does not create AppInstance semantics
+        - startup result envelope carries appInstanceId
+        - startupStatus does not redefine AppInstance lifecycle outcome
+        - trace context includes appInstanceId
+        - startup trace evidence does not replace AppInstance evidence
+        - unsupported list and locked summary use AppInstance
+
+    Current source-stack correction:
+        Proposal P02 defines:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of an Application
+
+    Required consequence for IS-05:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        local meaning.
+
+        Likely translation:
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+            AppInstance success
+                -> Application creation success and/or ApplicationRun start
+                   success, depending on the mode contract
+
+            AppInstance readiness
+                -> ApplicationRun readiness when live execution is meant
+
+            AppInstance lifecycle outcome
+                -> ApplicationRun lifecycle outcome when live execution is meant
+
+            AppInstance runtime identity
+                -> Application identity and ApplicationRun identity
+
+2. SavePack terminology is superseded by SaveBundle.
+
+    IS-05 uses SavePack in the purpose section, test mode, launcher mode, and
+    unsupported/locked summary sections.
+
+    Current source-stack correction:
+        Proposal P02 defines SaveBundle as the durable persistence closure of one
+        Application. SaveBundle is not a Pack, not an Application, not an
+        ApplicationRun, not a RuntimeHost, not a live process snapshot, not a Job
+        store, and not authority by itself.
+
+    Required consequence for IS-05:
+        Replace SavePack with SaveBundle.
+
+        Do not let startup mode naming imply that SaveBundle is a Pack or that
+        startup mode defines separate SaveBundle semantics.
+
+3. Shared startup operation list still contains AppInstance operation wording.
+
+    Section 05 says a startup mode that creates or starts an AppInstance uses
+    DA-20.
+
+    Required consequence for IS-05:
+        Recast this as Application / ApplicationRun lifecycle behavior.
+
+        Safer wording:
+
+            A startup mode that creates an Application, loads a SaveBundle,
+            creates an ApplicationRun, or starts an ApplicationRun follows the
+            owning lifecycle and persistence documents.
+
+        If exact operation names are mentioned later, use current names such as:
+
+            CreateApplication
+            LoadSaveBundle
+            CreateApplicationRun
+            StartApplicationRun
+
+4. startupStatus contains lifecycle-looking outcomes.
+
+    startupStatus includes ready, completed, failed, cancelled, and detached.
+    The document already says startupStatus does not redefine RuntimeHost,
+    command, Job, OrchestrationUnit, or AppInstance lifecycle outcomes.
+
+    Required correction:
+        Translate AppInstance to Application / ApplicationRun and preserve the
+        stop-lines.
+
+        Also clarify that ready/completed/failed/cancelled/detached are startup
+        mode surfaces only unless the mode contract explicitly projects an owning
+        command, RuntimeHost operation, Job, adapter, ApplicationRun, or retained
+        work outcome.
+
+5. Startup result projection can hide downstream results if not constrained.
+
+    The target correctly says oneShotCommand mode may project command result
+    status into startup result status only as an explicit startup-mode surface,
+    and command result remains command-domain evidence.
+
+    Required correction:
+        Preserve this and extend it to other downstream evidence:
+
+            A startup result envelope may summarize command, RuntimeHost
+            operation, workspace ownership, Job, adapter, View, or ApplicationRun
+            outcomes only through explicit mode contracts and must not erase the
+            owning-domain evidence or trace correlation.
+
+6. test mode must not become a privilege bypass.
+
+    IS-05 already says test mode uses controlled test surfaces without weakening
+    boundaries, may bypass human prompts only when explicit policy or decision
+    fixtures are supplied, and test fixtures do not become production defaults.
+
+    Required correction:
+        Preserve and translate AppInstance / SavePack terms to Application /
+        ApplicationRun / SaveBundle.
+
+        Add or preserve a stop-line that test fixtures do not create production
+        permissions, production policy defaults, production adapter authority,
+        production workspace ownership, or production SaveBundle semantics.
+
+7. launcher mode must not create its own semantics.
+
+    IS-05 says launcher mode does not create AppInstance or SavePack semantics
+    separate from DA-20 and DA-28, and does not make browser frontend state
+    authoritative.
+
+    Required correction:
+        Translate to Application / ApplicationRun / SaveBundle and keep the
+        browser-state stop-line.
+
+        Launcher UI is an entry/request surface, not authority.
+
+8. serve mode exposure boundary should remain strong.
+
+    serve mode may expose LAN entry surfaces only when explicit policy or
+    configuration permits LAN exposure and never silently exposes internet-
+    accessible runtime control surfaces.
+
+    Required correction:
+        Preserve this. Do not weaken local/LAN/internet exposure distinction in a
+        rewrite.
+
+9. RuntimeHost startup mode must not become TurnixRuntime identity.
+
+    Startup modes may create or connect to a RuntimeHost. Current P02 says
+    RuntimeHost is a running host boundary through which Kernel-owned authority is
+    started, exposed, coordinated, and closed; RuntimeHost is not Turnix identity
+    itself.
+
+    Required correction:
+        Preserve that startup mode selects an entry workflow. It does not create
+        authority, TurnixRuntime identity, Application identity, ApplicationRun
+        identity, SaveBundle authority, workspace ownership, or Kernel authority
+        by itself.
+
+10. Open questions should remain implementation-level.
+
+    IS-05 leaves exact startupRequestId representation, result schema, CLI /
+    launcher / service request mapping, process exit code mapping, detached work
+    behavior, serve bind defaults, connect host discovery, extension mechanism,
+    and error classes open.
+
+    Required correction:
+        Keep these open unless a later source resolves them. Do not use this IS to
+        finalize CLI syntax, launcher behavior, or service wrapper behavior.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate to Application or ApplicationRun according to meaning.
+
+2. Do not preserve SavePack as current terminology.
+
+    Translate to SaveBundle.
+
+3. Do not preserve startup mode success as AppInstance success.
+
+    Translate to Application creation success, ApplicationRun readiness/start
+    success, or SaveBundle load success only when an explicit mode contract maps
+    the outcome.
+
+4. Do not preserve appInstanceId in result or trace surfaces.
+
+    Replace with applicationId and/or applicationRunId.
+
+5. Do not preserve test mode as implicit permission bypass.
+
+    It may use explicit fixtures. It must not change production defaults or
+    weaken production authority boundaries.
+
+6. Do not preserve launcher mode as a separate semantic owner.
+
+    Launcher mode is an entry/request UI flow. It does not define independent
+    Application, ApplicationRun, SaveBundle, RPC, View, adapter, policy,
+    persistence, or command semantics.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-05.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance terminology.
+
+    Replace appInstanceId with applicationId and/or applicationRunId.
+
+    Replace AppInstance success/readiness/lifecycle/runtime identity with
+    Application and ApplicationRun terminology.
+
+2. Replace SavePack terminology.
+
+    Replace SavePack with SaveBundle in purpose text, test mode, launcher mode,
+    unsupported behavior, and locked summary.
+
+3. Update shared startup operation wording.
+
+    Replace:
+
+        A startup mode that creates or starts an AppInstance uses DA-20.
+
+    with current wording such as:
+
+        A startup mode that creates an Application, loads a SaveBundle, creates
+        an ApplicationRun, or starts an ApplicationRun follows the owning
+        lifecycle and persistence documents.
+
+4. Update startup identity and result fields.
+
+    Replace startupRequestId distinction and result-envelope fields from
+    appInstanceId to applicationId and/or applicationRunId.
+
+5. Add startup-input anti-forgery stop-line.
+
+    Add wording that startup request input, executable invocation context, entry
+    surface kind, command-line arguments, environment input, requested startup
+    mode, test harness context, launcher context, and service wrapper context are
+    classification / policy / routing evidence only.
+
+    They do not let the caller forge Kernel authority, RuntimeHost authority,
+    TurnixRuntime identity, workspace ownership, Application identity,
+    ApplicationRun identity, SaveBundle authority, capability permission,
+    adapter authorization, or policy approval.
+
+6. Preserve startup lifecycle stop-lines.
+
+    Keep the distinctions between startup selection, startup mode entry,
+    RuntimeHost lifecycle, command status, workspace ownership, Job outcome,
+    OrchestrationUnit outcome, adapter outcome, RPC outcome, View/frontend
+    outcome, and ApplicationRun outcome.
+
+7. Clarify startup result projection.
+
+    Add wording that startup result envelopes may project command or downstream
+    outcomes only through explicit startup-mode contracts and must not erase
+    underlying command, RuntimeHost operation, workspace ownership, Job, adapter,
+    View, ApplicationRun, policy, or trace evidence.
+
+8. Preserve test mode boundaries.
+
+    Keep the rule that test fixtures do not become production defaults.
+
+    Add or preserve wording that test mode does not create production permission,
+    production policy, production adapter authority, production workspace
+    ownership, production SaveBundle semantics, or production committed-state
+    semantics.
+
+9. Preserve launcher mode boundaries.
+
+    Keep launcher mode as a user-facing entry/request surface.
+
+    Keep the rule that launcher mode does not make browser frontend state
+    authoritative and does not create separate Application, ApplicationRun, or
+    SaveBundle semantics.
+
+10. Preserve serve/connect safety rules.
+
+    Keep:
+
+        serve mode never silently exposes internet-accessible runtime control
+        surfaces.
+
+        connect mode does not silently start a new writable RuntimeHost unless
+        explicitly permitted.
+
+        connect mode does not silently take over stale ownership evidence.
+
+11. Preserve open questions.
+
+    Keep exact startupRequestId representation, startup result schema,
+    CLI/launcher/service request mapping, process exit code mapping, detached
+    work behavior, serve bind defaults, connect host discovery, startup-mode
+    extension mechanism, and error classes open unless a later source resolves
+    them.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun / SaveBundle terminology.
+
+    2. Keep Core Concept, but add the startup-input anti-forgery stop-line.
+
+    3. Update Startup Mode Identity and Classification to replace appInstanceId
+       with applicationId and applicationRunId.
+
+    4. Keep Startup Request Normalization, but translate AppInstance creation
+       wording to Application / ApplicationRun wording.
+
+    5. Update Shared Startup Operation Order to current Application /
+       ApplicationRun / SaveBundle lifecycle/persistence terms.
+
+    6. Keep interactiveHost, oneShotCommand, serve, connect, test, and launcher
+       mode sections, but update terminology and preserve local safety rules.
+
+    7. Update Startup Mode Result Envelope fields and stop-lines.
+
+    8. Preserve Relation to Workspace Ownership, Relation to Command Surfaces,
+       Trace Mapping, Error Categories, Unsupported, Open Questions, and Locked
+       Summary sections.
+
+    9. Update Locked Summary to remove AppInstance / SavePack wording and to
+       preserve startup-mode non-authority.
+
+Do not turn IS-05 into DA-28, IS-04, IS-03, DA-20, DA-21, DA-22, DA-23, DA-24,
+DA-27, a launcher specification, a CLI syntax specification, or a service-wrapper
+specification.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Purpose paragraph
+
+    Current risk:
+        without creating separate AppInstance, SavePack, adapter, RPC,
+        capability, policy, persistence, Orchestration Unit, Job, View, or trace
+        semantics for each mode
+
+    Safer wording:
+        without creating separate Application, ApplicationRun, SaveBundle,
+        adapter, RPC, capability, policy, persistence, OrchestrationUnit, Job,
+        View, or trace semantics for each mode
+
+2. It does NOT define section
+
+    Current risk:
+        AppInstance lifecycle or runtime identity semantics
+
+    Safer wording:
+        Application lifecycle, Application identity, ApplicationRun lifecycle, or
+        ApplicationRun identity semantics
+
+3. Core Concept
+
+    Current risk:
+        Startup mode success is not AppInstance success...
+
+    Safer wording:
+        Startup mode success is not Application creation success,
+        ApplicationRun readiness, ApplicationRun start success, Job success,
+        adapter success, or OrchestrationUnit completion by default.
+
+4. Startup identity
+
+    Current risk:
+        appInstanceId
+
+    Safer wording:
+        applicationId
+        applicationRunId
+
+5. Normalization
+
+    Current risk:
+        Normalization does not create an AppInstance.
+
+    Safer wording:
+        Normalization does not create an Application or ApplicationRun.
+
+6. Shared operation order
+
+    Current risk:
+        A startup mode that creates or starts an AppInstance uses DA-20.
+
+    Safer wording:
+        A startup mode that creates an Application, loads a SaveBundle, creates
+        an ApplicationRun, or starts an ApplicationRun follows the owning
+        lifecycle and persistence documents.
+
+7. interactiveHost / serve readiness
+
+    Current risk:
+        readiness does not imply AppInstance readiness
+
+    Safer wording:
+        readiness does not imply ApplicationRun readiness or ApplicationRun start
+        success
+
+8. test mode
+
+    Current risk:
+        without weakening runtime, adapter, AppInstance, SavePack, orchestration,
+        capability, policy, persistence, or trace boundaries
+
+    Safer wording:
+        without weakening runtime, adapter, Application, ApplicationRun,
+        SaveBundle, orchestration, capability, policy, persistence, or trace
+        boundaries
+
+9. launcher mode
+
+    Current risk:
+        launcher mode does not create AppInstance or SavePack semantics separate
+        from DA-20 and DA-28
+
+    Safer wording:
+        launcher mode does not create Application, ApplicationRun, or SaveBundle
+        semantics separate from their owning design documents
+
+10. Result envelope
+
+    Current risk:
+        appInstanceId when applicable
+
+    Safer wording:
+        applicationId when applicable
+        applicationRunId when applicable
+
+11. startupStatus stop-line
+
+    Current risk:
+        startupStatus does not redefine AppInstance lifecycle outcome.
+
+    Safer wording:
+        startupStatus does not redefine Application lifecycle or ApplicationRun
+        lifecycle outcome.
+
+12. Trace mapping
+
+    Current risk:
+        appInstanceId
+        Startup mode trace evidence does not replace AppInstance evidence.
+
+    Safer wording:
+        applicationId
+        applicationRunId
+        Startup mode trace evidence does not replace Application or
+        ApplicationRun evidence.
+
+13. Unsupported list
+
+    Current risk:
+        treating startup mode success as AppInstance success by default
+        test mode bypassing ... AppInstance ... boundaries
+        launcher mode creating separate SavePack or AppInstance semantics
+
+    Safer wording:
+        treating startup mode success as Application creation success or
+        ApplicationRun success by default
+        test mode bypassing ... Application, ApplicationRun, SaveBundle ...
+        boundaries
+        launcher mode creating separate SaveBundle, Application, or
+        ApplicationRun semantics
+
+14. Locked Summary
+
+    Current risk:
+        appInstanceId
+        AppInstance success
+        AppInstance or SavePack semantics
+
+    Safer wording:
+        applicationId and applicationRunId
+        Application creation success or ApplicationRun success
+        Application, ApplicationRun, or SaveBundle semantics
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-05
+==============================================================================
+
+Accept the rewritten IS-05 only if all of the following are true:
+
+1. It remains an implementation specification for concrete RuntimeHost startup
+   mode behavior.
+
+2. It does not redefine RuntimeHost, TurnixRuntime, Kernel, Workspace,
+   Application, ApplicationRun, SaveBundle, committed-state, persistence, policy,
+   Job, OrchestrationUnit, Window, adapter, RPC, View, command surface, launcher,
+   CLI syntax, service wrapper, LAN, authentication, or terminal rendering
+   semantics.
+
+3. All AppInstance and appInstanceId terminology has been translated to
+   Application, ApplicationRun, applicationId, and/or applicationRunId according
+   to meaning.
+
+4. All SavePack terminology has been translated to SaveBundle terminology.
+
+5. startupMode values remain semantic categories, not final CLI names, flags,
+   launcher actions, or service-wrapper names.
+
+6. Startup request input, invocation context, entry-surface kind, environment
+   input, requested startup mode, test harness context, launcher context, and
+   service wrapper context cannot be read as authority grants or identity-forging
+   mechanisms.
+
+7. Startup modes do not become Kernel authority, TurnixRuntime identity,
+   RuntimeHost authority, workspace ownership, Application identity,
+   ApplicationRun lifecycle authority, SaveBundle authority, adapter authority,
+   Job lifecycle authority, command authority, RPC authority, View authority, or
+   committed-state mutation authority.
+
+8. Startup mode selection, startup mode entry, startup readiness, startup
+   completion, command status, RuntimeHost lifecycle, workspace ownership, Job
+   outcome, OrchestrationUnit outcome, adapter outcome, RPC outcome, View outcome,
+   ApplicationRun outcome, and trace evidence remain distinct.
+
+9. Shared startup operation ordering does not create separate independent
+   semantics for Application creation, ApplicationRun creation/start, SaveBundle
+   creation/load, workspace ownership, command dispatch, adapter execution,
+   capability invocation, Job handling, RPC, View creation, or persistence.
+
+10. Startup result envelopes do not replace downstream command, RuntimeHost
+    operation, workspace ownership, Job, OrchestrationUnit, adapter, View,
+    ApplicationRun, policy, trace, or committed-state evidence.
+
+11. oneShotCommand projection of command result into startup result is explicit
+    and does not replace IS-04 command-domain evidence.
+
+12. test mode does not become a production permission, policy, persistence,
+    adapter, workspace ownership, SaveBundle, or trace bypass.
+
+13. launcher mode does not make browser frontend state authoritative and does not
+    define independent Application, ApplicationRun, or SaveBundle semantics.
+
+14. serve mode does not silently expose LAN or internet-accessible runtime
+    control surfaces.
+
+15. connect mode does not silently start a new writable RuntimeHost or take over
+    stale ownership evidence.
+
+16. Open questions remain open unless a later source resolves them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-05 with targeted terminology, mode-result, and authority-boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into DA-28 RuntimeHost doctrine,
+IS-04 command-surface doctrine, IS-03 workspace ownership mechanics, DA-20
+Application/ApplicationRun lifecycle doctrine, DA-21 RPC doctrine, DA-22 View
+doctrine, DA-23/DA-27 adapter doctrine, DA-24 OrchestrationUnit doctrine, a
+launcher specification, a CLI syntax specification, or a service-wrapper
+specification.
+
+Translate obsolete AppInstance / SavePack wording into current Application /
+ApplicationRun / SaveBundle terminology. Strengthen startup-input anti-forgery,
+startup-result projection, test-mode, launcher-mode, serve-mode, and connect-mode
+stop-lines while preserving the existing startup-mode / command / workspace /
+RuntimeHost / Job / adapter / trace separation guarantees.
+
+==============================================================================
+END OF AUDIT-IS-05 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-05-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-05_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------

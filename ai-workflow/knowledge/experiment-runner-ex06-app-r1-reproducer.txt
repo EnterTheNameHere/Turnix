@@ -1,0 +1,47 @@
+"""Independent EX-06 primary versus post-process diagnostics regressions."""
+import importlib
+import pytest
+from backend.process.context import ProcessFacade
+from backend.workspace.context import WorkspaceFacade
+from tests.first_party.experimentRunner.test_procedure import rig, syntheticCli, definition, host5, launcher
+
+
+@pytest.mark.parametrize('secondaryStage', ['post-file', 'archive-outcome', 'archive-ordinary'])
+def test_first_process_primary_survives_secondary_evidence_failure(rig, monkeypatch, secondaryStage):
+    """Later diagnostics may fail without replacing an exact critical process exit."""
+    first = KeyboardInterrupt('process-first')
+    second = ValueError('diagnostic-second') if secondaryStage == 'archive-ordinary' else SystemExit('diagnostic-second')
+    syntheticCli(monkeypatch, rig[0])
+    actual = ProcessFacade.execute
+
+    def interrupted(self, ticket, *, beforeLaunch):
+        """Attach existing immutable completion evidence then signal first interruption."""
+        first.processEvidence = actual(self, ticket, beforeLaunch=beforeLaunch)
+        raise first
+
+    monkeypatch.setattr(ProcessFacade, 'execute', interrupted)
+    if secondaryStage == 'post-file':
+        read = WorkspaceFacade.readBytes
+
+        def failedRead(self, *args, **kwargs):
+            """Fail only after process-first was raised and caught by the App."""
+            if hasattr(first, 'processEvidence'):
+                raise second
+            return read(self, *args, **kwargs)
+
+        monkeypatch.setattr(WorkspaceFacade, 'readBytes', failedRead)
+    else:
+        port = importlib.import_module('first-party.applications.experimentRunner.procedureArchive').Port
+        doc = port.doc
+
+        def failedDocument(self, name, **fields):
+            """Inject a later process-outcome diagnostic materialization failure."""
+            if name == 'process-outcome@1' and hasattr(first, 'processEvidence'):
+                raise second
+            return doc(self, name, **fields)
+
+        monkeypatch.setattr(port, 'doc', failedDocument)
+    with pytest.raises(BaseException) as caught:
+        launcher.execute(launcher.prepare(definition(), host5(rig[1])), rig[2], handleInterrupt=False)
+    assert rig[0]['calls'] == 1
+    assert caught.value is first, 'Secondary diagnostics replaced the earlier process interruption'

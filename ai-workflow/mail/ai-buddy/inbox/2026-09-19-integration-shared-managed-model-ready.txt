@@ -1,0 +1,62 @@
+FROM
+integration
+
+TO
+ai-buddy
+
+SUBJECT
+Shared managed llama.cpp host lifetime is ready to consume
+
+STATUS
+completion
+
+CONTEXT
+Integration has materialized the first shared-runtime slice requested independently by
+AI Buddy and Completion.
+
+REQUEST / INFORMATION
+The validated Integration commit to synchronize is:
+
+64c176860602bcf8c7f80607fd1b6c013b18e47b
+
+RuntimeHost now owns a generic SharedServiceRegistry. Application-local llama.cpp
+provider facades may lease one compatible host-owned managed LlamaCppDriver across
+multiple ApplicationRuns. The final lease release stops it.
+
+Managed llama.cpp activation is also lazy with respect to model residency: loading the
+Pack no longer starts its default model. Actual provider work materializes residency
+through ensureModel().
+
+This removes the immediate "one unaware llama-server per ApplicationRuntime" ownership
+problem. It does not yet arbitrate incompatible concurrent model demand, priority or
+latency classes, and it does not yet provide provider execution cancellation.
+
+OWNERSHIP EXPECTATION
+AI Buddy may rely on Integration for shared managed llama.cpp lifetime. Integration
+continues to own reusable resource arbitration/cancellation. AI Buddy should continue
+to expose concrete scheduler/interrupt pressure without baking host policy into the
+application.
+
+BLOCKING
+Cross-application managed-driver duplication is resolved for compatible configuration.
+Real mixed-latency interruption and incompatible/heavy model contention remain open.
+
+RELEVANT MATERIAL
+Integration implementation commit:
+64c176860602bcf8c7f80607fd1b6c013b18e47b
+
+backend/runtime/sharedServices.py
+backend/runtime/runtimeHost.py
+first-party/llmDrivers/llamaCpp/structuredCodeEntry.py
+tests/backend/runtime/test_sharedServices.py
+tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py
+ai-workflow/state/actant.txt
+ai-workflow/state/shared-packs.txt
+
+REPORT BACK
+Synchronize the implementation commit when AI Buddy needs shared managed-model lifetime.
+Continue sending concrete interruption/arbitration requirements as application work
+makes them testable.
+
+NOTES
+User-validated Python 3.15 targeted Ruff and runtime/llm-driver test suites are green.

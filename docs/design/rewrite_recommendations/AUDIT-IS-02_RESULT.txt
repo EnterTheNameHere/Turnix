@@ -1,0 +1,755 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-02 WEBSOCKET RPC FLOW
+==============================================================================
+
+Document title:
+    IS-02 - WebSocket RPC Flow
+
+Target IS path:
+    docs/design/IS-02_WEBSOCKET_RPC_FLOW.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-02
+    DOC_FILE: docs/design/IS-02_WEBSOCKET_RPC_FLOW.txt
+    DOC_REV: 21
+    DOC_GIT: 99b16c4
+    GitHub blob SHA seen by assistant:
+        f22958566f1289841ed87621945631c4c3b18063
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-02_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-02 file was
+    read or expected.
+
+    CMR-04 was read only as an index because the user initially supplied the
+    document identifier IS-02 without the exact IS path.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as an index to locate IS-02
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-02_WEBSOCKET_RPC_FLOW.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology and authority-boundary fixes.
+
+    IS-02 is a useful implementation specification for concrete WebSocket RPC
+    transport flow. It should not be rewritten from scratch. Its strongest parts
+    are the repeated separation between WebSocket transport, RPC envelope
+    validation, Job lifecycle, adapter lifecycle, permission checks, and trace
+    evidence.
+
+    The main required fixes are obsolete current-model terms and a few missing
+    guardrails around principal derivation, object-handler routing, and
+    idempotency.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-02 clearly states that it defines concrete bootstrap, handshake,
+    connection-lifecycle, and message-flow behavior for WebSocket RPC transport.
+
+    It also says that it does not introduce new runtime authority semantics,
+    permission rules, policy rules, abstract RPC semantics, execution adapter
+    boundary semantics, View semantics, Job lifecycle semantics, or higher-level
+    routing/capability semantics.
+
+2. Correct transport/RPC separation.
+
+    The document repeatedly says that WebSocket is one concrete transport, not
+    the RPC model itself and not Kernel authority.
+
+    This is the correct boundary for an implementation specification: WebSocket
+    can carry RPCMessage envelopes, but it does not own RPC semantics.
+
+3. Good separation between transport lifecycle and higher lifecycles.
+
+    IS-02 repeatedly distinguishes:
+
+        - transport flow from Job lifecycle
+        - transport timeout from Job timeout
+        - transport disconnect from Job cancellation
+        - transport disconnect from adapter failure
+        - request acceptance as Job-backed work from final Job success
+        - request acceptance as adapter-mediated work from adapter or work success
+
+    These are important and should be preserved.
+
+4. Good IS-01 dependency boundary.
+
+    IS-02 uses IS-01 for RPCMessage envelope schema and isComplete completion
+    marker behavior instead of redefining the envelope schema locally.
+
+    This is correct. IS-02 should remain a flow document, not become a duplicate
+    RPCMessage schema.
+
+5. Good cancel handling.
+
+    The dispatch section already treats cancel as routed/requested behavior that
+    affects transport-local waits, subscriptions, Job-backed work, or
+    adapter-mediated work only according to message type, route, operation
+    contract, and policy.
+
+    It correctly says cancel does not directly kill arbitrary underlying
+    execution.
+
+6. Good timeout handling.
+
+    The document clearly separates transport timeout, Job timeout, and adapter
+    timeout.
+
+    It correctly says transport timeout may affect frontend Promise handling or
+    emit a cancellation request when policy and operation contract allow it, but
+    does not automatically transition a Job, cancel a Job, stop execution, or
+    fail an execution adapter.
+
+7. Good observability ownership.
+
+    IS-02 owns RPC transport-domain trace reason identifiers while leaving trace
+    substrate semantics to DA-03, Job lifecycle trace obligations to DA-19, and
+    adapter lifecycle trace obligations to DA-23.
+
+8. Good intentional openness.
+
+    The OPEN questions section correctly avoids locking final Job-backed
+    response, progress, retained-result, and subscription-delivery patterns while
+    DA-19 Job envelope questions remain unresolved.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. Session terminology reintroduces a removed core architecture concept.
+
+    IS-02 uses Session language in multiple places:
+
+        - session and generation tracking
+        - Session manager
+        - transport/session context
+        - session state
+        - active session expectation
+        - transport/session continuity failure
+
+    Current source-stack correction:
+        Proposal P02 removes Session from the Turnix core architecture. It also
+        rejects Session-based RPC routing.
+
+    Required consequence for IS-02:
+        Replace Session wording with connection-generation, RPCConnection,
+        frontend client binding, View binding, or transport-continuity wording,
+        depending on the local meaning.
+
+        Safe direction:
+
+            Session manager
+                -> RPCConnection / connection-state manager / transport
+                   connection state
+
+            session and generation tracking
+                -> connection generation and continuity tracking
+
+            transport/session context
+                -> transport connection context
+
+            current view or session state
+                -> current View binding / connection state snapshot
+
+            active session expectation
+                -> active connection-generation expectation
+
+            transport/session continuity failure
+                -> connection-generation or transport-continuity failure
+
+        Do not preserve Session wording as harmless colloquial text.
+
+2. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-02 still uses AppInstance in several places:
+
+        - frozen bootstrap object does not become authoritative AppInstance state
+        - View bootstrap does not define AppInstance lifecycle
+        - transport lifecycle is not AppInstance lifecycle
+        - welcome does not imply AppInstance readiness
+        - generation mismatch does not define AppInstance failure
+        - trace context includes appInstanceId
+        - transport observability does not define AppInstance semantics
+        - higher documents own AppInstance lifecycle
+
+    Current source-stack correction:
+        Proposal P02 replaces the older combined AppInstance layer with:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of that Application
+
+            SaveBundle
+                durable persistence closure of the Application
+
+    Required consequence for IS-02:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        meaning.
+
+        Safe direction:
+
+            authoritative AppInstance state
+                -> authoritative Application state / committed Application state
+
+            AppInstance lifecycle
+                -> Application and ApplicationRun lifecycle, or ApplicationRun
+                   lifecycle if the local subject is live runtime connection
+
+            AppInstance readiness
+                -> ApplicationRun readiness, unless durable Application identity
+                   readiness is specifically meant
+
+            AppInstance failure
+                -> ApplicationRun failure or Application lifecycle effect, only
+                   when a higher owner defines such an outcome
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+3. Principal derivation wording risks trusting message-carried authority.
+
+    Section 11 says backend behavior derives the principal from the message and
+    verifies required capability permissions.
+
+    Risk:
+        This can be read as allowing an incoming RPC payload to declare its own
+        authority principal.
+
+    Required correction:
+        The final IS should say the backend derives the effective principal from
+        authenticated connection context, View/client binding, runtime-owned
+        correlation, and allowed message metadata. It must not trust arbitrary
+        client-supplied payload fields as authority.
+
+        Add a stop-line:
+
+            Message fields may carry correlation metadata, but they do not let a
+            caller forge a principal, permission identity, acting Pack, Kernel
+            authority, Application identity, or ApplicationRun authority.
+
+4. Object handler routing needs a raw-object access stop-line.
+
+    IS-02 routes requests to object handlers and capability-based request
+    handlers.
+
+    This may be valid, but it must not imply direct access to raw backend objects
+    or internal service objects.
+
+    Required correction:
+        Add or preserve wording that object handlers are explicit RPC routing
+        targets known to the routing layer. Object routing does not grant raw
+        backend-object access, service-object access, filesystem access,
+        committed-state authority, capability permission, or Kernel authority.
+
+5. ViewRegistry wording should remain subordinate to View semantics.
+
+    The document says ViewRegistry stores server-side viewToken, ensures only the
+    authenticated client can bind to a view, and may allow multiple tabs or
+    distinct viewTokens.
+
+    This is acceptable because it is already subordinate to DA-22. The rewrite
+    should preserve the stop-line that ViewRegistry behavior does not define
+    View authority, Application identity, ApplicationRun lifecycle, Job outcome,
+    adapter lifecycle, committed state, or persistence root.
+
+6. clientReady module-load wording could be overread as pack activation.
+
+    clientReady reports module-load status and the backend processes
+    frontend-reported module metadata for loading. The document already says
+    clientReady does not by itself mean AppInstance readiness, pack activation
+    success, or adapter execution success.
+
+    Required correction:
+        Translate AppInstance readiness to ApplicationRun readiness, and make
+        the frontend-module status boundary explicit:
+
+            clientReady is frontend transport/readiness evidence. It is not Pack
+            activation success, ExecutionAdapter lifecycle success, Application
+            readiness, ApplicationRun readiness, or capability availability.
+
+7. Idempotency wording needs to stay below Replay/Retry/retained-result doctrine.
+
+    IS-02 allows idempotency to return cached replies, avoid re-running handlers,
+    or return existing accepted Job/adapter-work metadata when supported by the
+    operation contract.
+
+    This is useful, but it must remain request/message deduplication and must not
+    become architectural Replay, Resume, Retry, retained Job result doctrine,
+    Job identity reuse doctrine, OrchestrationUnit identity reuse, or
+    ProcessingRun identity reuse.
+
+    Required correction:
+        Add a compact stop-line:
+
+            Idempotency is RPC request/message deduplication. It does not define
+            Replay, Resume, Retry, retained Job result behavior, Job identity
+            reuse, OrchestrationUnit identity reuse, ProcessingRun identity reuse,
+            or adapter-work identity reuse except where a higher owner and the
+            operation contract explicitly define the relationship.
+
+8. Trace-context appInstanceId must become current runtime identity.
+
+    IS-02 trace context lists appInstanceId.
+
+    Required correction:
+        Replace with applicationId and/or applicationRunId. For transport
+        correlation, both may be useful:
+
+            applicationId
+                durable Application identity when known
+
+            applicationRunId
+                live run identity when known
+
+9. RPCRequestDispatched to object handler needs same object-route guardrail.
+
+    The trace reason definition says RPCRequestDispatched is emitted when a
+    request is routed to an object handler or capability-based request handler.
+
+    This is acceptable if object handler means an explicit RPC routing target.
+    It must not imply backend object exposure or service-object invocation.
+
+10. OPEN questions should remain, but not as outdated DA-19 uncertainty if later
+    source files resolve them.
+
+    At this audit point, IS-02 intentionally leaves Job envelope and retained
+    result patterns open under DA-19.
+
+    Required correction:
+        Keep those open questions only if the current source stack has not
+        resolved them. If a later Job/transport source resolves them before final
+        rewrite, update IS-02 accordingly instead of preserving stale OPEN text.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve Session terminology.
+
+    The current architecture removed Session from core. Replace all IS-02
+    Session-language with connection-generation, RPCConnection, View/client
+    binding, or transport-continuity wording.
+
+2. Do not preserve AppInstance terminology.
+
+    Translate AppInstance to Application and/or ApplicationRun according to the
+    local meaning. Use ApplicationRun for live runtime connection/readiness/failure
+    contexts, and Application for durable committed application state.
+
+3. Do not preserve appInstanceId as the only runtime correlation identity.
+
+    Replace with applicationId and applicationRunId where useful.
+
+4. Do not preserve old retry/result uncertainty if later source-stack material
+   resolves it.
+
+    IS-02 may keep explicit OPEN questions only while those questions remain open
+    in the current source stack.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-02.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Rename Section 05.
+
+    Current:
+        SESSION AND GENERATION TRACKING
+
+    Safer:
+        CONNECTION GENERATION AND CONTINUITY TRACKING
+
+2. Remove Session manager from overview.
+
+    Current:
+        the Session manager
+
+    Safer:
+        RPCConnection state
+        transport connection state manager
+        connection-generation manager
+
+3. Replace transport/session context.
+
+    Current:
+        A valid hello frame establishes transport/session context only.
+
+    Safer:
+        A valid hello frame establishes transport connection context and
+        connection-generation continuity only.
+
+4. Replace session state in welcome.
+
+    Current:
+        a snapshot of current view or session state
+
+    Safer:
+        a snapshot of current View binding and connection state
+
+5. Replace active session expectation.
+
+    Current:
+        active session expectation
+
+    Safer:
+        active connection-generation expectation
+
+6. Replace transport/session continuity failure.
+
+    Current:
+        Generation mismatch is a transport/session continuity failure.
+
+    Safer:
+        Generation mismatch is a connection-generation or transport-continuity
+        failure.
+
+7. Replace AppInstance in bootstrap and lifecycle text.
+
+    Current:
+        authoritative AppInstance state
+        AppInstance lifecycle
+        AppInstance readiness
+        AppInstance failure
+        AppInstance semantics
+
+    Safer:
+        authoritative Application state
+        Application and ApplicationRun lifecycle
+        ApplicationRun readiness
+        ApplicationRun failure, only when higher lifecycle owners define it
+        Application/ApplicationRun semantics
+
+8. Replace appInstanceId.
+
+    Current:
+        appInstanceId
+
+    Safer:
+        applicationId
+        applicationRunId
+
+9. Clarify principal derivation.
+
+    Replace:
+        derives the principal from the message
+
+    with:
+        derives the effective principal from authenticated connection context,
+        View/client binding, runtime-owned correlation, and allowed message
+        metadata.
+
+    Add the anti-forgery stop-line described above.
+
+10. Clarify object handlers.
+
+    Add a stop-line saying object handlers are explicit RPC routing targets and
+    do not expose raw backend objects, service objects, filesystem authority,
+    Kernel authority, capability permission, or committed-state authority.
+
+11. Clarify clientReady.
+
+    Preserve the existing clientReady guardrail, but translate to current terms:
+
+        clientReady is frontend transport/readiness evidence. It is not Pack
+        activation success, ExecutionAdapter lifecycle success, Application
+        readiness, ApplicationRun readiness, capability availability, or
+        committed-state evidence.
+
+12. Clarify idempotency.
+
+    Preserve the useful deduplication behavior, but add the stop-line that
+    idempotency does not define Replay, Resume, Retry, retained Job result
+    behavior, Job identity reuse, OrchestrationUnit identity reuse,
+    ProcessingRun identity reuse, or adapter-work identity reuse except under a
+    higher owner and operation contract.
+
+13. Preserve open Job-delivery questions.
+
+    Keep Section 15's open questions if the current source stack still leaves
+    them open. Do not falsely finalize Job-backed response, progress,
+    retained-result, or subscription-delivery shape from this IS alone.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing document structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It defines / It does NOT define sections to
+       remove Session and AppInstance wording.
+
+    2. Keep HTTP bootstrap before socket open, but replace AppInstance state with
+       Application state.
+
+    3. Keep connection lifecycle, but make it connection-generation and transport
+       lifecycle only.
+
+    4. Rename Section 05 away from Session.
+
+    5. Keep message dispatch, Job-backed request flow, adapter-mediated request
+       flow, acknowledgements, timeout separation, and observability sections.
+
+    6. Add principal anti-forgery and object-handler stop-lines in the
+       permissions/routing areas.
+
+    7. Update trace correlation fields from appInstanceId to applicationId and
+       applicationRunId.
+
+    8. Keep Section 15 as explicitly open if those questions remain unresolved.
+
+Do not turn IS-02 into DA-21, DA-19, DA-22, DA-23, or IS-01.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Purpose list
+
+    Current risk:
+        session and generation tracking
+
+    Safer wording:
+        connection-generation and continuity tracking
+
+2. Overview list
+
+    Current risk:
+        the Session manager
+
+    Safer wording:
+        RPCConnection state
+        transport connection state
+
+3. HTTP bootstrap
+
+    Current risk:
+        The frozen bootstrap object does not become authoritative AppInstance
+        state.
+
+    Safer wording:
+        The frozen bootstrap object does not become authoritative Application
+        state, committed state, or configuration authority.
+
+4. View bootstrap
+
+    Current risk:
+        View bootstrap establishes View binding context. It does not define
+        AppInstance lifecycle or adapter authority.
+
+    Safer wording:
+        View bootstrap establishes View binding context. It does not define
+        Application lifecycle, ApplicationRun lifecycle, or adapter authority.
+
+5. Connection lifecycle
+
+    Current risk:
+        This lifecycle is not AppInstance lifecycle.
+
+    Safer wording:
+        This lifecycle is not Application or ApplicationRun lifecycle.
+
+6. Client hello
+
+    Current risk:
+        A valid hello frame establishes transport/session context only.
+
+    Safer wording:
+        A valid hello frame establishes transport connection context and
+        connection-generation continuity only.
+
+7. Welcome
+
+    Current risk:
+        a snapshot of current view or session state
+
+    Safer wording:
+        a snapshot of current View binding and connection state
+
+8. clientReady
+
+    Current risk:
+        clientReady does not by itself mean AppInstance readiness...
+
+    Safer wording:
+        clientReady does not by itself mean Application readiness,
+        ApplicationRun readiness, Pack activation success, capability
+        availability, or ExecutionAdapter lifecycle success.
+
+9. Section 05 title
+
+    Current risk:
+        SESSION AND GENERATION TRACKING
+
+    Safer wording:
+        CONNECTION GENERATION AND CONTINUITY TRACKING
+
+10. Frontend generation responsibility
+
+    Current risk:
+        active session expectation
+
+    Safer wording:
+        active connection-generation expectation
+
+11. Generation mismatch
+
+    Current risk:
+        transport/session continuity failure
+
+    Safer wording:
+        connection-generation or transport-continuity failure
+
+12. Generation mismatch failure stop-line
+
+    Current risk:
+        AppInstance failure
+
+    Safer wording:
+        ApplicationRun failure or Application lifecycle outcome
+
+13. Permissions
+
+    Current risk:
+        derives the principal from the message
+
+    Safer wording:
+        derives the effective principal from authenticated connection context,
+        View/client binding, runtime-owned correlation, and allowed message
+        metadata.
+
+14. Trace context
+
+    Current risk:
+        appInstanceId
+
+    Safer wording:
+        applicationId
+        applicationRunId
+
+15. Relation to higher documents
+
+    Current risk:
+        AppInstance lifecycle
+
+    Safer wording:
+        Application and ApplicationRun lifecycle
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-02
+==============================================================================
+
+Accept the rewritten IS-02 only if all of the following are true:
+
+1. It remains an implementation specification for concrete WebSocket RPC flow.
+
+2. It does not redefine RPCMessage envelope schema beyond using IS-01.
+
+3. It does not introduce new runtime authority, permission, policy, lifecycle,
+   Job, adapter, View, Application, ApplicationRun, SaveBundle, trace-retention,
+   or committed-state semantics.
+
+4. WebSocket remains one concrete transport, not the RPC model and not Kernel
+   authority.
+
+5. All Session wording has been removed or translated into connection-generation,
+   RPCConnection, View/client binding, or transport-continuity wording.
+
+6. All AppInstance/appInstanceId wording has been translated into Application,
+   ApplicationRun, applicationId, and/or applicationRunId according to meaning.
+
+7. Principal derivation cannot be read as trusting arbitrary message payload
+   fields for authority.
+
+8. Object handler routing cannot be read as raw backend object access, service
+   object access, filesystem authority, Kernel authority, committed-state
+   authority, or capability permission.
+
+9. clientReady remains frontend transport/readiness evidence only and does not
+   imply Pack activation success, ExecutionAdapter lifecycle success,
+   ApplicationRun readiness, capability availability, or committed-state truth.
+
+10. Transport disconnect and transport timeout remain distinct from Job
+    cancellation, Job timeout, adapter failure, adapter timeout, ApplicationRun
+    failure, and committed-state mutation.
+
+11. Idempotency remains RPC request/message deduplication and does not define
+    Replay, Resume, Retry, retained Job result behavior, Job identity reuse,
+    OrchestrationUnit identity reuse, ProcessingRun identity reuse, or
+    adapter-work identity reuse except under a higher owner and operation
+    contract.
+
+12. RPC transport trace reasons remain transport-domain evidence and do not
+    define Job terminal outcomes, adapter terminal outcomes, capability
+    permission, policy, ApplicationRun lifecycle, or committed-state mutation.
+
+13. The explicit OPEN questions remain open only if still unresolved by the
+    current source stack.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-02 with targeted terminology and authority-boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into DA-21 abstract RPC doctrine,
+DA-19 Job lifecycle doctrine, DA-22 View doctrine, DA-23 adapter doctrine, IS-01
+message schema, or general Application/ApplicationRun lifecycle doctrine.
+
+Translate obsolete Session and AppInstance wording into current
+connection-generation / Application / ApplicationRun terminology. Strengthen the
+principal-derivation, object-handler, clientReady, idempotency, and trace-context
+stop-lines so the WebSocket flow remains a concrete transport flow and never
+becomes a source of authority.
+
+==============================================================================
+END OF AUDIT-IS-02 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-02-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-02_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------

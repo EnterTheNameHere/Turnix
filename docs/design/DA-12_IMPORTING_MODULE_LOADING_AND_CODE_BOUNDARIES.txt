@@ -10,40 +10,57 @@ Description:
 ------------
 Defines how code is referenced, loaded, and made available across supported
 languages, and where strict boundaries exist between resolution, importing,
-adapter selection, execution authorization, activation, and execution.
+module loading, adapter selection, execution authorization, activation-plan
+preparation, activation, and execution.
 
 This area is intentionally strict.
 
 Importing is not resolution.
 Importing is not activation.
 Importing is not dependency declaration.
+Importing is not activation-plan preparation.
 Importing is not adapter execution authority.
 Importing does not imply permission to execute.
 
 Purpose:
 --------
-This document defines how Turnix prevents native language import systems from
-bypassing Turnix semantics such as resolution, visibility, source selection,
-adapter selection, execution authorization, activation order, and execution
-authority.
+This document defines how Tertalis prevents native language import systems and
+module-loading mechanisms from bypassing Tertalis semantics such as Pack
+resolution, visibility, SaveBundle/Application scoping, adapter selection,
+execution authorization, activation-plan preparation, activation order, and
+execution authority.
 
 It defines:
 - language-level import boundaries
-- Turnix-mediated cross-pack access mechanisms
-- turnixImport selector rules and loading behavior
-- dependency consistency requirements for imports
-- the separation between module evaluation and Turnix-recognized execution
-- relationship between importing and execution adapter boundaries
-- Python pack-code import limits under the adapter model
-- canonical activation entrypoint constraints relevant to code boundaries
+- Pack-local private module boundaries
+- Tertalis-mediated cross-Pack code access mechanisms
+- JavaScript tertalisImport selector rules and loading behavior
+- dependency consistency requirements during imports
+- the distinction between module loading and activation participation
+- the distinction between activation entries, private implementation modules,
+  and exported module surfaces
+- the separation between module evaluation and Tertalis-recognized execution
+- relationship between importing and ExecutionAdapter boundaries
+- relationship between importing and activation-plan boundaries
+- Python Pack-code import limits under the adapter model
 
 It does NOT define:
 - generic resolution semantics (see DA-11)
 - dependency semantics and solver behavior (see DA-13)
-- execution adapter semantics (see DA-23)
-- activation lifecycle beyond the boundary rules stated here (see DA-14)
-- capability schemas and permission prompting details (see DA-16)
+- complete activation lifecycle, phase barriers, cyclic activation,
+  registration publication, final Activated state, or activation failure
+  semantics (see DA-14)
+- capability schemas, capability permission, Service internals, or permission
+  prompting details (see DA-16)
 - user decision and remembered policy handling (see DA-17)
+- ExecutionAdapter runtime semantics (see DA-23)
+- adapter lifecycle, trust, or traceability semantics (see DA-27)
+- PackManager graph-preparation or activation-plan preparation semantics
+  (see DA-29)
+- ModCallContext facade shape, absent surfaces, or invocation lifetime
+  semantics (see DA-30)
+- concrete served artifact URLs, cache strategy, bundling strategy,
+  TypeScript artifact naming, or RPC field layout
 
 Upstream Documents:
 ------------------
@@ -57,7 +74,12 @@ Upstream Documents:
 - DA-10
 - DA-11
 - DA-13
+- DA-14
+- DA-16
 - DA-23
+- DA-27
+- DA-29
+- DA-30
 
 Downstream Documents:
 --------------------
@@ -70,274 +92,562 @@ Downstream Documents:
 01. INTERPRETATION BASIS
 ===============================================================================
 
-01.1. This document expresses normative meaning through explicit,
+01.01. This document expresses normative meaning through explicit,
       deterministic prose.
 
-01.2. Normative meaning in Turnix derives from sentence structure and
+01.02. Normative meaning in Tertalis derives from sentence structure and
       document context rather than from RFC-style keywords.
 
-01.3. The CORE META-RULES documents define the general rule language and
+01.03. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines importing, module-loading, and code-boundary
-      rules within that shared interpretation model.
+01.04. This document defines importing, module-loading, and code-boundary rules
+      within that shared interpretation model.
+
+01.05. "Activation entry" is the canonical lifecycle-participation term used by
+      this document.
+
+01.06. "Adapter entry" is not a separate platform concept in this document.
+
+01.07. When "adapter entry" appears informally, it means the activation entry
+      for one declared adapter/runtime participation.
+
+01.08. "Pack entry" is not a canonical lifecycle term in this document.
+
+01.09. "Mechanical loading" means loading or evaluating a requested artifact,
+      module, or activation entry through an applicable adapter or loader
+      path.
+
+01.10. Mechanical loading does not imply graph preparation, activation-plan
+       preparation, dependency readiness, cyclic activation admission, or final
+       Activated state.
 
 
 ===============================================================================
-02. CORE PROBLEM STATEMENT
+02. CANONICAL TERMS AND OWNERSHIP BOUNDARIES
 ===============================================================================
 
-02.1. Native language import systems do not understand Turnix pack
-      resolution, visibility, save scoping, adapter selection, execution
-      authorization, activation boundaries, or execution authority.
+02.01. This document uses canonical architecture type names when those names
+      are needed to state import and module-loading boundaries.
 
-02.2. Turnix therefore does not allow arbitrary language-native importing
-      across packs.
+02.02. ModCallContext is the invocation-scoped, Pack-facing gateway through
+      which adapter-executed Pack code interacts with Tertalis.
 
-02.3. Cross-pack code access routes only through Turnix-defined mechanisms.
+02.03. DA-30 owns ModCallContext facade shape, absent surfaces, and
+      invocation-scoped lifetime semantics.
 
-02.4. Native imports remain allowed only for:
+02.04. DA-12 names ModCallContext only to prevent native imports or module
+      loading from becoming a gateway bypass.
+
+02.05. ApplicationRun is one live execution period of an Application.
+
+02.06. Application is the durable application identity.
+
+02.07. SaveBundle is the durable persistence closure of an Application.
+
+02.08. ExecutionAdapter is the adapter boundary that loads or runs external or
+      adapter-mediated Pack code.
+
+02.09. DA-23 and DA-27 own concrete ExecutionAdapter semantics and adapter
+      lifecycle boundaries.
+
+02.10. DA-14 owns activation lifecycle semantics.
+
+02.11. DA-16 owns capability and Service semantics.
+
+02.12. DA-29 owns PackManager graph-preparation and activation-plan
+       preparation semantics.
+
+02.13. Importing and module loading do not grant Kernel authority.
+
+02.14. Importing and module loading do not grant ModCallContext gateway
+       authority.
+
+02.15. Importing and module loading do not grant PackManager authority.
+
+02.16. Importing and module loading do not grant activation authority.
+
+02.17. Importing and module loading do not grant capability permission.
+
+
+===============================================================================
+03. CORE PROBLEM STATEMENT
+===============================================================================
+
+03.01. Native language import systems do not understand Tertalis Pack resolution,
+      visibility, SaveBundle/Application scoping, adapter selection, execution
+      authorization, activation-plan boundaries, activation boundaries, or
+      execution authority.
+
+03.02. Tertalis therefore does not allow arbitrary language-native importing
+      across Packs.
+
+03.03. Cross-Pack code access routes only through Tertalis-defined mechanisms.
+
+03.04. Native imports remain allowed only for:
       - language internals
-      - same-file or same-directory code under normal local language rules
-      - explicitly allowed Turnix platform surfaces where such access is
-        part of the supported execution model
+      - Pack-local private implementation modules under adapter-supported
+        local language rules
+      - explicitly allowed Tertalis platform surfaces where such access is part
+        of the supported execution model
 
-02.5. Any mechanism that bypasses Turnix resolution, visibility, adapter
-      selection, execution authorization, activation, or execution boundaries
-      is forbidden.
+03.05. A Pack-local native import remains inside the importing Pack's local
+      module boundary.
 
-02.6. Same host language does not imply same authority.
+03.06. A child directory containing another Pack manifest starts another Pack
+      boundary.
 
-02.7. Python pack code remains adapter-executed pack code and does not
-      become backend implementation code through Python import behavior.
+03.07. The parent Pack's private module space stops at the child Pack boundary.
+
+03.08. Native language behavior does not override Pack visibility, dependency,
+      activation-plan, activation, adapter, permission, or policy boundaries.
+
+03.09. Same host language does not imply same authority.
+
+03.10. Python Pack code remains adapter-executed Pack code.
+
+03.11. Python Pack code does not become backend implementation code through
+       Python import behavior.
+
+03.12. A native import succeeding does not prove Tertalis graph readiness.
+
+03.13. A native import succeeding does not prove activation readiness.
 
 
 ===============================================================================
-03. SEPARATION OF CONCERNS
+04. SEPARATION OF CONCERNS
 ===============================================================================
 
-03.1. Importing is not dependency declaration.
+04.01. Importing is not dependency declaration.
 
-03.2. Importing is not resolution.
+04.02. Importing is not discovery.
 
-03.3. Importing is not adapter selection.
+04.03. Importing is not generic resolution.
 
-03.4. Importing is not execution authorization.
+04.04. Importing is not visibility override.
 
-03.5. Importing is not activation.
+04.05. Importing is not adapter selection.
 
-03.6. Importing is not execution authority.
+04.06. Importing is not execution authorization.
 
-03.7. Importing is not capability permission.
+04.07. Importing is not activation-plan preparation.
 
-03.8. Resolution answers which pack identity satisfies a request.
+04.08. Importing is not activation.
 
-03.9. Adapter selection answers which adapter kind or concrete adapter
-      provider is eligible for a declared executable artifact.
+04.09. Importing is not execution authority.
 
-03.10. Execution authorization answers whether a declared executable
-       artifact may be loaded and executed in the current pack,
-       AppInstance, SavePack, adapter, policy, and trust context.
+04.10. Importing is not capability permission.
 
-03.11. Importing answers how a code artifact is obtained once Turnix rules
-       permit that step.
+04.11. Importing is not Kernel authority.
 
-03.12. Activation answers when Turnix intentionally starts recognized pack
-       behavior.
+04.12. Importing is not ModCallContext gateway authority.
 
-03.13. Execution authority answers whether code may perform meaningful
-       Turnix-recognized work.
+04.13. Importing is not PackManager graph preparation.
 
-03.14. Capability permission answers whether a capability invocation is
+04.14. Importing is not Job lifecycle.
+
+04.15. Importing is not OrchestrationUnit lifecycle.
+
+04.16. Importing is not a background work guarantee.
+
+04.17. Importing is not native backend import authority.
+
+04.18. Importing is not filesystem path lookup.
+
+04.19. Importing is not committed-state mutation.
+
+04.20. Importing is not persistent I/O outcome.
+
+04.21. Importing is not artifact/export outcome.
+
+04.22. Importing is not ComparisonResult, Replay outcome, Resume outcome,
+       Retry outcome, or offline verification workflow outcome.
+
+04.23. Module loading is not activation-plan preparation.
+
+04.24. Module loading is not dependency ordering.
+
+04.25. Module loading is not activation ordering.
+
+04.26. Module loading is not cyclic activation group admission.
+
+04.27. Resolution answers which Pack identity satisfies a request.
+
+04.28. PackManager graph preparation answers which selected graph and
+       activation plan Tertalis will attempt to use.
+
+04.29. Adapter selection answers which adapter kind or concrete adapter
+       provider is eligible for a declared executable artifact.
+
+04.30. Execution authorization answers whether a declared executable artifact
+       may be loaded or executed in the current Pack, ApplicationRun,
+       SaveBundle/Application context, adapter, policy, and trust context.
+
+04.31. Importing answers how a permitted code artifact is obtained and made
+       available.
+
+04.32. Activation answers when Tertalis intentionally brings a Pack into
+       recognized executable participation.
+
+04.33. Execution authority answers whether code may perform meaningful
+       Tertalis-recognized work.
+
+04.34. Capability permission answers whether a capability invocation is
        allowed under the capability, policy, and decision model.
 
-03.15. This document keeps these boundaries explicit because native language
+04.35. If imported code later participates in another domain, that domain
+       defines the resulting domain outcome.
+
+04.36. This document keeps these boundaries explicit because native language
        import systems would otherwise collapse them into one accidental path.
 
-03.16. DA-23 owns the execution adapter boundary in which importing and
-       module loading operate.
+
+===============================================================================
+05. EXECUTABLE PACK MATERIAL ROLES
+===============================================================================
+
+05.01. Executable Pack material has three distinct module-loading roles.
+
+05.02. An activation entry is declared executable Pack material loaded by
+      Tertalis through one ExecutionAdapter for lifecycle participation defined
+      by DA-14.
+
+05.03. A private implementation module is loaded by Pack code as ordinary
+      implementation material owned by the same Pack.
+
+05.04. A private implementation module is not externally addressable through
+      Tertalis by default.
+
+05.05. A private implementation module does not participate in Pack lifecycle
+      merely because it exists.
+
+05.06. A private implementation module does not participate in Pack lifecycle
+      merely because Pack code imports it.
+
+05.07. An exported module surface is publicly addressable only through an
+      explicitly supported mediated module-loading mechanism.
+
+05.08. An exported module surface is loaded on demand.
+
+05.09. An exported module surface does not receive lifecycle callbacks merely
+      because it is exported.
+
+05.10. Tertalis does not automatically treat every code file as an activation
+       entry.
+
+05.11. Tertalis does not automatically call lifecycle hooks on every code file
+       found in a directory.
+
+05.12. A plural module mapping used for mediated imports is not an automatic
+       preload list.
+
+05.13. Loading a module may execute host-runtime top-level code.
+
+05.14. Preloading executable files is therefore behavior, not metadata.
+
+05.15. Importing a private implementation module does not make that module an
+       activation entry.
+
+05.16. Importing an exported module surface does not make that surface an
+       activation entry.
+
+05.17. Loading an activation entry and loading a private implementation module
+       are distinct acts even when the same adapter can load both.
+
+05.18. Module role is not inferred from filename alone.
 
 
 ===============================================================================
-04. PYTHON IMPORT RULES (LOCKED)
+06. NATIVE LANGUAGE IMPORT BOUNDARY
 ===============================================================================
 
-04.1. Python pack code may use native Python imports only for local code
-      under the same-file or same-directory rule and for explicitly allowed
-      Turnix platform surfaces.
+06.01. Native language imports remain local mechanisms.
 
-04.2. Local Python imports include examples such as:
+06.02. Native language imports do not resolve Pack selectors.
+
+06.03. Native language imports do not inspect Tertalis visibility.
+
+06.04. Native language imports do not choose resolved dependency identity.
+
+06.05. Native language imports do not choose ExecutionAdapters.
+
+06.06. Native language imports do not authorize execution.
+
+06.07. Native language imports do not prepare activation plans.
+
+06.08. Native language imports do not activate Packs.
+
+06.09. Native language imports do not grant capability permission.
+
+06.10. Native language imports do not grant access to trusted backend
+       internals.
+
+06.11. Native language imports do not establish dependency readiness.
+
+06.12. Native language imports do not establish activation readiness.
+
+06.13. Native language imports do not admit cyclic activation groups.
+
+06.14. Native language imports do not prove activation-plan correctness.
+
+06.15. Cross-Pack native imports are unsupported unless a later document
+       explicitly defines a mediated cross-Pack native import mechanism.
+
+06.16. Physical possibility in a host language does not create a Tertalis
+       guarantee.
+
+06.17. Physical possibility in a host language does not grant Kernel
+       authority.
+
+06.18. Physical possibility in a host language does not make direct backend
+       access a supported contract.
+
+
+===============================================================================
+07. PYTHON IMPORT RULES
+===============================================================================
+
+07.01. Python Pack code may use native Python imports for language internals.
+
+07.02. Python Pack code may use native Python imports for Pack-local private
+      implementation modules under the supported local module rules of the
+      Python ExecutionAdapter.
+
+07.03. Python Pack code may use explicitly allowed Tertalis platform-surface
+      imports when such imports are part of a supported adapter-facing
+      execution model.
+
+07.04. Local Python imports include examples such as:
       - from .llamacpp_client import LlamaCppClient
       - from .config import loadConfig
 
-04.3. Explicitly allowed Turnix platform-surface imports include only the
+07.05. Explicitly allowed Tertalis platform-surface imports include only the
       whitelisted supported surface.
 
-04.4. Explicitly allowed Turnix platform-surface imports do not include raw
-      backend internals merely because the pack code is Python.
+07.06. Explicitly allowed Tertalis platform-surface imports do not include raw
+      backend internals merely because the Pack code is Python.
 
-04.5. Cross-pack native Python imports are not allowed.
+07.07. Cross-Pack native Python imports are not allowed.
 
-04.6. Disallowed examples include:
+07.08. Disallowed examples include:
       - from ui.controls import Button
-      - from Turnix.ui.controls import Button
+      - from Tertalis.ui.controls import Button
       - from first_party.mods.foo import bar
       - from backend.core.kernel import Kernel
       - from backend.persistence.io import IoManager
 
-04.7. The rationale is:
-      - Python import machinery has no awareness of pack resolution
-      - Python import machinery has no awareness of visibility
-      - Python import machinery has no awareness of save scoping
-      - Python import machinery has no awareness of adapter selection
-      - Python import machinery has no awareness of execution authorization
-      - Python import machinery has no awareness of activation boundaries
-      - Python import machinery has no awareness of capability permission
+07.09. Python import machinery has no awareness of Pack resolution.
 
-04.8. Allowing native cross-pack Python imports would bypass Turnix
-      guarantees.
+07.10. Python import machinery has no awareness of visibility.
 
-04.9. Allowing Python pack code to import backend internals as authority
-      would bypass the execution boundary defined by DA-23.
+07.11. Python import machinery has no awareness of SaveBundle/Application
+       scoping.
+
+07.12. Python import machinery has no awareness of adapter selection.
+
+07.13. Python import machinery has no awareness of execution authorization.
+
+07.14. Python import machinery has no awareness of activation-plan boundaries.
+
+07.15. Python import machinery has no awareness of activation boundaries.
+
+07.16. Python import machinery has no awareness of capability permission.
+
+07.17. Allowing native cross-Pack Python imports would bypass Tertalis
+       guarantees.
+
+07.18. Allowing Python Pack code to import backend internals as authority would
+       bypass the ExecutionAdapter boundary.
+
+07.19. Python import success does not establish dependency readiness.
+
+07.20. Python import success does not establish activation readiness.
+
+07.21. Python import success does not establish activation-plan correctness.
 
 
 ===============================================================================
-05. PYTHON CROSS-PACK ACCESS (LOCKED MECHANISMS)
+08. PYTHON CROSS-PACK ACCESS
 ===============================================================================
 
-05.1. Python pack code interacts with other packs only through Turnix-
-      mediated APIs.
+08.01. Python Pack code interacts with other Packs only through
+      Tertalis-mediated surfaces.
 
-05.2. Supported mediated categories include:
-      - services where allowed by DA-16
-      - capabilities
-      - pack metadata and activation control
+08.02. Cross-Pack execution goes through Capabilities where the owning
+      documents expose capability invocation.
 
-05.3. Example mediated patterns include:
-      - ctx.registerService(name, instance)
-      - ctx.services.get(name)
-      - ctx.callCapability("llm.pipeline@1", args)
-      - ctx.resolvePack(selector)
-      - ctx.ensureActivated(selector)
+08.03. Python Pack code may use metadata or identity queries where the owning
+      documents expose those queries.
 
-05.4. There is no Python equivalent of turnixImport as a cross-pack native
+08.04. Python Pack code may use activation-control requests where the owning
+      documents expose those requests.
+
+08.05. Python Pack code may use ModCallContext-mediated surfaces explicitly
+      exposed by DA-30 and the owning domain documents.
+
+08.06. Internal runtime Services may back capability implementations or other
+      runtime wiring.
+
+08.07. Ordinary Pack code does not receive raw Service objects as a cross-Pack
+      interaction shortcut.
+
+08.08. There is no Python equivalent of tertalisImport as a cross-Pack native
       symbol or executable-code import mechanism.
 
-05.5. Python code does not receive executable code objects or symbols from
-      other packs through native import bypass.
+08.09. Python code does not receive executable code objects or symbols from
+      other Packs through native import bypass.
 
-05.6. Python pack code may still receive Turnix-created context,
-      capability, service, metadata, and activation-control surfaces when
-      those surfaces are granted by the owning documents.
+08.10. Python Pack code may still receive Tertalis-created context, capability,
+       metadata, and activation-control surfaces when those surfaces are
+       granted by the owning documents.
 
-05.7. In-process Python access remains mediated by DA-23, DA-14, and DA-16.
+08.11. In-process Python access remains mediated by DA-23, DA-14, DA-16, and
+       DA-30.
 
-05.8. In-process Python access does not become backend authority merely
-      because it uses function calls instead of network transport.
+08.12. In-process Python access does not become backend authority merely
+       because it uses function calls instead of network transport.
+
+08.13. In-process Python access does not become PackManager graph-preparation
+       authority.
+
+08.14. In-process Python access does not become activation-plan preparation.
 
 
 ===============================================================================
-06. JAVASCRIPT IMPORT MODEL (LOCKED)
+09. JAVASCRIPT IMPORT MODEL
 ===============================================================================
 
-06.1. JavaScript pack code runs in a browser environment.
+09.01. Browser-side JavaScript Pack code does not assume Node.js runtime
+      behavior.
 
-06.2. Current constraints include:
-      - no Node.js runtime assumptions
-      - no filesystem access
-      - no per-pack import maps
-      - no native cross-pack imports
+09.02. Browser-side JavaScript Pack code does not receive filesystem access.
 
-06.3. Dynamic cross-pack JavaScript loading routes through:
-      turnixImport(selector)
+09.03. Browser-side JavaScript Pack code does not receive per-Pack native
+      import maps as a cross-Pack loading path.
 
-06.4. turnixImport is a Turnix-defined mediated loader.
-      It is not equivalent to native import().
+09.04. Browser-side JavaScript Pack code does not use native cross-Pack imports.
 
-06.5. Reserved names for future refinement do not change current semantics.
+09.05. Dynamic cross-Pack JavaScript loading routes through:
+      tertalisImport(selector)
 
-06.6. Browser JavaScript code remains adapter-executed frontend code under
+09.06. tertalisImport is a Tertalis-defined mediated loader.
+
+09.07. tertalisImport is not equivalent to native import().
+
+09.08. Browser-side JavaScript code remains adapter-executed frontend code under
       DA-23 and DA-22.
 
+09.09. Browser-side JavaScript module loading does not prepare activation
+      plans.
+
+09.10. Browser-side JavaScript module loading does not establish dependency
+       readiness.
+
 
 ===============================================================================
-07. TURNIXIMPORT - WHAT IT IS
+10. TERTALISIMPORT - WHAT IT IS
 ===============================================================================
 
-07.1. turnixImport(selector: string) is:
-      - a Turnix-aware resolver
+10.01. tertalisImport(selector: string) is:
+      - a Tertalis-aware resolver front-end
       - a controlled loader
       - a mediated ESM importer
 
-07.2. turnixImport behavior includes:
-      - parsing a Turnix selector
-      - asking the backend to resolve pack identity and load target
-      - performing visibility and policy checks
+10.02. tertalisImport behavior includes:
+      - parsing a Tertalis selector
+      - asking Tertalis to resolve Pack identity and load target
+      - applying visibility and policy checks through owning domains
       - fetching the permitted JavaScript artifact
       - performing dynamic ESM import of that permitted artifact
 
-07.3. turnixImport does not create a second independent resolution system.
-      It depends on Turnix resolution and boundary checks already defined
-      elsewhere.
+10.03. tertalisImport does not create a second independent resolution system.
 
-07.4. turnixImport participates in adapter loading semantics without
-      becoming activation or execution authorization by itself.
+10.04. tertalisImport depends on Tertalis resolution and boundary checks already
+      defined elsewhere.
+
+10.05. tertalisImport participates in adapter loading semantics.
+
+10.06. tertalisImport does not become activation or execution authorization by
+      itself.
+
+10.07. tertalisImport does not become activation-plan preparation by itself.
+
+10.08. tertalisImport does not become dependency ordering by itself.
+
+10.09. tertalisImport does not become activation ordering by itself.
+
+10.10. tertalisImport does not become cyclic activation group admission by
+       itself.
 
 
 ===============================================================================
-08. TURNIXIMPORT - WHAT IT IS NOT
+11. TERTALISIMPORT - WHAT IT IS NOT
 ===============================================================================
 
-08.1. turnixImport is not:
+11.01. tertalisImport is not:
       - a dependency declaration
       - an adapter selection request
       - an execution authorization request
+      - an activation-plan preparation request
       - an activation request
       - a capability permission request
       - a visibility override
       - a permissive or best-effort loader
       - a version selector
-      - an execution authorization
+      - a filesystem lookup
+      - a URI loader
+      - a lifecycle callback trigger
+      - a registration publication mechanism
+      - a cyclic activation group admission mechanism
 
-08.2. If importing fails, the failure is explicit.
+11.02. If importing fails, the failure is explicit.
 
-08.3. turnixImport does not silently guess or broaden the requested target.
+11.03. tertalisImport does not silently guess or broaden the requested target.
 
-08.4. turnixImport does not grant Kernel authority to imported module code.
+11.04. tertalisImport does not grant Kernel authority to imported module code.
+
+11.05. tertalisImport does not grant ModCallContext gateway authority to imported
+      module code.
+
+11.06. tertalisImport does not prove activation-plan correctness.
+
+11.07. tertalisImport does not prove dependency readiness.
+
+11.08. tertalisImport does not prove activation readiness.
 
 
 ===============================================================================
-09. TURNIXIMPORT SELECTOR FORMS (LOCKED)
+12. TERTALISIMPORT SELECTOR FORMS
 ===============================================================================
 
-09.1. A turnixImport selector is not:
+12.01. A tertalisImport selector is not:
       - a filesystem path
       - a URI
       - a semver-qualified reference
 
-09.2. A turnixImport selector is an identity-based Turnix selector within
-      the importing rules of this document.
+12.02. A tertalisImport selector is an identity-based Tertalis selector within the
+      importing rules of this document.
 
-09.3. Supported conceptual forms are:
+12.03. Supported conceptual forms are:
 
-      A) Core or internal runtime files
+      A) Explicitly exposed Tertalis platform module
          "core/rpc.js"
          "core/layout.js"
 
-      B) Pack default entry
+      B) Pack default exported module surface
          "ui.controls"
 
-      C) Pack sub-entry or export
+      C) Pack sub-entry or exported module surface
          "ui.controls/Button"
 
-09.4. Pack default-entry selectors require the corresponding declared
-      dependency relationship already to exist where dependency rules require
-      it.
+12.04. Pack default exported module selectors require the corresponding
+      declared dependency relationship already to exist where dependency rules
+      require it.
 
-09.5. Pack sub-entry selectors resolve against declared JavaScript entry
-      mappings rather than filesystem guessing.
+12.05. Pack sub-entry selectors resolve against declared JavaScript exported
+      module mappings rather than filesystem guessing.
 
-09.6. Disallowed selector forms include:
+12.06. Disallowed selector forms include:
       - "../"
       - absolute paths
       - filesystem guessing
@@ -346,287 +656,435 @@ Downstream Documents:
 
 
 ===============================================================================
-10. DEPENDENCY CONSISTENCY RULE (LOCKED)
+13. DEPENDENCY CONSISTENCY DURING IMPORT
 ===============================================================================
 
-10.1. Importing respects the concrete identity already chosen during
+13.01. Importing respects the concrete identity already chosen during
       dependency resolution.
 
-10.2. If a pack declares a dependency that resolves to one concrete pack
-      identity, importing must remain consistent with that chosen identity.
+13.02. If a Pack declares a dependency that resolves to one concrete Pack
+      identity, importing remains consistent with that chosen identity.
 
-10.3. Allowed imports therefore remain those that refer to that already-
-      resolved identity.
+13.03. Allowed imports refer to the already-resolved identity.
 
-10.4. Disallowed imports include attempts to:
+13.04. Disallowed imports include attempts to:
       - switch author identity
       - restate semver in the selector
       - bypass the already-resolved dependency choice
 
-10.5. Examples:
+13.05. Example:
 
-      If a pack declares dependency:
-          "packs": ["Turnix@ui.controls@^1.2"]
+      If a Pack declares dependency:
+          "packs": ["Tertalis@ui.controls@^1.2"]
 
       Allowed imports:
-          turnixImport("ui.controls")
-          turnixImport("ui.controls/Button")
+          tertalisImport("ui.controls")
+          tertalisImport("ui.controls/Button")
 
       Disallowed imports:
-          turnixImport("Other@ui.controls")
-          turnixImport("ui.controls@2.0")
+          tertalisImport("Other@ui.controls")
+          tertalisImport("ui.controls@2.0")
 
-10.6. Violations are hard errors.
+13.06. Violations are hard errors.
 
-10.7. Importing does not reopen dependency resolution.
+13.07. Importing does not reopen dependency resolution.
+
+13.08. Importing does not prove that the dependency is Activated.
+
+13.09. Importing does not prove that dependency-provided runtime surfaces are
+      available.
+
+13.10. Importing does not repair a missing or invalid dependency relationship.
+
+13.11. Importing does not convert an advisory relationship into a dependency.
 
 
 ===============================================================================
-11. SEMVER IN IMPORTS (LOCKED)
+14. SEMVER IN IMPORTS
 ===============================================================================
 
-11.1. Semver is not allowed in turnixImport selectors.
+14.01. Semver is not allowed in tertalisImport selectors.
 
-11.2. Semver belongs to:
+14.02. Semver belongs to:
       - manifests
       - dependency resolution
       - policy decisions
 
-11.3. Importing is identity-based rather than version-selection-based.
+14.03. Importing is identity-based rather than version-selection-based.
 
 
 ===============================================================================
-12. FILE MATCHING RULES (LOCKED)
+15. FILE MATCHING RULES
 ===============================================================================
 
-12.1. For sub-entry imports such as:
-      turnixImport("ui.controls/Button")
+15.01. For sub-entry imports such as:
+      tertalisImport("ui.controls/Button")
 
-      Turnix resolves against runtimes.javascript.entries.
+      Tertalis resolves against declared JavaScript exported module mappings.
 
-12.2. Matching logic:
-      - exact "Button"
-      - or "Button.<extension>"
+15.02. Matching logic uses exact declared mapping identity.
 
-12.3. Allowed current extension forms include:
-      - .js
-      - .mjs
-      - .ts compiled to the served artifact form
+15.03. If an owning manifest rule defines extension matching for an exported
+      JavaScript module surface, that rule applies before artifact serving.
 
-12.4. Ambiguous matches are errors.
+15.04. Ambiguous matches are errors.
 
-12.5. Missing matches are errors.
+15.05. Missing matches are errors.
 
-12.6. There is no fallback from sub-entry import to default entry.
+15.06. There is no fallback from sub-entry import to default exported module
+      surface.
 
+15.07. There is no filesystem guessing.
 
-===============================================================================
-13. DEFAULT ENTRY BEHAVIOR (LOCKED)
-===============================================================================
+15.08. File matching does not infer activation-entry status.
 
-13.1. If the selector has no sub-path, Turnix loads the declared default
-      JavaScript entry for that pack.
+15.09. File matching does not infer lifecycle participation.
 
-13.1.1. Example:
-            turnixImport("ui.controls")
-
-13.2. runtimes.javascript.entry must exist.
-
-13.3. That entry is loaded.
-
-13.4. Module exports are then returned.
-
-13.5. There is no implicit index.js, filename guessing, or directory
-      guessing.
+15.10. File matching does not infer dependency readiness.
 
 
 ===============================================================================
-14. IMPORTING VS ACTIVATION (CRITICAL DISTINCTION)
+16. DEFAULT EXPORTED MODULE SURFACE BEHAVIOR
 ===============================================================================
 
-14.1. turnixImport loads a JavaScript module and may trigger normal ESM
-      evaluation by the JavaScript runtime.
+16.01. If a selector has no sub-path, Tertalis loads the declared default
+      JavaScript exported module surface for that Pack.
 
-14.2. That ESM module evaluation is not Turnix-recognized activation.
+16.01.01. Example:
+          tertalisImport("ui.controls")
 
-14.3. turnixImport does not:
-      - activate the pack
+16.02. The Pack declares which JavaScript module surface is the default import
+      surface.
+
+16.03. That declared module surface is loaded.
+
+16.04. Module exports are then returned.
+
+16.05. There is no implicit index.js, filename guessing, or directory guessing.
+
+16.06. The default exported module surface is not an activation entry merely
+      because tertalisImport can load it.
+
+16.07. The default exported module surface is not Activated merely because
+      tertalisImport can load it.
+
+16.08. The default exported module surface does not become lifecycle authority
+      merely because tertalisImport can load it.
+
+
+===============================================================================
+17. IMPORTING VS ACTIVATION PLAN
+===============================================================================
+
+17.01. Activation-plan preparation is owned by DA-29.
+
+17.02. An activation plan is selected graph intent refined for activation order
+      and activation readiness.
+
+17.03. Importing does not prepare selected pack graphs.
+
+17.04. Importing does not prepare activation plans.
+
+17.05. Importing does not decide dependency order.
+
+17.06. Importing does not decide activation order.
+
+17.07. Importing does not admit cyclic activation groups.
+
+17.08. Importing does not reject cyclic activation groups.
+
+17.09. Importing does not prove activation-plan correctness.
+
+17.10. Importing does not repair activation-plan defects.
+
+17.11. Importing does not replace PackManager diagnostics.
+
+17.12. Import failure is import-domain evidence.
+
+17.13. Activation-plan failure is graph-preparation or activation-domain
+       evidence according to the owning failure context.
+
+17.14. Importing preserves the boundary between code access and graph intent.
+
+
+===============================================================================
+18. IMPORTING VS ACTIVATION
+===============================================================================
+
+18.01. tertalisImport loads a permitted JavaScript module and may trigger normal
+      ESM evaluation by the JavaScript runtime.
+
+18.02. That ESM module evaluation is not Tertalis-recognized activation.
+
+18.03. Loading or evaluating a module through tertalisImport does not make the
+      imported module an activation entry.
+
+18.04. Loading or evaluating a module through tertalisImport does not call
+      lifecycle callbacks.
+
+18.05. Loading or evaluating a module through tertalisImport does not create
+      final Activated state.
+
+18.06. Loading or evaluating a module through tertalisImport does not publish
+      registrations.
+
+18.07. tertalisImport does not:
+      - activate the Pack
       - grant execution authority
       - grant capability permission
       - imply lifecycle participation
 
-14.4. Activation remains a separate Turnix-controlled action handled through
-      the appropriate activation mechanisms.
+18.08. Activation remains a separate Tertalis-controlled action handled through
+      DA-14-owned activation mechanisms.
 
-14.5. Module evaluation that occurs merely because the JavaScript runtime
-      evaluated an imported module is not treated as Turnix-recognized pack
-      execution by itself.
+18.09. If an exported module surface needs Pack lifecycle setup, the owning
+      Pack's activation lifecycle establishes that setup through DA-14-owned
+      semantics.
 
-14.6. Adapter loading or module evaluation is not activation under DA-23 and
-      DA-14.
+18.10. Module evaluation that occurs merely because the JavaScript runtime
+       evaluated an imported module is not treated as Tertalis-recognized Pack
+       execution by itself.
 
+18.11. Adapter loading or module evaluation is not activation under DA-23 and
+       DA-14.
 
-===============================================================================
-15. RESOLVEPACK VS ENSUREACTIVATED (LOCKED SEMANTICS)
-===============================================================================
+18.12. DA-12 does not define the complete activation-entry protocol.
 
-15.1. resolvePack(selector):
-      - resolves metadata only
-      - performs visibility checks
-      - does not load code
-      - does not select an adapter for execution
-      - does not authorize execution
-      - does not activate
+18.13. DA-12 refers to declared activation entries only to distinguish them
+       from private implementation modules, exported module surfaces, and
+       modules loaded by tertalisImport.
 
-15.2. ensureActivated(selector):
-      - ensures pack activation
-      - may trigger activation
-      - does not return exports or symbols
-      - may return activation diagnostics
-      - may raise NotActivatedError
+18.14. Importing does not establish that a dependency has completed Phase 1.
 
-15.3. NotActivatedError indicates orchestration failure rather than native
-      import failure.
+18.15. Importing does not establish that a dependency has completed Phase 2.
 
-15.4. NotActivatedError must surface to the user.
+18.16. Importing does not establish that a dependency has completed Phase 3.
+
+18.17. Importing does not establish that a dependency is Activated.
+
+18.18. Importing does not make an intra-cycle surface available for cyclic
+       activation.
 
 
 ===============================================================================
-16. IMMEDIATE EXECUTION AND SIDE EFFECTS (LOCKED POLICY)
+19. RESOLVEPACK VS ENSUREACTIVATED
 ===============================================================================
 
-16.1. Some languages permit immediate execution constructs such as:
+19.01. resolvePack(selector) resolves metadata only.
+
+19.02. resolvePack(selector) performs visibility checks.
+
+19.03. resolvePack(selector) does not load code.
+
+19.04. resolvePack(selector) does not select an adapter for execution.
+
+19.05. resolvePack(selector) does not authorize execution.
+
+19.06. resolvePack(selector) does not prepare activation plans.
+
+19.07. resolvePack(selector) does not activate a Pack.
+
+19.08. ensureActivated(selector) requests or ensures Pack activation through the
+      activation domain.
+
+19.09. ensureActivated(selector) may trigger activation when activation rules
+      allow it.
+
+19.10. ensureActivated(selector) does not return exports or symbols.
+
+19.11. ensureActivated(selector) may return activation diagnostics or a
+       structured activation failure.
+
+19.12. Activation-control failure indicates orchestration or activation
+       failure rather than native import failure.
+
+19.13. Activation-control failure surfaces to the user or caller according to
+       the owning failure-surfacing rules.
+
+19.14. ensureActivated(selector) may consume an accepted activation plan when
+       the owning activation documents define that path.
+
+19.15. ensureActivated(selector) does not prepare a replacement activation plan
+       by itself.
+
+
+===============================================================================
+20. IMMEDIATE EXECUTION AND SIDE EFFECTS
+===============================================================================
+
+20.01. Some languages permit immediate execution constructs such as:
       - module-level statements
       - IIFE-style patterns
       - top-level side effects
 
-16.2. Turnix does not coordinate, track, or rely on immediate execution.
+20.02. Tertalis does not coordinate, track, or rely on immediate execution as an
+      importing guarantee.
 
-16.3. Immediate execution is discouraged in pack code.
+20.03. Immediate execution is discouraged in Pack code.
 
-16.4. Import-time execution is not an activation mechanism.
+20.04. Import-time execution is not an activation mechanism.
 
-16.5. Importing a module does not imply permission to execute meaningful
-      Turnix-recognized logic.
+20.05. Importing a module does not imply permission to execute meaningful
+      Tertalis-recognized logic.
 
-16.6. Code that executes immediately:
-      - runs outside Turnix orchestration
-      - runs without PackContext authority
-      - is outside Turnix guarantees
+20.06. Code that executes immediately:
+      - runs outside Tertalis orchestration
+      - runs without ModCallContext gateway authority
+      - is outside Tertalis guarantees
       - is not considered activated even if it appears to work
 
-16.7. Meaningful Turnix-recognized execution waits for the supported
-      activation entrypoint.
+20.07. Meaningful Tertalis-recognized execution waits for a supported DA-14-owned
+      activation or orchestration path.
 
-16.8. Adapter execution that occurs outside Turnix-recognized activation or
-      orchestration remains unsupported by Turnix guarantees.
+20.08. Adapter execution that occurs outside Tertalis-recognized activation or
+      orchestration remains unsupported by Tertalis guarantees.
 
+20.09. Import-time execution does not establish dependency readiness.
 
-===============================================================================
-17. CANONICAL ENTRYPOINTS (LOCKED)
-===============================================================================
+20.10. Import-time execution does not establish activation readiness.
 
-17.1. The currently supported activation entrypoint is:
-      onLoad(ctx)
+20.11. Import-time execution does not repair activation-plan ordering.
 
-17.2. onLoad(ctx):
-      - is called exactly once by Turnix
-      - is the only supported activation entrypoint
-      - is the first moment Turnix intentionally executes pack code
-      - receives a Turnix-created PackContext
-      - prepares the pack for later runtime behavior
-
-17.3. Turnix recognizes no alternative activation path.
-
-17.4. If a pack has executable code, Turnix activates that pack through
-      onLoad(ctx) using the appropriate execution adapter when the artifact
-      belongs to an adapter runtime.
+20.12. Import-time execution does not admit cyclic activation groups.
 
 
 ===============================================================================
-18. BACKGROUND WORK GUARANTEE (LOCKED)
+21. BACKGROUND WORK GUARANTEE
 ===============================================================================
 
-18.1. Turnix does not guarantee behavior for background work started outside
-      Turnix orchestration.
+21.01. Tertalis does not guarantee behavior for background work started outside
+      Tertalis orchestration.
 
-18.2. Only work triggered by:
-      - supported activation entrypoints
-      - capability calls
-      - other Turnix-defined orchestrated execution pathways
+21.02. Only work triggered by supported Tertalis-defined activation or
+      orchestration pathways is supported by Tertalis guarantees.
 
-      is supported by Turnix guarantees.
+21.03. Such pathways may include:
+      - activation lifecycle callbacks defined by DA-14
+      - capability calls defined by DA-16
+      - other Tertalis-defined orchestrated execution pathways
 
-18.3. Background work started otherwise:
+21.04. Background work started otherwise:
       - may execute
       - remains unsupported
       - remains untracked
-      - is not abortable by Turnix guarantees
-      - is not cleaned up by Turnix guarantees
+      - is not abortable by Tertalis guarantees
+      - is not cleaned up by Tertalis guarantees
 
-18.4. Adapter implementation details do not convert unsupported background
-      work into supported Turnix execution.
+21.05. Adapter implementation details do not convert unsupported background
+      work into supported Tertalis execution.
 
+21.06. Background work does not become supported merely because a module import
+      started it.
 
-===============================================================================
-19. ERROR PHILOSOPHY (LOCKED)
-===============================================================================
-
-19.1. Import errors are hard errors.
-
-19.2. The rationale is:
-      - importing implies certainty
-      - permissive loading creates nondeterminism
-      - failures must remain visible and explainable
-
-19.3. Import-related errors:
-      - use the standard error envelope
-      - include requesting pack identity
-      - include target identity
-      - include reason classification
-
-19.4. Import-related errors do not become capability permission failures or
-      Job terminal outcomes merely because later execution might have used
-      capabilities or Jobs.
+21.07. Background work does not make the originating Pack Activated.
 
 
 ===============================================================================
-20. EXPLICITLY OPEN QUESTIONS
+22. ERROR PHILOSOPHY
 ===============================================================================
 
-20.1. OPEN questions include:
-      - possible rename turnixImport
-      - whether turnixImport remains strictly internal to Turnix, with mods
-        using ctx.resolvePack or ctx.ensureActivated instead
-      - tooling for authoring entry mappings
+22.01. Import errors are hard errors.
+
+22.02. Importing implies certainty.
+
+22.03. Permissive loading creates nondeterminism.
+
+22.04. Failures remain visible and explainable.
+
+22.05. Import-related errors use a structured Tertalis failure surface.
+
+22.06. Import-related errors include requesting Pack identity when available.
+
+22.07. Import-related errors include target identity when available.
+
+22.08. Import-related errors include reason classification when available.
+
+22.09. Import-related errors do not become capability permission failures merely
+      because later execution might have used capabilities.
+
+22.10. Import-related errors do not become Job terminal outcomes merely
+       because later execution might have used Jobs.
+
+22.11. Import-related errors do not become activation-plan failures merely
+       because activation later could have consumed an activation plan.
+
+22.12. Import-related errors do not become activation failures merely because
+       activation later could have run.
+
+22.13. Exact error envelope fields belong to the owning implementation or
+       interface specification.
+
+
+===============================================================================
+23. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+23.01. OPEN questions include:
+      - possible rename of tertalisImport
+      - whether tertalisImport remains strictly internal to Tertalis, with Pack
+        code using mediated metadata or activation-control surfaces instead
+      - tooling for authoring exported module mappings
       - documentation wording that avoids Python-import confusion
+      - final manifest field names for JavaScript exported module surfaces
+      - final served artifact URL structure and cache strategy
+      - final TypeScript compilation and artifact naming rules
+      - final dynamic import bundling strategy
+
+23.02. Activation-plan schema and graph-preparation open questions are owned by
+      DA-29.
+
+23.03. Activation phase, barrier, and cyclic activation open questions are
+      owned by DA-14.
+
+23.04. ExecutionAdapter runtime and mechanical loading open questions are owned
+      by DA-23 and DA-27.
 
 
 ===============================================================================
-21. LOCKED SUMMARY
+24. SUMMARY
 ===============================================================================
 
-21.1. LOCKED:
-      - no Python cross-pack native imports
-      - Python pack code is not backend implementation code
-      - JavaScript cross-pack loading through turnixImport only
-      - importing does not imply adapter selection
-      - importing does not imply execution authorization
-      - importing does not imply activation
-      - importing does not imply execution authority
-      - importing does not imply capability permission
-      - no semver in imports
-      - dependency consistency is enforced
-      - immediate execution, including IIFE-style patterns and top-level code,
-        is discouraged and unsupported
-      - onLoad(ctx) is the only supported activation entrypoint
-      - import errors are strict and visible
-      - activation remains separate from import
-      - native imports do not bypass DA-23 execution boundaries
+24.01. Native language imports do not bypass Tertalis semantics.
 
-21.2. OPEN:
-      - naming polish
-      - authoring ergonomics
+24.02. Cross-Pack native imports are not supported.
+
+24.03. Python Pack code is not backend implementation code.
+
+24.04. Browser-side JavaScript cross-Pack loading routes through tertalisImport.
+
+24.05. tertalisImport is mediated loading, not authority.
+
+24.06. tertalisImport selectors are identity-based, not path-based, URI-based, or
+      version-selection-based.
+
+24.07. Importing respects the already-resolved dependency identity.
+
+24.08. File matching is exact and non-heuristic.
+
+24.09. Ambiguous imports and missing imports are errors.
+
+24.10. There is no implicit index.js, filename guessing, or directory
+       guessing.
+
+24.11. Importing and module loading are not activation.
+
+24.12. Importing and module loading are not activation-plan preparation.
+
+24.13. Importing and module loading do not establish dependency readiness.
+
+24.14. Importing and module loading do not admit cyclic activation groups.
+
+24.15. Module evaluation is not Tertalis-recognized execution by itself.
+
+24.16. Import-time side effects and unsupported background work remain outside
+       Tertalis guarantees.
+
+24.17. Activation entries, private implementation modules, and exported module
+       surfaces remain distinct roles.
+
+24.18. Import errors are strict, visible, classified, and explainable.
+
+24.19. DA-12 remains the importing, module-loading, and code-boundary document.
 
 
 ===============================================================================
@@ -636,6 +1094,6 @@ END OF DA-12 - IMPORTING, MODULE LOADING & CODE BOUNDARIES
 --- doc-meta ---
 DOC_ID: DA-12
 DOC_FILE: docs/design/DA-12_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
-DOC_REV: 17
-DOC_GIT: 023e3de
+DOC_REV: 21
+DOC_GIT: 9059ebf
 ----------------

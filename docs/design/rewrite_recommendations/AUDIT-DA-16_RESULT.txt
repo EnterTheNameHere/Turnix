@@ -1,0 +1,783 @@
+==============================================================================
+AUDIT RESULT - DA-16 SERVICES, CAPABILITIES AND PERMISSIONS
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-16_SERVICES_CAPABILITIES_AND_PERMISSIONS.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-16_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-16_SERVICES_CAPABILITIES_AND_PERMISSIONS.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-16_RECOMMENDATION.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-14_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-17_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-19_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-23_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-24_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-27_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Partially superseded by DA-30 and Proposal P02.
+
+    The recommendation correctly preserves the Service / Capability distinction,
+    Capability / Job separation, permission identity versus execution
+    authorization, runtime export versus manifest intent, permission-pause flow,
+    capability-domain trace ownership, conflict handling, and cross-runtime /
+    cross-adapter symmetry.
+
+    However, the recommendation still assumes older PackContext/AppInstance
+    vocabulary and does not account for DA-30's stronger ModCallContext surface
+    rules. It therefore must be used only as translated boundary-preservation
+    guidance.
+
+Document verdict:
+    Keep with targeted but important rewrite.
+
+DA-16 is conceptually strong and should remain the Service, Capability,
+Permission, and capability-mediated cross-Pack interaction document.
+
+No full replacement is recommended.
+
+But DA-16 has one major conflict with the current ModCallContext audit result:
+
+    - DA-16 currently shows Pack-facing service access through examples such as
+      ctx.registerService("llm", client) and ctx.services.get("llm").
+    - DA-30 treats ctx.services as an absent/forbidden ModCallContext backdoor.
+    - Service objects are runtime wiring, not Pack-facing cross-Pack execution
+      surfaces.
+    - Cross-Pack execution must go through Capabilities, not direct Service object
+      access.
+
+Therefore DA-16 needs more than numbering cleanup. It needs a targeted alignment
+rewrite around service exposure and ModCallContext surfaces.
+
+Primary conclusion:
+    Keep DA-16's capability and permission model, but rewrite its Service access
+    model so Services remain internal runtime wiring or explicitly registered
+    runtime-owned wiring, while Pack-facing cross-Pack execution and Pack-facing
+    requests go through Capabilities and ModCallContext-mediated capability call
+    surfaces. Do not expose ctx.services or direct Service objects to ordinary
+    Pack code unless a later document explicitly defines a separate safe facade.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-16 should not keep older terminology or old gateway assumptions as historical
+artifacts.
+
+Specifically, the rewrite should not preserve:
+
+    - PackContext as the Pack-facing gateway name
+    - ctx.services as a ModCallContext surface
+    - direct cross-Pack service-object access as the normal Pack interaction path
+    - AppInstance as runtime identity vocabulary
+    - capability invocation becoming ApplicationRun, Job, OrchestrationUnit,
+      Window, RuntimeHost, adapter, PackManager, committed-state, persistence, or
+      workflow outcome by implication
+    - adapter execution authorization as capability permission
+    - RuntimeHost command acceptance as capability permission
+    - PackManager graph preparation as capability permission
+    - service object access as capability permission
+
+If a legacy alias or compatibility surface is intentionally retained, DA-16 must
+scope it explicitly and must still state the canonical architecture surface as
+primary.
+
+Otherwise, the old names and gateway assumptions should be removed or translated.
+
+The useful part of the recommendation is not the old PackContext/AppInstance
+wording. The useful part is the boundary:
+
+    Services are internal/runtime wiring. Capabilities are named, permissioned,
+    Turnix-mediated operations. Capability invocation is not automatically any
+    other domain outcome. Permission decisions are versioned, explicit, and
+    mediated. Cross-Pack execution goes through capability mediation.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-16 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, PackContext became ModCallContext.
+    - The new design removes ctx.services.
+    - This rewrite changed service access.
+    - Unlike V2, services are internal wiring.
+    - Codex kept PackContext wording.
+    - This audit decided to remove ctx.services.
+    - DA-16 was rewritten because of the audit.
+
+Those facts may be useful in audit files, branch notes, migration notes,
+compatibility notes, changelogs, or editor instructions. They do not belong in
+the architecture document itself.
+
+The final DA-16 should simply define Services, Capabilities, permission classes,
+permission decision flow, capability invocation modes, capability/Job relation,
+capability/OrchestrationUnit relation, cross-runtime capability mediation,
+capability conflicts, and capability-domain trace ownership.
+
+==============================================================================
+02. WHAT DA-16 GETS RIGHT
+==============================================================================
+
+02.1. Capability model is strong
+--------------------------------
+
+DA-16 correctly defines Capabilities as named, permissioned, Turnix-mediated
+operations exported by Packs and invoked by other Packs or adapter-executed code
+through mediated surfaces.
+
+It correctly says Capabilities are the only supported cross-Pack execution
+boundary.
+
+Preserve this.
+
+02.2. Capability identity and permission model are strong
+--------------------------------------------------------
+
+DA-16 correctly defines capability identifiers as `<name>@<major>` and says
+remembered permission matching uses the exact versioned capability identifier.
+
+It correctly avoids wildcard, prefix, family, or versionless fallback matching for
+remembered decisions.
+
+It correctly separates permission class from caller negotiation.
+
+Preserve this and keep DA-17 as the owner of remembered-decision precedence and
+persistence.
+
+02.3. Runtime export versus manifest intent is strong
+-----------------------------------------------------
+
+DA-16 correctly says capability export happens at runtime through explicit
+registration and that runtime behavior is authoritative over manifest intent.
+
+Manifest capability declarations remain advisory and useful for tooling,
+diagnostics, and user experience.
+
+Preserve this.
+
+02.4. Permission pause flow is useful
+-------------------------------------
+
+DA-16 correctly says permission evaluation occurs before capability execution,
+that undecided permission can pause execution for decision handling, and that
+execution resumes only after the decision path completes.
+
+Preserve this, but ensure no background mutation occurs while paused unless an
+owning work/lifecycle document explicitly defines allowed staged work.
+
+02.5. Capability / Job separation is strong
+-------------------------------------------
+
+DA-16 correctly says not every capability invocation creates a Job, Job-backed
+capability execution remains capability-mediated, and Job lifecycle semantics are
+owned by DA-19.
+
+Preserve this.
+
+02.6. Capability / OrchestrationUnit separation is needed
+---------------------------------------------------------
+
+The recommendation correctly identifies that capability invocation is not
+automatically an OrchestrationUnit and capability result is not automatically an
+OrchestrationUnit outcome.
+
+DA-16 should add or preserve this explicitly in the final document.
+
+DA-24 owns OrchestrationUnit lifecycle, mutation authority, and terminal outcome
+semantics.
+
+02.7. Computed/reactive behavior section is good
+------------------------------------------------
+
+DA-16 correctly says computed or reactive behavior remains runtime-only and does
+not mutate stored configuration or memory by itself.
+
+Preserve this, and keep durable mutation constrained by state, transaction,
+capability, permission, and persistence boundaries.
+
+02.8. Capability conflict handling is strong
+--------------------------------------------
+
+DA-16 correctly says multiple Packs exporting the same capability identity are
+not allowed by default, conflicts are explicit, and resolution requires explicit
+user choice or hard failure.
+
+Preserve this.
+
+02.9. Trace ownership is mostly strong
+--------------------------------------
+
+DA-16 correctly owns capability-domain trace reason identifiers and distinguishes
+capability permission, direct execution, deferred execution, denied execution,
+failed execution, and Job-backed acceptance.
+
+Preserve this, but clarify that trace evidence is a domain emission obligation;
+trace storage, retention, pruning, and loss remain DA-03-owned.
+
+==============================================================================
+03. MAJOR REQUIRED FIX: SERVICE ACCESS AND MODCALLCONTEXT SURFACES
+==============================================================================
+
+DA-16 currently says Services are registered by a Pack during activation and
+retrieved explicitly by other Packs, with examples:
+
+    ctx.registerService("llm", client)
+    client = ctx.services.get("llm")
+
+This conflicts with the current ModCallContext boundary from DA-30 audit work.
+
+DA-30 treats ctx.services as a forbidden or absent ModCallContext surface because
+service objects are runtime wiring, not Pack-facing cross-Pack bypass objects.
+
+03.1. Replace Pack-facing service access examples
+-------------------------------------------------
+
+Remove or rewrite examples that imply ordinary Pack code receives ctx.services or
+directly retrieves service objects from another Pack.
+
+Possible replacement direction:
+
+    Services are runtime wiring objects registered with the Kernel/runtime through
+    explicit runtime-owned registration mechanisms.
+
+    Services may back capability implementations.
+
+    Ordinary Pack-to-Pack behavior is invoked through Capabilities, not by
+    retrieving and calling another Pack's Service object.
+
+    ModCallContext may expose capability registration and capability invocation
+    facades according to DA-30. It does not expose ctx.services unless a later
+    explicitly scoped service facade is defined.
+
+If DA-16 wants to keep a service registry concept, define it as internal runtime
+wiring, not as a Pack-facing cross-Pack object lookup API.
+
+03.2. Clarify Service purpose
+-----------------------------
+
+DA-16 should preserve the Service / Capability distinction, but strengthen it:
+
+    Service:
+        runtime-owned wiring object or internal implementation dependency.
+
+    Capability:
+        named, versioned, permissioned, Turnix-mediated operation that Pack code
+        and adapter-executed code may invoke through mediated surfaces.
+
+    Service object access is not capability permission.
+
+    Service object access is not Pack-facing cross-Pack execution.
+
+    Service object access is not direct backend access.
+
+    Service object access is not ModCallContext authority.
+
+    A capability implementation may use internal Services, but callers see the
+    capability contract, not the service internals.
+
+03.3. Align with DA-30 absent surfaces
+--------------------------------------
+
+DA-16 should point to DA-30 for the exact ModCallContext facade set and absent
+surfaces.
+
+At minimum, DA-16 should not contradict:
+
+    - no ctx.services as ordinary Pack-facing surface
+    - no ctx.kernel
+    - no ctx.runtimeHost
+    - no ctx.rawFilesystem
+    - no direct transaction commit surface
+    - no direct Job terminal-state setter
+    - no ctx.sessions
+
+Do not make DA-16 a ModCallContext specification; just stop it from implying a
+forbidden surface.
+
+==============================================================================
+04. REQUIRED TERMINOLOGY ALIGNMENT
+==============================================================================
+
+04.1. PackContext -> ModCallContext
+-----------------------------------
+
+The recommendation still uses PackContext. The final DA-16 should use
+ModCallContext where a Pack-facing invocation gateway is meant.
+
+Do not preserve PackContext as a historical layer inside the current DA-16.
+
+04.2. AppInstance -> Application / ApplicationRun
+-------------------------------------------------
+
+The recommendation still says AppInstance. Translate according to meaning:
+
+    Application:
+        durable application individual
+
+    ApplicationRun:
+        one live runtime incarnation / execution period
+
+For DA-16 stop-lines, the common replacement is ApplicationRun lifecycle outcome
+because capability invocations occur during live runtime execution.
+
+04.3. Orchestration Unit -> OrchestrationUnit
+---------------------------------------------
+
+Use OrchestrationUnit when referring to the first-class type name, unless the
+project deliberately keeps the spaced form as a display alias.
+
+==============================================================================
+05. REQUIRED CAPABILITY OUTCOME STOP-LINES
+==============================================================================
+
+DA-16 should contain a compact source-level capability-outcome boundary.
+
+Recommended boundary:
+
+    Capability invocation is a named, permissioned, Turnix-mediated operation.
+
+    Capability invocation is not automatically a Job, OrchestrationUnit, RPC
+    outcome, adapter lifecycle outcome, RuntimeHost outcome, ApplicationRun
+    lifecycle outcome, Window finalization, PackManager outcome, committed-state
+    mutation, persistent I/O result, artifact/export outcome, ComparisonResult,
+    Replay outcome, Resume outcome, Retry outcome, or audit workflow outcome.
+
+    If capability invocation affects another domain, that domain defines the
+    resulting domain outcome.
+
+    Correlation between a capability invocation and another domain outcome is
+    explicit and trace-visible.
+
+This belongs in DA-16 because DA-16 owns capability invocation and permission
+mediation.
+
+Do not expand DA-16 into the detailed lifecycle documents for all those domains.
+
+==============================================================================
+06. TRACE WORDING FIX
+==============================================================================
+
+Current DA-16 says capability-call trace evidence is required for debugging,
+trust, reproducibility, and audit.
+
+Correct reading:
+
+    Capability-call trace evidence is required as a domain emission obligation
+    when capability calls occur.
+
+Not:
+
+    Trace persistence is guaranteed forever.
+
+Not:
+
+    Committed-state correctness depends on retained capability trace evidence.
+
+Suggested DA-16 clarification:
+
+    Capability-call trace evidence is required as an emission obligation where
+    capability calls occur. Trace representation, retention, pruning, and loss
+    remain governed by DA-03.
+
+Reason:
+    This preserves capability-domain trace obligations without turning trace
+    retention into committed-state correctness or workflow outcome authority.
+
+==============================================================================
+07. STRUCTURAL CLEANUP
+==============================================================================
+
+DA-16 has duplicate section numbering around capability execution modes and Jobs.
+
+Current pattern:
+
+    09. CAPABILITY INVOCATION FLOW
+
+followed by lines 09.1 through 09.7, then a subheading:
+
+    09.1 CAPABILITY EXECUTION MODES AND JOBS
+
+This duplicate 09.1 can confuse references.
+
+Recommended cleanup:
+
+    Keep the content.
+
+    Rename or renumber the subheading, for example:
+
+        09A. CAPABILITY EXECUTION MODES AND JOBS
+
+    or:
+
+        10. CAPABILITY EXECUTION MODES AND JOBS
+
+    if following sections are renumbered.
+
+This is structural/readability cleanup, not a conceptual rewrite.
+
+==============================================================================
+08. WHAT TO PRESERVE FROM CURRENT DA-16
+==============================================================================
+
+Preserve these boundaries, but rewrite PackContext/AppInstance/service-surface
+assumptions where present:
+
+    - Services and Capabilities are distinct.
+    - Services are runtime wiring only.
+    - Capabilities are named, versioned, permissioned, Turnix-mediated operations.
+    - Capabilities are the sole supported cross-Pack execution boundary.
+    - Capabilities are the supported authority boundary for adapter-executed code
+      that requests Pack-provided behavior.
+    - Capability identity uses major version only.
+    - Remembered permission matching uses exact versioned capability identity.
+    - No wildcard, prefix, family, or versionless fallback matching is introduced
+      by DA-16.
+    - Manifest capability declarations are advisory and do not override runtime
+      capability export.
+    - Capability permission is distinct from DA-23 execution authorization.
+    - Permission evaluation occurs before capability execution begins.
+    - Permission pause does not skip trace, policy, or lifecycle ownership.
+    - Job-backed execution does not skip permission evaluation.
+    - Adapter-mediated invocation does not skip permission evaluation.
+    - In-process invocation does not skip permission evaluation.
+    - Not every capability invocation creates a Job.
+    - Job-backed capability execution remains capability-mediated.
+    - Job handles do not expose service internals.
+    - Job lifecycle semantics are DA-19-owned.
+    - Capability invocation is not automatically an OrchestrationUnit.
+    - Mutation-capable capability behavior remains constrained by DA-04 and DA-24.
+    - Computed/reactive behavior is runtime-only unless it uses owning durable
+      mutation boundaries.
+    - Capability identity conflicts are explicit and not silently resolved by
+      adapter selection or PackManager graph preparation.
+    - Capability-domain trace reason identifiers are DA-16-owned.
+    - Capability trace evidence remains causally linked to Job/adapter/RPC/etc.
+      trace where those domains participate.
+    - Cross-runtime and cross-adapter capability use follows the same mediated
+      capability model.
+
+==============================================================================
+09. WHAT TO ADD OR CHANGE IN THE REVISED DA-16
+==============================================================================
+
+09.1. Add canonical terminology note
+------------------------------------
+
+Add a compact note near the interpretation or concept section:
+
+    DA-16 uses canonical architecture names:
+
+        ModCallContext:
+            invocation-scoped Pack-facing gateway into Turnix
+
+        ApplicationRun:
+            one live execution period of an Application
+
+        OrchestrationUnit:
+            bounded work/mutation authority context
+
+    Older notes may use PackContext or AppInstance. DA-16 does not use those
+    names as primary architecture terms unless a compatibility note explicitly
+    says so.
+
+Do not write this as "V3 names", "new names", or "after the rewrite".
+
+09.2. Rewrite Services section
+------------------------------
+
+Change the Services section so it does not expose ctx.services or direct service
+objects to ordinary Pack code.
+
+Recommended direction:
+
+    Services are runtime wiring objects used internally by the runtime and by
+    capability implementations.
+
+    Service objects are not Pack-facing cross-Pack execution surfaces.
+
+    Ordinary Pack-to-Pack execution is mediated through Capabilities.
+
+    Capability implementations may use Services internally, but callers receive
+    only the capability contract and mediated result.
+
+    ModCallContext does not expose ctx.services unless a later explicitly scoped
+    service facade is defined.
+
+09.3. Rewrite examples
+----------------------
+
+Replace or remove examples such as:
+
+    ctx.registerService("llm", client)
+    client = ctx.services.get("llm")
+
+Possible replacement examples:
+
+    Runtime/service registration example:
+        Kernel/runtime registers an internal LLM service for capability handlers.
+
+    Capability export example:
+        ctx.registerCapability("llm.pipeline@1", handler)
+
+    Capability call example:
+        ctx.callCapability("llm.pipeline@1", args)
+
+Keep examples abstract if exact API names remain open.
+
+09.4. Add capability outcome stop-line
+--------------------------------------
+
+Add the stop-line from section 05.
+
+09.5. Add DA-30 stop-line
+-------------------------
+
+Add DA-30 as owner of ModCallContext invocation gateway details and absent
+surfaces.
+
+DA-16 may state that capability invocation is exposed through ModCallContext or
+equivalent mediated capability-call surfaces, but DA-16 should not define the
+full ModCallContext facade.
+
+09.6. Expand downstream / stop-line references
+----------------------------------------------
+
+If the upstream/downstream lists are maintained, add or update references to:
+
+    - DA-20 for Application/ApplicationRun identity
+    - DA-24 for OrchestrationUnit mutation authority
+    - DA-27 for adapter lifecycle/trust/isolation
+    - DA-28 for RuntimeHost lifecycle/command/local-first/LAN semantics
+    - DA-29 for PackManager catalog/graph/repair semantics
+    - DA-30 for ModCallContext gateway semantics
+
+DA-16 may name these domains only to keep capability boundaries clear.
+
+09.7. Keep exact API details open
+---------------------------------
+
+Do not define concrete capability API form, exact Job handle representation,
+streaming/subscription capability API, permission UI shape, policy storage
+schema, RPC envelope schema, adapter metadata schema, or concrete service registry
+implementation in DA-16 unless already explicitly settled elsewhere.
+
+==============================================================================
+10. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    PackContext
+        -> ModCallContext
+
+    AppInstance lifecycle outcome
+        -> ApplicationRun lifecycle outcome
+
+    AppInstance identity
+        -> Application / ApplicationRun identity, depending on durable-vs-live
+           meaning
+
+    Orchestration Unit
+        -> OrchestrationUnit when used as the first-class type name
+
+    ctx.services.get(...)
+        -> remove, or replace with capability invocation / internal runtime wiring
+           wording
+
+    ctx.registerService(...)
+        -> remove from Pack-facing example, or mark as runtime/internal service
+           registration if such a surface is explicitly defined elsewhere
+
+    Services provide shared runtime wiring and are retrieved by other packs
+        -> Services provide runtime wiring. Cross-Pack execution goes through
+           Capabilities, not direct Service object retrieval.
+
+    Services are registered by a pack during activation
+        -> Services are registered through runtime-owned wiring paths or
+           capability-provider setup according to owning lifecycle documents
+
+    PackContext access does not replace capability mediation
+        -> ModCallContext participation does not replace capability mediation
+
+    current Dv3 terminology / current Dv3 type names / current Dv3 names
+        -> canonical architecture terminology / canonical architecture type names
+
+    Any final-document wording like "In V3, services..."
+        -> replace with direct architecture language such as "Services..."
+
+==============================================================================
+11. ACCEPTANCE CONDITIONS FOR THE REVISED DA-16
+==============================================================================
+
+A revised DA-16 is acceptable when all of the following are true:
+
+    - It preserves Service / Capability separation.
+
+    - It makes Services runtime/internal wiring rather than Pack-facing cross-Pack
+      bypass objects.
+
+    - It does not expose ctx.services as an ordinary ModCallContext surface.
+
+    - It preserves Capabilities as the sole supported cross-Pack execution
+      boundary.
+
+    - It preserves Capabilities as named, versioned, permissioned,
+      Turnix-mediated operations.
+
+    - It preserves exact versioned capability identity matching for remembered
+      permission decisions.
+
+    - It preserves no wildcard, prefix, family, or versionless fallback matching.
+
+    - It preserves runtime capability export as authoritative over manifest
+      declaration.
+
+    - It preserves manifest capability declarations as optional/advisory tooling,
+      diagnostics, and user-experience material.
+
+    - It preserves permission identity as distinct from DA-23 execution
+      authorization.
+
+    - It preserves permission evaluation before capability execution.
+
+    - It preserves permission pause and deterministic resume semantics.
+
+    - It preserves Capability / Job separation.
+
+    - It preserves Job-backed capability execution as still capability-mediated.
+
+    - It preserves Job lifecycle and terminal outcome as DA-19-owned.
+
+    - It preserves Capability / OrchestrationUnit separation.
+
+    - It preserves OrchestrationUnit lifecycle, mutation authority, and terminal
+      outcome as DA-24-owned.
+
+    - It preserves capability conflict detection and explicit resolution.
+
+    - It preserves adapter-mediated and in-process capability invocation as still
+      permission-checked and capability-mediated.
+
+    - It preserves cross-runtime and cross-adapter symmetry.
+
+    - It preserves computed/reactive behavior as runtime-only unless it goes
+      through durable mutation boundaries.
+
+    - It preserves capability-domain trace ownership without replacing DA-03
+      trace substrate semantics.
+
+    - It clarifies trace emission versus trace retention/loss.
+
+    - It uses ModCallContext instead of PackContext.
+
+    - It uses ApplicationRun instead of AppInstance where live lifecycle outcome
+      is meant.
+
+    - It keeps DA-30 as owner of ModCallContext gateway details and absent
+      surfaces.
+
+    - It keeps DA-17 as owner of remembered permission decision semantics.
+
+    - It keeps DA-19 as owner of Job lifecycle semantics.
+
+    - It keeps DA-23/DA-27 as owner of execution adapter and adapter lifecycle
+      boundaries.
+
+    - It keeps DA-28 as owner of RuntimeHost outcomes.
+
+    - It keeps DA-29 as owner of PackManager outcomes.
+
+    - It does not define concrete capability API form, streaming API, Job handle
+      representation, RPC envelope schema, service registry implementation,
+      permission UI, policy storage schema, or adapter metadata schema unless an
+      owning specification explicitly fixes them.
+
+    - It does not mention audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+==============================================================================
+12. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-16.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform a targeted rewrite of the Service access model, because the current
+text exposes ctx.services / direct Service object access in a way that conflicts
+with the ModCallContext boundary.
+
+Use REWRITE-DA-16 only as translated boundary-preservation guidance. Do not keep
+it as an obsolete historical artifact and do not copy its stale PackContext or
+AppInstance vocabulary into the rewritten DA.
+
+Do not include audit/source metadata or version/process framing in the final
+DA-16 documentation. The final DA-16 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-16 should remain the Services, Capabilities, Permissions, and capability-
+mediated cross-Pack interaction document.
+
+DA-16 should not become:
+
+    - ModCallContext specification
+    - ExecutionAdapter lifecycle/trust specification
+    - importing/module-loading specification
+    - activation lifecycle specification
+    - Application/ApplicationRun lifecycle specification
+    - Job lifecycle specification
+    - OrchestrationUnit lifecycle or mutation-authority specification
+    - RuntimeHost command/lifecycle specification
+    - PackManager operation specification
+    - committed-state or transaction specification
+    - persistent I/O specification
+    - concrete trace schema/storage specification
+    - concrete service registry implementation specification
+    - concrete permission UI or policy storage implementation specification
+
+The main work is to preserve DA-16's strong capability and permission model while
+removing the service-object backdoor implied by ctx.services, aligning with
+ModCallContext absence rules, and keeping capability invocation from becoming any
+other domain outcome by implication.
+
+==============================================================================
+END OF AUDIT RESULT - DA-16
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-16
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-16_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------

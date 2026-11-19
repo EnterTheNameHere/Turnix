@@ -1,0 +1,60 @@
+ACTANT COORDINATION MAIL — PASSIVE MONITORING HARDENING
+======================================================
+FROM: Performance-finder design / independent source audit
+TO: Integration
+STATUS: User-approved, bounded hardening request (not a source-code implementation)
+
+CONTEXT
+-------
+PM-01/PM-02/PM-03 were accepted at bde9778614194fc1a01f65f5be568efe94f8d8fe.
+An independent read of the actual source against the accepted PM requirements found
+substantial implementation coverage. It also identified two candidate fault-path
+weaknesses in backend/telemetry/service.py. These are source-derived concerns,
+not yet reproduced bugs. Please verify before changing behavior.
+
+H-01: FAILED SUBSCRIPTION ACQUISITION
+------------------------------------
+TelemetryService.subscribe() adds a TelemetrySubscription to _subscriptions before
+_collect() and _ensureWorker(). If an unexpected exception escapes either, the
+caller never receives the subscription but its collection claim might remain.
+
+Verify with injected exception at initial _collect and worker setup separately.
+Acceptance: acquisition is atomic from the caller's perspective, or failed
+acquisition reliably revokes its claim, clears retained monitoring data and
+does not keep polling/resources active; pre-existing consumers survive.
+Normal provider unavailability remains nonfatal/explicit. Test that a later
+valid subscription can be acquired after the fault.
+
+H-02: UNEXPECTED POLLING-THREAD TERMINATION
+-------------------------------------------
+TelemetryService._samplingLoop() sets _thread = None only on normal exit.
+An unexpected exception escaping the loop could leave a dead thread reference,
+preventing _ensureWorker() from starting replacement polling.
+
+Investigate with deterministic injected faults, distinguishing ordinary
+handled sensor failures from unexpected collector/scheduler/clock exceptions.
+Acceptance: no permanently stale worker reference and later legitimate
+subscription/sampling requests can recover. Preserve one shared collector,
+consumer isolation, bounded history, and truthful failure visibility; do not
+introduce unbounded automatic retry/spin or mask platform failure evidence.
+
+SCOPE, OWNERSHIP AND VERIFICATION
+--------------------------------
+Integration is accountable for investigation, bounded assignment if useful,
+independent source review, regression testing, and acceptance. It may implement
+the targeted fixes directly or delegate them on a temporary branch under the
+current ai-workflow protocol. Check current inbox and synchronize safely first.
+Add focused fault-injection architectural tests; rerun relevant telemetry,
+observation/application and full tests. Report exact changed paths/commits, commands,
+test results and any remaining failure/cleanup limits.
+
+Do not redesign PM-01/02/03, add performance UI, automatic optimization, server
+restarts, provider activation authority, or alter consumer Application branches.
+If the findings prove false, close them with concrete source/test evidence instead
+of making speculative changes. This request does not claim that code is defective
+until reproduced, nor that real NVIDIA/llama.cpp validation has occurred.
+
+NEXT GATE
+---------
+Following accepted hardening, real-hardware and real-provider validation remains
+a separate task requiring a fresh scope and evidence.

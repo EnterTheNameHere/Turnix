@@ -1,0 +1,789 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-09_ROOT_SYSTEM_AND_PACK_DISCOVERY_BOUNDARIES.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 15
+    DOC_GIT: 21ce227
+    GitHub blob SHA seen by assistant:
+        913234b935c91d27580191d78e79ece84b57da6b
+
+Audit note status:
+    Consolidated Dv3 architecture rewrite recommendation.
+    Action-focused revision pass for discovery boundaries, root-origin/category
+    separation, SavePack and save-local context, ordinary content-root
+    precedence, userdata/saves root recovery, manifest-based scanning, discovery
+    output, lazy SavePack scanning, PackManager separation, trace wording, and
+    compressed rewrite guidance.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-09 should be kept.
+
+No heavy rewrite is recommended.
+
+DA-09 owns root origins, root categories, candidate-root formation, bootstrap
+path behavior, content-root aggregation, discovery entrypoint rules, directory
+scanning constraints, discovery output, save discovery policy, discovery
+guarantees, and discovery-domain trace obligations.
+
+DA-09 should keep discovery boring, strict, predictable, deterministic, and
+side-effect-free.
+
+Discovery identifies candidate pack entities inside allowed roots and
+classifies them into discovered or rejected outcomes.
+
+Discovery also establishes candidate roots for non-pack categories such as
+userdata and saves.
+
+Discovery does not grant runtime meaning beyond the root/bootstrap model
+defined in DA-09.
+
+Discovery must not decide:
+
+    - visibility
+    - enablement
+    - selector resolution
+    - dependency satisfaction
+    - activation
+    - import behavior
+    - runtime loading
+    - capability authority
+    - PackManager repair
+    - policy outcomes beyond the root/bootstrap model defined in DA-09
+
+Overall recommendation:
+
+    KEEP WITH SMALL PRECEDENCE WATCH
+
+
+CURRENT CLASSIFICATION
+======================
+
+KEEP WITH SMALL PRECEDENCE WATCH
+
+DA-09 should not be rewritten heavily.
+
+Future edits should preserve:
+
+    - discovery as side-effect-free candidate production
+    - discovery as input, not runtime result
+    - root origin/category separation
+    - custom / first-party / third-party / userdata / saves category meanings
+    - SavePack and save-local context boundaries
+    - ordinary content-root precedence as ordinary discovery/root input
+    - selected/preferred root distinction
+    - no silent userdata/saves root switching
+    - roots as namespaces, not packs
+    - manifest-based deterministic scanning
+    - symlink rejection by default
+    - discovery output contract
+    - manifests as whole artifacts
+    - lazy SavePack deep scanning by default
+    - PackManager helpfulness staying outside ordinary discovery
+    - DA-03-compatible trace wording
+
+
+PRESERVATION RULE 1: DISCOVERY IS NOT AUTHORITY
+===============================================
+
+Preserve DA-09's core boundary:
+
+    Discovery finds and classifies candidates.
+
+    Later domains decide later meanings.
+
+Discovery must not become:
+
+    - visibility
+    - indexing
+    - resolution
+    - selector parsing
+    - dependency solving
+    - policy authority
+    - activation
+    - import
+    - runtime loading
+    - capability authority
+    - PackManager repair
+    - runtime state authority
+    - committed-state authority
+
+Correct domain split:
+
+    Discovery:
+        strict candidate production and rejected-candidate classification
+
+    Indexing / visibility:
+        visible catalog shape
+
+    Resolution:
+        selected candidates
+
+    Dependency logic:
+        dependency satisfaction
+
+    Activation:
+        controlled executable participation
+
+    Import / module loading:
+        import behavior
+
+    ExecutionAdapter / PackContext / capability systems:
+        runtime code participation
+
+    PackManager:
+        explicit inspection, explanation, graph preparation, validation, and
+        policy/user-mediated repair
+
+This prevents discovery from becoming the clever "make packs work" layer.
+
+
+PRESERVATION RULE 2: ROOT ORIGIN AND CATEGORY MEANING STAY SEPARATE
+===================================================================
+
+Preserve the distinction between root origin and root category.
+
+Root origin kind describes where a root came from.
+
+Root origin kind does not by itself determine whether a candidate should win
+later resolution.
+
+Root categories have distinct meanings:
+
+    - custom/
+    - first-party/
+    - third-party/
+    - userdata/
+    - saves/
+
+userdata/ and saves/ are not content categories.
+
+Externally-managed content roots may contribute only third-party content unless
+another authoritative document explicitly changes that rule.
+
+Do not rewrite externally-managed root rules as a hard adversarial-security
+guarantee.
+
+They are provenance and safety-hygiene constraints.
+
+
+PRESERVATION RULE 3: SAVEPACK AND SAVE-LOCAL MATERIAL STAY CONTEXT-BOUND
+========================================================================
+
+Preserve DA-09's SavePack boundary.
+
+SavePacks are discoverable as save entities.
+
+SavePacks are not eligible for import as normal content-root packs.
+
+Packs copied into a SavePack remain context-bound to that SavePack only unless
+another authoritative document explicitly states otherwise.
+
+Save-local pack material is a distinct nearer source context and precedes
+ordinary content-root precedence.
+
+Therefore:
+
+    custom does not override save-local pack material by default
+
+Reason:
+
+    Save-local material is nearer to the SavePack/AppInstance context than
+    ordinary content-root precedence.
+
+Do not weaken this before SavePack/AppInstance and selected-graph documents are
+settled.
+
+
+WATCH ITEM: CONTENT-ROOT PRECEDENCE
+===================================
+
+DA-09 defines ordinary content-root precedence as:
+
+    custom
+    first-party
+    third-party
+
+This is likely correct for ordinary content-root precedence.
+
+Keep this as an input to deterministic resolution, not as a blanket runtime
+authority rule.
+
+It must not override:
+
+    - save-local material
+    - selected graph intent
+    - pinned SavePack graph evidence
+    - explicit user choice
+    - explicit AppInstance semantics
+    - explicit SavePack semantics
+    - policy-owned graph choices
+
+Recommendation:
+
+    Keep DA-09 wording for ordinary content-root precedence.
+
+    Do not let discovery/root category precedence become universal runtime
+    authority.
+
+
+PRESERVATION RULE 4: USERDATA AND SAVES ROOT RECOVERY MUST NOT SILENTLY SWITCH
+==============================================================================
+
+Preserve DA-09's selected/preferred root distinction.
+
+For userdata and saves:
+
+    selected root is stronger than preferred root
+
+    selected root expresses explicit user choice
+
+    preferred root expresses last used usable operational target
+
+If selected and preferred differ because controlled recovery used another root,
+the mismatch must be surfaced to the user rather than hidden.
+
+Preserve userdata rules:
+
+    userdata has exactly one active root
+
+    CLI userdata is explicit and final
+
+    ENV userdata is a bootstrap seed and follows normal bootstrap behavior
+
+    redirect applies only to userdata
+
+    redirect may be followed once
+
+    only canonical paths.config.json may define final persisted
+    selected/preferred userdata state
+
+If active userdata root or canonical persisted path-config location becomes
+unreadable or unwritable:
+
+    - do not silently switch
+    - surface the problem to the user
+    - copying or migration may be offered when old userdata remains readable
+    - old userdata does not remain a parallel live source
+    - inability to persist the new path/config change is explicit failure of
+      that persistence action rather than a reason to silently write elsewhere
+
+Preserve saves rules:
+
+    saves has exactly one active writable root
+
+    saves does not use redirect semantics
+
+    selectedSaves is explicit selected saves root
+
+    savesDirectoryRoots are extra candidate hints and do not imply jump by
+    themselves
+
+If selectedSaves exists but is no longer usable:
+
+    - do not silently fall through
+    - surface the problem to the user
+    - allow controlled recovery or reselection through the normal centralized
+      path
+
+If previously used saves root becomes non-writable but remains readable:
+
+    - surface the change explicitly
+    - show previous saves path
+    - show writable replacement if one is found
+    - allow user selection of another saves root
+    - continue to expose readable old saves for loading where possible
+
+If a save is later written into the writable saves root, that writable copy
+becomes the nearer source and shadows the read-only copy in later
+discovery/listing.
+
+This read-only old / writable new shadowing applies to saves only, not userdata.
+
+
+PRESERVATION RULE 5: ROOTS ARE NAMESPACES, NOT PACKS
+====================================================
+
+Preserve discovery entrypoint rules.
+
+Root directories are namespaces rather than packs.
+
+A manifest located directly in a category root directory is ignored.
+
+Examples:
+
+    first-party/manifest.json5
+    custom/manifest.json5
+    saves/manifest.json5
+
+This should not be treated as a fatal error.
+
+Reason:
+
+    - roots define namespaces rather than pack identities
+    - accidental global packs are prevented
+    - ambiguity at root level is avoided
+
+
+PRESERVATION RULE 6: DISCOVERY SCANNING STAYS MANIFEST-BASED AND DETERMINISTIC
+==============================================================================
+
+Preserve manifest-based depth.
+
+Discovery depth is defined by manifest nesting rather than raw filesystem
+nesting.
+
+Depth increases only when scanning below a discovered manifest.
+
+Preserve scan-depth behavior:
+
+    totalDepth <= 0 means unlimited
+
+    totalDepth == 1 means immediate subdirectories only
+
+    totalDepth >= 2 means exact recursion limit
+
+    default totalDepth = 60
+
+If the limit is exceeded, recursion stops for that branch and discovery
+continues elsewhere.
+
+This is not fatal by itself.
+
+Preserve symlink behavior:
+
+    File and directory symlinks are forbidden by default.
+
+Reason:
+
+    - determinism
+    - security boundary clarity
+    - prevention of implicit graph expansion
+
+Later policy-based relaxation may exist, but discovery behavior must remain
+deterministic.
+
+
+PRESERVATION RULE 7: DISCOVERY OUTPUT IS INPUT, NOT RUNTIME RESULT
+==================================================================
+
+Preserve DA-09's discovery output contract.
+
+Discovery produces PackDescriptor objects in Discovered state.
+
+Discovery classifies candidate pack entities into discovered or rejected
+outcomes.
+
+At discovery time:
+
+    - manifest is read
+    - declared fields are parsed and type-checked
+    - parent relationships are established
+    - packTreeId is computed
+    - raw manifest data is preserved
+
+Discovery preserves multiple distinct discovered candidates even when later
+stages may determine some are equivalent.
+
+Discovery does not:
+
+    - determine resolution source
+    - resolve visibility
+    - apply user enable/disable policy
+    - parse selectors
+    - activate packs
+    - import code
+    - load runtimes
+    - require compilers or pack-provided providers
+
+Discovery output remains an input to later indexing, visibility, and resolution
+stages.
+
+It is not a runtime-loaded result by itself.
+
+
+PRESERVATION RULE 8: MANIFESTS ARE WHOLE ARTIFACTS
+==================================================
+
+Preserve the whole-manifest rule.
+
+Discovery treats each manifest as a whole-definition artifact.
+
+Duplicate manifest candidates are selected, not merged.
+
+Duplicate manifest candidates are shadowed, not stacked.
+
+No additive field composition across duplicate manifests occurs.
+
+Later resolution operates on whole candidate artifacts produced by discovery,
+not merged manifest fragments.
+
+This prevents hidden manifest composition and "manifest soup" behavior.
+
+
+PRESERVATION RULE 9: SAVE DISCOVERY STAYS LAZY BY DEFAULT
+=========================================================
+
+Preserve DA-09's save discovery policy.
+
+By default, Turnix scans:
+
+    saves/*/*/manifest.json5
+
+By default, Turnix does not recurse into SavePack directories.
+
+By default, Turnix does not discover copied packs inside SavePacks eagerly.
+
+Deep scanning of SavePack contents occurs only when:
+
+    - a SavePack is explicitly loaded
+    - a management surface inspects a SavePack
+    - configuration explicitly enables deep save scanning
+
+At that point:
+
+    - copied packs may be discovered
+    - visibility remains limited to SavePack context
+    - copied-pack rules apply
+
+PackManager and management surfaces may inspect more deeply, but that
+helpfulness must not silently migrate into ordinary discovery.
+
+
+PRESERVATION RULE 10: DISCOVERY REMAINS SIDE-EFFECT FREE
+========================================================
+
+Preserve discovery guarantees.
+
+Discovery is fast and side-effect-free.
+
+Discovery does not depend on pack activation.
+
+Discovery does not require pack-provided Readers, Writers, compilers, or runtime
+providers.
+
+Heavy logic belongs to later indexing, resolution, activation, or
+manager/tooling stages rather than discovery.
+
+Discovery failures are classified rather than globally fatal unless required
+core prerequisites are unavailable.
+
+Discovery may preserve more provenance information than later deterministic
+selection will use.
+
+Do not rewrite discovery into a stage that activates, imports, compiles,
+repairs, loads, or asks pack-provided providers for meaning.
+
+
+PRESERVATION RULE 11: PACKMANAGER HELPFULNESS MUST NOT MIGRATE INTO DISCOVERY
+=============================================================================
+
+Preserve DA-09 / DA-29 boundary.
+
+Discovery:
+
+    strict, deterministic, side-effect-free candidate production
+
+PackManager:
+
+    inspect, explain, prepare, validate, repair, and manage selected graph
+    intent through explicit policy/user-mediated operations
+
+PackManager may use discovery output.
+
+PackManager may request explicit rescan where allowed.
+
+PackManager may inspect SavePack contents where the management operation permits
+it.
+
+PackManager must not make ordinary discovery:
+
+    - clever
+    - heuristic
+    - silently self-repairing
+    - side-effectful
+    - graph-preparing
+    - policy-deciding
+    - activation-like
+    - import-like
+
+
+PRESERVATION RULE 12: TRACE WORDING FOLLOWS DA-03
+=================================================
+
+DA-09 uses trace-visible and discovery-domain trace reason wording.
+
+This should follow the DA-03 cross-document trace wording check.
+
+Discovery trace obligations are discovery-domain emission obligations.
+
+Trace retention and loss remain governed by DA-03.
+
+Discovery trace evidence does not define:
+
+    - resolution
+    - visibility
+    - activation
+    - import
+    - runtime loading
+    - capability availability
+    - runtime meaning
+
+
+SOURCE BOUNDARY STATEMENT: DISCOVERY IS STRICT CANDIDATE PRODUCTION
+===================================================================
+
+DA-09 may state this compact source-level boundary:
+
+    Discovery identifies candidate pack entities inside allowed roots and
+    classifies them into discovered or rejected outcomes.
+
+    Discovery also establishes candidate roots for non-pack categories such as
+    userdata and saves.
+
+    Discovery does not grant runtime meaning beyond the root/bootstrap model
+    defined in DA-09.
+
+    Discovery does not decide visibility, enablement, selector resolution,
+    dependency satisfaction, activation, runtime loading, import behavior,
+    capability authority, or PackManager repair.
+
+    Discovery is strict, boring, predictable, deterministic, and
+    side-effect-free.
+
+This source-level boundary is useful because DA-09 owns root-origin,
+root-category, bootstrap path, and discovery-boundary semantics.
+
+Detailed ownership mapping belongs in the guardrail section.
+
+
+WATCH ITEM: PACKMANAGER BOUNDARY
+================================
+
+DA-29 PackManager inspection, explanation, graph preparation, validation,
+repair, and management operations may use discovery output.
+
+PackManager helpfulness must not make DA-09 discovery:
+
+    - clever
+    - heuristic
+    - self-repairing
+    - side-effectful
+    - graph-preparing
+    - policy-deciding
+    - activation-like
+    - import-like
+
+
+WATCH ITEM: TRACE WORDING
+=========================
+
+Follow the DA-03 cross-document trace wording check.
+
+Discovery trace obligations are discovery-domain emission obligations.
+
+Trace retention and loss remain governed by DA-03.
+
+Do not let discovery trace wording imply that trace evidence is committed state,
+that trace persistence is guaranteed forever, or that discovery trace evidence
+defines later runtime meaning.
+
+
+WATCH ITEM: SAVEPACK / APPINSTANCE GRAPH SEMANTICS
+==================================================
+
+SavePack, AppInstance, selected-graph, and dependency documents should define
+how copied pack material, pinned graph identity, selected graph intent, and
+save-local pack material interact after discovery.
+
+Until then:
+
+    - save-local material remains context-bound
+    - ordinary content-root precedence does not override save-local material by
+      default
+    - discovered SavePacks are save entities, not ordinary importable content
+      roots
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-09 CONTENT
+=========================================================
+
+This section is not suggested DA-09 wording.
+
+It exists to prevent architectural drift during rewrite when the editor knows
+DA-09 but may not have every subject-owning document loaded.
+
+Use these as guardrails only.
+
+Discovery-boundary guardrails:
+
+    Discovery is candidate production, not runtime identity.
+
+    Discovery output is input to later stages, not runtime result.
+
+    Discovery is not visibility.
+
+    Discovery is not indexing.
+
+    Discovery is not generic resolution.
+
+    Discovery is not selector parsing.
+
+    Discovery is not dependency satisfaction.
+
+    Discovery is not activation.
+
+    Discovery is not importing.
+
+    Discovery is not runtime loading.
+
+    Discovery is not capability authority.
+
+    Discovery is not PackManager repair.
+
+    Discovery is not policy authority beyond the root/bootstrap model defined
+    in DA-09.
+
+    Discovery is not committed-state authority.
+
+    Catalog listing is not discovery.
+
+    PackManager inspection is not ordinary discovery.
+
+    PackManager repair is not discovery.
+
+    Helpful management behavior must not silently migrate into ordinary
+    discovery.
+
+    Root origin kind is not later resolution winner by itself.
+
+    Root category precedence is not universal runtime authority.
+
+    custom does not override save-local pack material by default.
+
+    SavePack is discoverable as save entity, not ordinary importable content
+    root.
+
+    Save-local material is context-bound to its SavePack/AppInstance context.
+
+    Roots are namespaces, not packs.
+
+    Manifests are whole artifacts.
+
+    Discovery does not merge duplicate manifests.
+
+    Discovery does not activate pack-provided Readers, Writers, compilers, or
+    runtime providers.
+
+    Discovery trace evidence is not resolution, visibility, activation, import,
+    runtime loading, capability availability, or runtime meaning.
+
+Owning-document guardrails:
+
+    DA-03 owns trace schema, trace DAG semantics, trace storage, trace retention,
+    and trace loss.
+
+    DA-06 owns configuration semantics.
+
+    DA-07 owns early-phase I/O limits and built-in-reader-only behavior.
+
+    DA-10 owns pack identity, hierarchy, indexing, visibility, and SavePack
+    visibility semantics.
+
+    DA-11 owns generic PackRequest resolution mechanics, selector resolution,
+    and deterministic selection.
+
+    DA-12 owns importing, module loading, and code-boundary rules.
+
+    DA-13 owns dependency semantics, advisory relation semantics, pinned/copied
+    field semantics, and provider-role semantics.
+
+    DA-14 owns activation lifecycle and PackContext authority.
+
+    DA-16 owns service, capability, permission, and Job-backed capability
+    semantics.
+
+    DA-17 owns user decision and remembered policy semantics outside DA-09's
+    root/bootstrap model.
+
+    DA-20 owns AppInstance lifecycle and runtime identity semantics.
+
+    DA-21 owns RPC, channel, and transport semantics.
+
+    DA-23 owns execution adapter boundary semantics.
+
+    DA-24 owns OrchestrationUnit and mutation-authority semantics.
+
+    DA-28 owns RuntimeHost workspace ownership and command-surface semantics.
+
+    DA-29 owns PackManager inspection, explanation, graph preparation,
+    validation, repair, selected graph management, and PackManager-domain trace
+    semantics.
+
+Local rewrite rule:
+
+    DA-09 may name these concepts when needed to protect discovery and root
+    boundaries.
+
+    DA-09 should not define their detailed behavior.
+
+    DA-09 should remain the root-origin, root-category, candidate-root,
+    bootstrap path, discovery scanning, discovery output, save discovery, and
+    discovery-domain trace document.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-09.
+
+No heavy rewrite is recommended.
+
+Recommended future edits:
+
+    - keep discovery as strict side-effect-free candidate production
+    - keep discovery output as input, not runtime result
+    - keep root origin/category separation
+    - keep SavePack and save-local context boundaries
+    - keep ordinary content-root precedence scoped to ordinary content-root
+      resolution input
+    - keep selected/preferred root distinction
+    - keep userdata/saves root recovery explicit rather than silent
+    - keep roots as namespaces, not packs
+    - keep manifest-based deterministic scanning
+    - keep symlink rejection by default
+    - keep manifests as whole artifacts
+    - keep lazy SavePack deep scanning by default
+    - keep PackManager helpfulness outside ordinary discovery
+    - keep DA-03-compatible trace wording
+
+Do not expand DA-09 into detailed indexing/visibility, generic resolution,
+selector parsing, dependency solving, importing, activation, runtime loading,
+PackContext, capability permission, PackManager repair, AppInstance lifecycle,
+SavePack runtime behavior, RPC, ExecutionAdapter, RuntimeHost, selected-graph
+semantics, or concrete trace schema/storage semantics.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-09
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-09_RECOMMENDATION.txt
+DOC_REV: 4
+DOC_GIT: 4c1a6e4
+----------------

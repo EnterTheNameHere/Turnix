@@ -1,0 +1,81 @@
+ER-02 INDEPENDENT BINDING PUBLICATION REPRODUCER
+================================================
+Owner: Integration. Investigated worker: 0b334c8.
+Run against the worker source tree, not accepted Integration (module is not adopted).
+Copy the Python below to test_integration_binding_race.py at that source tree root.
+Use a Python with repository dependencies; run pytest on that file explicitly.
+The root sys.path insertion ensures worker modules are used with embedded Python.
+Expected correct behavior: all four cases pass by rejecting late publication.
+Observed on 0b334c8: four failures, DID NOT RAISE LlmExecutionOwnershipError.
+Fakes and Events only; no provider/server/model/hardware operation.
+
+# file: python-embedded/er02-review/test_integration_binding_race.py ; version: 1
+"""Independent publication-versus-revocation regression for the worker snapshot."""
+import importlib.util
+import sys
+from concurrent.futures import Future
+from pathlib import Path
+from threading import Event, Thread
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent))
+path = Path(__file__).parent / "tests/backend/llm/test_executionSessions.py"
+spec = importlib.util.spec_from_file_location("er02ReviewHelpers", path)
+helpers = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(helpers)
+
+
+@pytest.mark.parametrize("revoke", ["host", "registry", "owner", "registration"])
+def test_binding_cannot_publish_after_revocation(monkeypatch, revoke):
+    """Revocation that wins before publication must not leave a new live binding."""
+    registry = helpers.LlmProviderRegistry()
+    scope = helpers.RegistrationScope()
+    registry.register(scope, ownerId="provider", name="controlled", provider=helpers.Legacy())
+    scope.publish()
+    registration = registry.requireRegistration("controlled")
+    service = registry.executions
+    owner = service.owner(registry)
+    residency = helpers.Residency()
+    domain = helpers.ExecutionResourceDomain("review", residency)
+    profile = domain.registerProfile(helpers.ResidencyDescriptor(b"review-profile", object()))
+    entered, proceed = Event(), Event()
+    original = domain.openParticipant
+
+    def hold(**kwargs):
+        """Pause outside the broker lane after issuing the core participant."""
+        participant = original(**kwargs)
+        entered.set()
+        assert proceed.wait(5)
+        return participant
+
+    monkeypatch.setattr(domain, "openParticipant", hold)
+    future = Future()
+
+    def publish():
+        """Capture the actual binding publication or its rejection."""
+        try:
+            future.set_result(service.bind(registry, registration, domain=domain,
+                profiles={None: profile}, adapter=helpers.Adapter(residency),
+                grants={owner: helpers.LlmOwnerGrant((None,), True)}, leaseCloser=lambda: None))
+        except BaseException as error:
+            future.set_exception(error)
+
+    thread = Thread(target=publish, daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        if revoke == "host":
+            service.revokeAll()
+        elif revoke == "registry":
+            service.revokeRegistry(registry)
+        elif revoke == "owner":
+            service.revokeOwner(owner)
+        else:
+            service.revokeRegistration(registry, "provider")
+            scope.withdraw()
+    finally:
+        proceed.set()
+    with pytest.raises(helpers.LlmExecutionOwnershipError):
+        future.result(5)
+    assert not service._bindings

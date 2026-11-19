@@ -1,0 +1,913 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-10 DEFAULT LAUNCHER APPPACK AND TOOL STATE CONTEXT
+==============================================================================
+
+Document title:
+    IS-10 - Default Launcher AppPack and Tool State Context
+
+Target IS path:
+    docs/design/IS-10_DEFAULT_LAUNCHER_APPPACK_AND_TOOL_STATE_CONTEXT.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-10
+    DOC_FILE: docs/design/IS-10_DEFAULT_LAUNCHER_APPPACK_AND_TOOL_STATE_CONTEXT.txt
+    DOC_REV: 1
+    DOC_GIT: ad81473
+    GitHub blob SHA seen by assistant:
+        bf0565d3ac82126528ba095e2b7481cbac7b4fa1
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-10_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-10 file was
+    read or expected.
+
+    CMR-04 was read only as an index because the user supplied the document
+    identifier IS-10 without the exact IS path.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as an index to locate IS-10
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-09_RUNTIME_CATALOG_AND_PACK_LISTING_OPERATIONS.txt
+    - docs/design/IS-10_DEFAULT_LAUNCHER_APPPACK_AND_TOOL_STATE_CONTEXT.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, ToolStateContext, and launcher-authority
+    boundary fixes.
+
+    IS-10 is a useful concrete implementation specification for default launcher
+    startup behavior, launcher replacement, launcher Main Menu actions,
+    ToolStateContext persistence, temporary tool-state fallback, launcher use of
+    PackManager/catalog operations, launcher exit behavior, and trace visibility.
+
+    It should not be rewritten from scratch.
+
+    The core invariant is valuable: the default launcher is an ordinary
+    replaceable first-party AppPack used as an entry and presentation surface. It
+    is not Kernel, RuntimeHost, PackManager, catalog, persistence authority,
+    SaveBundle authority, or special application authority.
+
+    Required fixes are targeted but important: replace obsolete AppInstance and
+    SavePack terminology, clarify whether ToolStateContext is a special
+    Application/SaveBundle-like persistence closure or a separate tool-state
+    persistence domain, and preserve the boundary between launcher UI actions and
+    the runtime operations they request.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-10 correctly defines the default launcher runtime flow without defining
+    root discovery, pack identity, PackRequest resolution, import/module loading,
+    dependency semantics, activation semantics, service/capability execution,
+    policy, Job lifecycle, RPC, UI/frontend runtime, adapter authority,
+    RuntimeHost lifecycle, PackManager semantics, concrete ListPacks envelopes,
+    browser component layout, CSS, JavaScript module syntax, CLI syntax, JSON-RPC
+    envelope fields, or WebSocket envelope fields.
+
+2. Strong launcher non-authority invariant.
+
+    The document repeatedly says Turnix Default Launcher is not Kernel,
+    RuntimeHost, PackManager, a pack catalog, or a manager for user persistence by
+    itself.
+
+    Launcher UI is presentation and interaction. Launcher actions request
+    RuntimeHost, PackManager, catalog, settings, lifecycle, or persistence
+    operations through mediated Turnix boundaries.
+
+3. Good replaceable launcher boundary.
+
+    The default launcher is replaceable by configuration, policy, or later
+    launcher-selection rules. Replacement changes which AppPack is requested for
+    launcher startup, but does not redefine RuntimeHost, catalog, PackManager,
+    persistence, application lifecycle, or activation semantics.
+
+    Replacement launcher status grants no extra authority.
+
+4. Good explicit fallback boundary.
+
+    If the launcher AppPack cannot be resolved, startup fails unless an explicit
+    fallback launcher or recovery policy is defined and accepted. Silent fallback
+    to another launcher is not supported.
+
+5. Good View/presentation boundary.
+
+    Launcher Main Menu labels are user-facing presentation labels. They do not
+    define authority by themselves and do not mutate state by being displayed.
+
+    User interaction becomes meaningful only when Turnix accepts the corresponding
+    command, capability request, RPC message, decision, or RuntimeHost operation.
+
+6. Good ToolStateContext placement intent.
+
+    ToolStateContext is not stored under the launcher AppPack content directory,
+    not stored under first-party/third-party/custom content roots as pack content,
+    and not stored under normal saves by default.
+
+    Persistent ToolStateContext belongs under userdata. Its placement does not
+    make userdata a content root and does not make the launcher AppPack writable
+    by runtime execution.
+
+7. Good temporary-state boundary.
+
+    Temporary ToolStateContext use is explicit and trace-visible. Temporary state
+    is not silently presented as persistent state, and UI may present temporary
+    status when relevant to user expectations.
+
+8. Good action delegation.
+
+    New, Load, Settings, and Exit are launcher actions, not authority owners.
+
+    New does not own application creation or persistence creation semantics.
+    Load does not own persistence loading or migration semantics. Settings does
+    not mutate configuration merely by being opened. Exit does not always mean
+    RuntimeHost shutdown.
+
+9. Good launcher / PackManager boundary.
+
+    The launcher uses PackManager and catalog operations as a client surface. It
+    does not own PackManager semantics, ListPacks semantics, graph preparation,
+    package management, roots, selected graphs, persistence, configuration, or
+    policy.
+
+10. Good launcher access boundary.
+
+    Launcher AppPack authority is ordinary AppPack authority. It does not include
+    raw Kernel internals, unrestricted filesystem access, unrestricted PackManager
+    operations, or unrestricted persistence mutation. Replacement launchers follow
+    the same rules.
+
+11. Good exit/shutdown separation.
+
+    Exit can close launcher interaction, stop the launcher run, or request
+    RuntimeHost shutdown only according to the active startup workflow, accepted
+    command, or policy. Presentation labels such as Close Launcher and Quit
+    Turnix do not collapse those meanings.
+
+12. Good open-question discipline.
+
+    The document leaves concrete launcher identity, manifest declaration shape,
+    ToolStateContext schema, ToolStateContext identity, path encoding, launcher
+    View layout, frontend component structure, settings envelopes, launcher action
+    identifiers, bounded startup policy, multi-run coexistence policy,
+    PackManager View embedding, and launcher trace fields open.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-10 uses AppInstance throughout:
+
+        - launcher AppInstance creation
+        - launcher runs as an AppInstance
+        - launcher AppInstance identity
+        - user AppInstance
+        - AppInstance creation semantics
+        - AppInstance lifecycle/runtime identity semantics
+        - AppInstance-domain trace reasons
+        - multi-AppInstance coexistence
+        - active AppInstances
+        - launcher appInstanceId
+
+    Current source-stack correction:
+        Proposal P02 defines Application as the durable application individual and
+        ApplicationRun as one live execution period of an Application.
+
+    Required consequence for IS-10:
+        Translate AppInstance to Application and/or ApplicationRun according to
+        meaning.
+
+        Likely replacements:
+
+            launcher AppInstance creation
+                -> launcher ApplicationRun creation/start, if the launcher
+                   Application already exists or is durable tool Application
+                   identity
+                -> launcher Application creation plus ApplicationRun creation, if
+                   first launcher startup creates a durable launcher Application
+
+            launcher runs as an AppInstance
+                -> launcher runs as an ApplicationRun of the launcher Application
+
+            user AppInstance
+                -> user Application / user ApplicationRun according to context
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+            AppInstance lifecycle outcome
+                -> Application lifecycle outcome or ApplicationRun lifecycle
+                   outcome; usually ApplicationRun where live launcher execution
+                   is meant
+
+2. SavePack terminology is superseded by SaveBundle.
+
+    IS-10 uses SavePack in several places:
+
+        - launcher not becoming SavePack authority
+        - ToolStateContext is not a normal user SavePack
+        - ToolStateContext not listed by ListSavePacks
+        - New does not own SavePack creation
+        - Load lists or loads SavePacks
+        - selected SavePack identity
+        - launcher-owned SavePack creation/loading semantics
+
+    Current source-stack correction:
+        Proposal P02 defines SaveBundle as durable persistence closure of an
+        Application. SaveBundle is not a Pack and not authority by itself.
+
+    Required consequence for IS-10:
+        Translate SavePack to SaveBundle where the meaning is durable persistence
+        closure or user save identity.
+
+        Likely replacements:
+
+            normal user SavePack
+                -> normal user SaveBundle
+
+            ListSavePacks
+                -> ListSaveBundles or SaveBundle listing operation, aligned with
+                   the final IS-09 correction
+
+            selected SavePack identity
+                -> selected SaveBundle identity
+
+            SavePack creation/loading/migration
+                -> SaveBundle creation/loading/migration
+
+3. ToolStateContext as "save context for AppInstance lifecycle purposes" is too
+   old-model and ambiguous.
+
+    IS-10 says ToolStateContext is a save context for AppInstance lifecycle
+    purposes while also saying it is not a normal user SavePack.
+
+    Current-model risk:
+        SaveBundle is the durable persistence closure of an Application, and
+        ApplicationRun composes live runtime contexts including SaveBundle binding.
+        Calling ToolStateContext a save context may imply it is a SaveBundle,
+        a SaveBundle substitute, or a generic persistence root for a launcher
+        ApplicationRun.
+
+    Required consequence for IS-10:
+        Decide and state the current relationship precisely.
+
+        Safe direction:
+
+            ToolStateContext is a tool-state persistence context for launcher and
+            tool Applications. It is stored under userdata and mediated by Kernel
+            persistence/state authority. It is not a user SaveBundle, not a Pack,
+            not a content root, not a normal save, and not application committed
+            state for user Applications.
+
+        If ToolStateContext is implemented as a special SaveBundle-like durable
+        closure for tool Applications, state that as a special tool-state
+        persistence closure, not as a normal user SaveBundle and not as SavePack.
+
+        If ToolStateContext is separate from SaveBundle, say so directly.
+
+4. Launcher AppPack as replaceable entry surface must not become an authority
+   elevation path.
+
+    IS-10 already says replacement launcher status grants no authority.
+
+    Required consequence for IS-10:
+        Preserve and strengthen that configured/default launcher identity does not
+        grant Kernel authority, RuntimeHost authority, PackManager authority,
+        raw filesystem access, SaveBundle mutation authority, capability
+        permission, policy approval, or ApplicationRun lifecycle authority beyond
+        mediated operations.
+
+5. Launcher startup flow must be recast to current lifecycle operations.
+
+    Current flow:
+
+        resolve configured launcher AppPack
+        create or load ToolStateContext
+        create Launcher AppInstance
+        start Launcher AppInstance
+        create launcher View
+        bind frontend client
+
+    Required current flow should use current terms:
+
+        resolve configured launcher AppPack / accepted launcher AppDefinition
+        create or load ToolStateContext
+        create or locate launcher Application, if a durable launcher Application
+        identity is used
+        create Launcher ApplicationRun
+        start Launcher ApplicationRun
+        create launcher View
+        bind frontend client
+
+    Exact operation names may remain open, but the semantic model should no
+    longer be AppInstance.
+
+6. New action composition uses obsolete SavePack/AppInstance operation names.
+
+    Current list includes:
+
+        CreateSavePack or create save context
+        ValidateSavePackCompatibility
+        BindSaveContext
+        CreateAppInstance
+        StartAppInstance
+
+    Required current translation:
+
+        CreateApplication when new durable user Application is created
+        CreateSaveBundle or create Application persistence closure
+        ValidateSaveBundleCompatibility
+        BindSaveBundle or bind Application persistence context
+        CreateApplicationRun
+        StartApplicationRun
+        CreateView when applicable
+
+    The final wording should follow the owning lifecycle/persistence documents
+    and not invent independent launcher-owned operation semantics.
+
+7. Load action composition uses obsolete SavePack/AppInstance operation names.
+
+    Current list includes:
+
+        ListPacks filtered to SavePack
+        ResolveAppPack associated with selected SavePack
+        LoadSavePack
+        ValidateSavePackCompatibility
+        BindSaveContext
+        CreateAppInstance
+        StartAppInstance
+
+    Required current translation:
+
+        ListSaveBundles or SaveBundle listing operation aligned with IS-09
+        Resolve AppPack / accepted AppDefinition source associated with selected
+        SaveBundle
+        LoadSaveBundle
+        ValidateSaveBundleCompatibility
+        Check last-used / last-known-good graph evidence
+        BindSaveBundle or bind Application persistence context
+        CreateApplicationRun
+        StartApplicationRun
+        CreateView when applicable
+
+8. Exit action needs current ApplicationRun terminology and retained-work guardrail.
+
+    IS-10 already distinguishes launcher exit from RuntimeHost shutdown and
+    active work from silent stopping.
+
+    Required current translation:
+        Replace launcher AppInstance stop with launcher ApplicationRun stop.
+        Replace active AppInstances with active Applications/ApplicationRuns as
+        appropriate, usually active ApplicationRuns.
+
+        Preserve that launcher Exit does not silently stop active ApplicationRuns,
+        Jobs, adapters, Views, OrchestrationUnits, or retained work.
+
+9. Settings action should explicitly separate ToolStateContext from configuration
+   and policy.
+
+    IS-10 already says ToolStateContext does not replace configuration state owned
+    by DA-06 or remembered policy decisions owned by DA-17.
+
+    Required consequence:
+        Preserve this. Also ensure launcher-local settings stored in
+        ToolStateContext do not become global configuration, workspace
+        configuration, SaveBundle committed state, or policy decisions unless a
+        mediated accepted mutation explicitly writes to the owning domain.
+
+10. Trace context must be updated.
+
+    IS-10 uses launcher appInstanceId and AppInstance-domain trace reasons.
+
+    Required current translation:
+        Use launcher applicationId and/or launcher applicationRunId.
+        Use Application/ApplicationRun trace reason ownership once the owning
+        lifecycle trace vocabulary is updated.
+
+        Preserve that launcher trace evidence does not replace RuntimeHost,
+        Application, ApplicationRun, UI, activation, PackManager, catalog,
+        decision, persistence, capability, or SaveBundle evidence.
+
+11. ToolStateContext normal listing boundary must align with IS-09.
+
+    IS-10 says ToolStateContext is not listed by normal ListSavePacks.
+
+    Required current translation:
+        ToolStateContext is not listed by normal ListSaveBundles or user
+        SaveBundle listing. It may be listed only by explicit tooling,
+        diagnostics, audit, or tool-state operations when such operations are
+        defined and permitted.
+
+12. Launcher Main Menu labels are good but should remain non-final UI design.
+
+    The labels New, Load, Settings, Exit are useful default presentation labels.
+    They should not be overread as concrete component layout, exact UX behavior,
+    exact command identifiers, or fixed localization text.
+
+    Required consequence:
+        Preserve that labels are presentation labels and exact launcher View
+        layout/action identifiers remain open.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate to Application / ApplicationRun according to meaning.
+
+2. Do not preserve AppInstance lifecycle or appInstanceId.
+
+    Translate to Application lifecycle, ApplicationRun lifecycle, applicationId,
+    and/or applicationRunId.
+
+3. Do not preserve SavePack as current terminology.
+
+    Translate to SaveBundle according to meaning.
+
+4. Do not preserve ListSavePacks for normal user saves if IS-09 is corrected to
+   ListSaveBundles or non-Pack SaveBundle catalog projection.
+
+5. Do not preserve ToolStateContext as a vague generic save context.
+
+    Define whether it is a tool-state persistence context separate from
+    SaveBundle, or a special tool-state persistence closure for tool Applications.
+
+6. Do not preserve launcher New/Load as owning persistence or lifecycle semantics.
+
+    They are launcher actions that request owning operations.
+
+7. Do not preserve launcher status as special authority.
+
+    Default or replacement launcher status grants no extra authority.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-10.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance terminology.
+
+    Replace:
+
+        launcher AppInstance
+        user AppInstance
+        AppInstance creation
+        AppInstance lifecycle
+        AppInstance-domain trace reasons
+        appInstanceId
+        multi-AppInstance coexistence
+
+    with Application and/or ApplicationRun terminology.
+
+2. Replace SavePack terminology.
+
+    Replace:
+
+        SavePack
+        normal user SavePack
+        ListSavePacks
+        selected SavePack identity
+        SavePack creation/loading/migration
+        SavePack compatibility
+        SavePack mutation
+
+    with SaveBundle terminology or with the final IS-09 catalog/listing term.
+
+3. Clarify ToolStateContext ontology.
+
+    Add a direct statement choosing one of these current-model interpretations:
+
+        ToolStateContext is a tool-state persistence context stored under
+        userdata and separate from user SaveBundles.
+
+    or:
+
+        ToolStateContext is a special tool-state persistence closure for tool
+        Applications, not a normal user SaveBundle.
+
+    In either case, make clear that ToolStateContext is not AppPack content, not a
+    content root, not a normal user SaveBundle, not raw filesystem authority, not
+    PackManager authority, and not policy/configuration authority.
+
+4. Update launcher startup flow.
+
+    Replace create/start Launcher AppInstance with current Application /
+    ApplicationRun steps.
+
+    Suggested conceptual flow:
+
+        resolve configured launcher AppPack or accepted launcher AppDefinition
+        create or load ToolStateContext
+        create or locate launcher Application when durable launcher identity is
+        used
+        create Launcher ApplicationRun
+        start Launcher ApplicationRun
+        create launcher View
+        bind frontend client when a frontend surface is used
+
+5. Update New action composition.
+
+    Replace CreateSavePack / ValidateSavePackCompatibility / BindSaveContext /
+    CreateAppInstance / StartAppInstance with CreateApplication /
+    CreateSaveBundle / ValidateSaveBundleCompatibility / BindSaveBundle or bind
+    Application persistence context / CreateApplicationRun / StartApplicationRun.
+
+    Preserve that New does not own those semantics.
+
+6. Update Load action composition.
+
+    Replace ListPacks filtered to SavePack / LoadSavePack /
+    ValidateSavePackCompatibility / BindSaveContext / CreateAppInstance /
+    StartAppInstance with current SaveBundle and ApplicationRun operations.
+
+    Preserve that Load does not own listing, loading, binding, migration, or
+    lifecycle semantics.
+
+7. Update Exit action.
+
+    Replace launcher AppInstance stop with launcher ApplicationRun stop.
+
+    Preserve that Exit does not always mean RuntimeHost shutdown and does not
+    silently stop active ApplicationRuns, Jobs, adapters, Views,
+    OrchestrationUnits, retained work, or required entry surfaces.
+
+8. Update ToolStateContext listing boundary.
+
+    Replace normal ListSavePacks with normal ListSaveBundles or the final IS-09
+    save-listing term.
+
+    Preserve that ToolStateContext may be listed only by explicit tooling,
+    diagnostics, audit, or tool-state operations when defined and permitted.
+
+9. Update launcher access boundary.
+
+    Replace unrestricted SavePack mutation with unrestricted SaveBundle mutation
+    or application-data mutation according to owning semantics.
+
+    Preserve that launcher frontend runtime does not directly mutate committed
+    state, ToolStateContext, configuration, roots, packs, SaveBundles, selected
+    graphs, or policy.
+
+10. Update trace fields and ownership.
+
+    Replace launcher appInstanceId with launcher applicationId and/or
+    applicationRunId.
+
+    Replace AppInstance-domain trace reasons with Application/ApplicationRun trace
+    reason ownership once accepted.
+
+    Preserve that launcher trace evidence does not replace owning-domain trace
+    evidence.
+
+11. Preserve temporary-state guardrails.
+
+    Keep temporary ToolStateContext explicit, trace-visible, not silently
+    persistent, and user-visible when relevant.
+
+12. Preserve replacement launcher guardrails.
+
+    Keep replacement launchers ordinary AppPacks or accepted launcher
+    AppDefinition sources. They receive no extra authority merely because they are
+    configured as launcher.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun / SaveBundle terminology.
+
+    2. Keep Core Concept, but state launcher ApplicationRun instead of launcher
+       AppInstance and strengthen replacement launcher non-authority.
+
+    3. Keep Launcher Identity, but clarify AppPack versus accepted launcher
+       AppDefinition source if non-AppPack launcher definitions are later
+       supported.
+
+    4. Update Launcher Startup Flow to current Application / ApplicationRun /
+       ToolStateContext language.
+
+    5. Rename Launcher AppInstance section to Launcher ApplicationRun or Launcher
+       Application and ApplicationRun, depending on final model.
+
+    6. Keep ToolStateContext and ToolStateContext Placement sections, but clarify
+       whether ToolStateContext is separate from SaveBundle or a special
+       tool-state persistence closure.
+
+    7. Keep Persistent and Temporary Tool State, Launcher Main Menu, Settings,
+       PackManager/Catalog usage, Access/Permission Boundary, Failure Categories,
+       Relation to Implementation Specifications, Unsupported, Open Questions,
+       and Locked Summary sections.
+
+    8. Update New, Load, Exit, Trace, Unsupported, and Locked Summary sections to
+       current Application / ApplicationRun / SaveBundle terms.
+
+Do not turn IS-10 into DA-20 Application/ApplicationRun lifecycle doctrine, DA-22
+View/frontend doctrine, DA-28 RuntimeHost doctrine, DA-29 PackManager doctrine,
+IS-09 catalog/listing operation schema, DA-06 configuration doctrine, DA-17 policy
+doctrine, DA-14 activation doctrine, concrete launcher UI layout, CLI syntax,
+JSON-RPC/WebSocket schema, or ToolStateContext schema.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Description
+
+    Current risk:
+        launcher AppInstance creation
+
+    Safer wording:
+        launcher ApplicationRun creation/start, and launcher Application identity
+        if durable launcher identity is used
+
+2. Purpose
+
+    Current risk:
+        without becoming Kernel, RuntimeHost, PackManager, catalog, SavePack, or
+        AppInstance authority
+
+    Safer wording:
+        without becoming Kernel, RuntimeHost, PackManager, catalog, SaveBundle,
+        Application, or ApplicationRun authority
+
+3. Core Concept
+
+    Current risk:
+        Turnix Default Launcher is not a SavePack manager by itself.
+        Turnix Default Launcher runs as an AppInstance when launched.
+
+    Safer wording:
+        Turnix Default Launcher is not a SaveBundle manager by itself.
+        Turnix Default Launcher runs as an ApplicationRun when launched.
+
+4. Launcher startup flow
+
+    Current risk:
+        create Launcher AppInstance
+        start Launcher AppInstance
+
+    Safer wording:
+        create Launcher ApplicationRun
+        start Launcher ApplicationRun
+
+    Add launcher Application creation/lookup if the final model uses durable
+    launcher Application identity.
+
+5. Launcher AppInstance section title
+
+    Current risk:
+        LAUNCHER APPINSTANCE
+
+    Safer wording:
+        LAUNCHER APPLICATIONRUN
+
+    or:
+        LAUNCHER APPLICATION AND APPLICATIONRUN
+
+6. ToolStateContext
+
+    Current risk:
+        ToolStateContext is a save context for AppInstance lifecycle purposes.
+
+    Safer wording:
+        ToolStateContext is a tool-state persistence context for launcher and
+        tool ApplicationRuns. It is stored under userdata and is separate from
+        normal user SaveBundles unless a later tool-state persistence
+        specification defines a special SaveBundle-like representation.
+
+7. New action
+
+    Current risk:
+        New presents or requests creation of a new user AppInstance path.
+
+    Safer wording:
+        New presents or requests creation of a new user Application and
+        ApplicationRun path.
+
+8. New action operation composition
+
+    Current risk:
+        CreateSavePack or create save context
+        ValidateSavePackCompatibility
+        BindSaveContext
+        CreateAppInstance
+        StartAppInstance
+
+    Safer wording:
+        CreateApplication when needed
+        CreateSaveBundle or create Application persistence closure
+        ValidateSaveBundleCompatibility
+        BindSaveBundle or bind Application persistence context
+        CreateApplicationRun
+        StartApplicationRun
+
+9. Load action
+
+    Current risk:
+        Load presents or requests loading of an existing user SavePack or save
+        context.
+
+    Safer wording:
+        Load presents or requests loading of an existing user SaveBundle or
+        accepted persistence context.
+
+10. Load action operation composition
+
+    Current risk:
+        ListPacks filtered to SavePack
+        ResolveAppPack associated with the selected SavePack
+        LoadSavePack
+        ValidateSavePackCompatibility
+        BindSaveContext
+        CreateAppInstance
+        StartAppInstance
+
+    Safer wording:
+        ListSaveBundles or the accepted SaveBundle listing operation
+        Resolve AppPack or accepted AppDefinition source associated with the
+        selected SaveBundle
+        LoadSaveBundle
+        ValidateSaveBundleCompatibility
+        BindSaveBundle or bind Application persistence context
+        CreateApplicationRun
+        StartApplicationRun
+
+11. Exit action
+
+    Current risk:
+        Exit stops the launcher AppInstance...
+        active AppInstances
+
+    Safer wording:
+        Exit stops the launcher ApplicationRun...
+        active ApplicationRuns
+
+12. Trace context
+
+    Current risk:
+        launcher appInstanceId
+        selected SavePack identity
+        Launcher AppInstance lifecycle uses AppInstance-domain trace reasons
+
+    Safer wording:
+        launcher applicationId and/or applicationRunId
+        selected SaveBundle identity
+        Launcher Application/ApplicationRun lifecycle uses the owning lifecycle
+        trace reasons
+
+13. Unsupported list
+
+    Current risk:
+        listing ToolStateContext through normal ListSavePacks
+        launcher-owned SavePack creation semantics
+        launcher-owned AppInstance creation semantics
+
+    Safer wording:
+        listing ToolStateContext through normal ListSaveBundles or normal user
+        SaveBundle listing
+        launcher-owned SaveBundle creation semantics
+        launcher-owned Application/ApplicationRun creation semantics
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-10
+==============================================================================
+
+Accept the rewritten IS-10 only if all of the following are true:
+
+1. It remains an implementation specification for default launcher startup flow,
+   launcher AppPack role, ToolStateContext placement, launcher actions, launcher
+   use of PackManager/catalog operations, and launcher exit behavior.
+
+2. It does not redefine root discovery, pack identity, PackRequest resolution,
+   import/module loading, dependency semantics, activation lifecycle, capability
+   execution, policy, Job lifecycle, Application lifecycle, ApplicationRun
+   lifecycle, SaveBundle lifecycle/binding, RPC, UI/frontend runtime, adapter
+   authority, RuntimeHost lifecycle, PackManager semantics, ListPacks envelopes,
+   browser layout, CSS, JavaScript module syntax, CLI syntax, JSON-RPC fields, or
+   WebSocket fields.
+
+3. All AppInstance terminology has been translated to Application and/or
+   ApplicationRun according to meaning.
+
+4. All SavePack terminology has been translated to SaveBundle terminology or the
+   final IS-09 save-listing term.
+
+5. ToolStateContext ontology is explicit: it is either a tool-state persistence
+   context separate from user SaveBundles or a special tool-state persistence
+   closure for tool Applications. It is not left as vague generic save context.
+
+6. ToolStateContext is not AppPack content, not a content root, not normal user
+   SaveBundle state, not configuration authority, not policy authority, not
+   PackManager authority, and not raw filesystem authority.
+
+7. Persistent ToolStateContext remains under userdata and does not make userdata a
+   content root or the launcher AppPack writable.
+
+8. Temporary ToolStateContext remains explicit, trace-visible, and not silently
+   presented as persistent state.
+
+9. Default launcher and replacement launchers remain ordinary AppPacks or accepted
+   launcher AppDefinition sources and receive no extra authority merely by being
+   configured as launcher.
+
+10. Launcher startup uses current Application/ApplicationRun lifecycle terms and
+    does not create a user Application/ApplicationRun or user SaveBundle merely by
+    opening the launcher.
+
+11. New and Load actions request owning operations; they do not own Application,
+    ApplicationRun, SaveBundle, graph, activation, PackManager, View, or
+    persistence semantics.
+
+12. Settings view opening remains presentation/read-only until an accepted
+    mediated mutation occurs.
+
+13. Exit remains distinct from RuntimeHost shutdown and does not silently stop
+    active ApplicationRuns, Jobs, adapters, Views, OrchestrationUnits, retained
+    work, or required entry surfaces.
+
+14. Launcher use of PackManager and catalog operations remains client-surface use.
+    It does not grant PackManager authority or ListPacks authority to the
+    launcher AppPack.
+
+15. Launcher frontend runtime does not directly mutate committed state,
+    ToolStateContext, configuration, roots, packs, SaveBundles, selected graphs,
+    or policy.
+
+16. Launcher trace evidence remains evidence only and does not replace owning
+    RuntimeHost, Application, ApplicationRun, UI, activation, PackManager,
+    catalog, decision, persistence, capability, or SaveBundle evidence.
+
+17. Open questions remain open unless a later authoritative source resolves them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-10 with targeted terminology, ToolStateContext, and launcher-authority
+boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into Application/ApplicationRun
+lifecycle doctrine, SaveBundle lifecycle doctrine, View/frontend doctrine,
+RuntimeHost doctrine, PackManager doctrine, catalog/listing schema, configuration
+doctrine, policy doctrine, activation doctrine, concrete launcher UI layout, CLI
+syntax, JSON-RPC/WebSocket schema, or ToolStateContext schema.
+
+Translate obsolete AppInstance / SavePack wording into current Application /
+ApplicationRun / SaveBundle terminology. Clarify ToolStateContext ontology so it
+is not a vague generic save context. Preserve the replaceable-launcher
+non-authority invariant, ToolStateContext userdata placement, explicit temporary
+state behavior, launcher action delegation, New/Load non-ownership, Settings
+non-mutation, Exit versus RuntimeHost shutdown separation, PackManager/catalog
+client-surface boundary, and launcher trace-evidence boundary.
+
+==============================================================================
+END OF AUDIT-IS-10 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-10-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-10_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------

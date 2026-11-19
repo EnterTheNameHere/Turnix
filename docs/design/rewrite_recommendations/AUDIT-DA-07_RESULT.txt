@@ -1,0 +1,838 @@
+==============================================================================
+AUDIT RESULT - DA-07 FILE I/O, READERS / WRITERS AND PERSISTENCE SAFETY
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-07_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-07_RECOMMENDATION.txt
+
+Files read for this audit turn:
+    docs/design/rewrite_recommendations/REWRITE-DA-07_RECOMMENDATION.txt
+    docs/design/DA-07_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
+
+Standing audit context:
+    docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Correct in substance.
+
+    The recommendation correctly preserves DA-07 as the persistent-I/O authority,
+    Reader / Writer provider, root-boundary, raw-access containment,
+    persistence-safety, error-classification, recovery, backup/snapshot,
+    streaming-I/O, and no-backdoor document.
+
+Document verdict:
+    Keep with targeted cross-reference and terminology updates.
+
+DA-07 should not be heavily rewritten.
+
+The target confirms that IoManager is not merely stale helper wording. DA-07
+currently defines IoManager as the sole authority responsible for persistent I/O.
+Therefore the revised DA-07 should keep IoManager as the named central
+persistent-I/O authority unless the architecture intentionally renames that
+authority everywhere.
+
+Recommended naming posture:
+
+    Keep IoManager as the canonical authority object/name in DA-07.
+
+    Use "persistent-I/O authority" as the architectural role/category of
+    IoManager, not as a replacement that erases the named component.
+
+    Use "mediated I/O" to describe the required access pattern: requests pass
+    through IoManager and its controlled Reader / Writer providers rather than
+    through raw filesystem handles, unrestricted path APIs, pack code, adapter
+    code, tools, Views, RPC handlers, Jobs, capabilities, services, or
+    RuntimeHost command surfaces.
+
+The main required fixes are:
+
+    - add DA-05 as the payload identity / ValueRef / Chunk representation owner
+    - add DA-08 as Window / SafePointWindow / ActiveWindow / AbortedWindow /
+      Window finalization owner
+    - add DA-25 and DA-26 stop-lines for artifact/export/comparison/Replay/
+      Resume/Retry/audit workflow meanings
+    - add DA-24, DA-27, and DA-28 stop-lines where OrchestrationUnit, adapter
+      lifecycle/trust/isolation, and RuntimeHost workspace/command-surface
+      boundaries are named
+    - translate AppInstance and AppInstance ownership wording to
+      Application/ApplicationRun and SaveBundle terminology where appropriate
+    - replace SavePack as current general save identity terminology unless a
+      compatibility note explicitly scopes it
+    - preserve IoManager as sole persistent-I/O authority
+    - preserve Reader / Writer providers as format mechanics under IoManager
+      control, not authority roots
+    - preserve raw access containment and no-backdoor rules
+    - preserve discovery/indexing early-phase restrictions
+    - preserve root writability as separate from state-mutation authority
+    - preserve no silent fallback for identity-bearing data
+    - preserve backup/snapshot/rollback as durability/recovery mechanisms, not
+      truth-definition mechanisms
+    - preserve streaming as explicit, staged, cancellation-safe, and forbidden in
+      deterministic early phases
+    - avoid final-document rewrite/process metadata leakage
+
+Primary conclusion:
+    Keep DA-07 as the IoManager-centered persistent-I/O authority document. Do not
+    replace IoManager with vague abstract wording unless the whole architecture is
+    intentionally renaming the component. Instead, clarify that IoManager is the
+    named authority, and "persistent-I/O authority" is the role it owns.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-07 should not preserve old terminology merely because it appears in older
+source material or older recommendation text.
+
+Specifically, the rewrite should not preserve:
+
+    - AppInstance as current live runtime identity vocabulary
+    - AppInstance ownership as current ApplicationRun ownership wording
+    - SavePack as the current general durable save identity term, unless scoped as
+      a compatibility or historical alias
+    - SavePack write ownership as current general ownership phrasing when
+      SaveBundle / Application / ApplicationRun is meant
+    - provider pack activation wording that weakens DA-14 activation boundaries
+    - adapter-executed code authority wording that weakens DA-23 / DA-27
+    - RuntimeHost workspace ownership wording that weakens DA-28
+    - persistent artifact wording that weakens DA-08 / DA-25 / DA-26
+    - trace visibility wording that implies DA-07 owns DA-03 trace substrate
+    - IoManager storage of Chunk / ValueRef material as Chunk / ValueRef semantic
+      authority
+    - backups/snapshots as committed-state truth
+    - optional trace/log/cache persistence failures as committed-state corruption
+    - root writability as mutation authority by itself
+    - native filesystem access as a Turnix authority path
+
+Canonical translations:
+
+    AppInstance -> ApplicationRun where one live execution/incarnation is meant
+    AppInstance -> Application where durable application identity is meant
+    AppInstance ownership -> ApplicationRun ownership when live ownership is meant
+    SavePack -> SaveBundle where durable persistence closure is meant
+    SavePack-local / save-local material -> SaveBundle-local material where the
+        persistent closure is meant
+    IoManager -> keep, if referring to the named persistence authority object
+    persistent-I/O authority -> role/category owned by IoManager
+    mediated I/O -> requests through IoManager and its controlled providers
+
+Important clarification:
+    Unlike some other DA audits, IoManager appears intentionally current in this
+    DA. The final editor should not erase it merely because a later audit used the
+    abstract phrase "persistent-I/O authority / mediated I/O" elsewhere.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-07 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, SavePack became SaveBundle.
+    - The new design keeps IoManager.
+    - The audit decided IoManager is canonical.
+    - Codex preserved stale wording.
+    - This rewrite adds DA-05 and DA-25 stop-lines.
+    - Unlike older designs, providers are not authority roots.
+
+Those facts may be useful in audit files, migration notes, compatibility notes,
+branch notes, changelogs, or explicitly historical documents. They do not belong
+in the architecture document itself.
+
+The final DA-07 should simply define persistent I/O, IoManager authority, Reader /
+Writer providers, root permissions, raw access containment, error classification,
+recovery, configuration storage relationship, save-data handling, migration and
+rollback boundaries, backups/snapshots, streaming I/O, and no-backdoor rules.
+
+==============================================================================
+02. WHAT DA-07 GETS RIGHT
+==============================================================================
+
+02.1. IoManager is correctly central
+------------------------------------
+
+DA-07 correctly says all persistence in Turnix is centralized and mediated.
+
+It also correctly defines:
+
+    IoManager is the sole authority responsible for persistent I/O.
+
+Preserve this. This should remain the named authority unless the architecture is
+renaming the component globally.
+
+02.2. Reader / Writer provider model is strong
+----------------------------------------------
+
+DA-07 correctly says IoManager delegates concrete format handling to registered
+Readers and Writers, while those providers remain under IoManager control and do
+not become authority roots.
+
+Preserve this.
+
+02.3. Raw access containment is strong
+--------------------------------------
+
+DA-07 correctly says raw filesystem handles, platform-native APIs, and low-level
+I/O operations may exist inside Reader / Writer implementations, but raw handles
+and unrestricted path APIs do not escape to packs or adapter-executed code.
+
+Preserve this strongly.
+
+02.4. Early-phase restrictions are strong
+-----------------------------------------
+
+DA-07 correctly says discovery and indexing use built-in Readers only, and do not
+use pack-provided Readers/Writers, compilers, transformers, or streaming I/O.
+
+Preserve this.
+
+02.5. Root writability is separated from mutation authority
+----------------------------------------------------------
+
+DA-07 correctly says writable roots exist, but root writability does not by itself
+authorize state mutation.
+
+Preserve this.
+
+02.6. Error classification is useful
+------------------------------------
+
+DA-07 correctly separates unrecoverable, user-decidable, and optional/best-effort
+I/O failures, and says identity-bearing data never uses silent fallback.
+
+Preserve this.
+
+02.7. Recovery bootstrap boundary is useful
+-------------------------------------------
+
+DA-07 correctly says recovery decisions do not occur before the minimal recovery
+surface exists, and failures before that are unrecoverable in that moment.
+
+Preserve this.
+
+02.8. Trace visibility is correctly scoped
+------------------------------------------
+
+DA-07 correctly says I/O outcomes are trace-visible while DA-03 owns trace naming,
+reason naming, and trace storage semantics.
+
+Preserve this and strengthen DA-03 trace-substrate wording where helpful.
+
+02.9. Backups, snapshots, rollback, and streaming are bounded
+------------------------------------------------------------
+
+DA-07 correctly treats backups/snapshots/rollback as durability and recovery
+mechanisms, not truth-definition mechanisms. It also correctly treats streaming
+as explicit and staged.
+
+Preserve this.
+
+02.10. No-backdoor rules are strong
+-----------------------------------
+
+DA-07 correctly says packs, adapter-executed code, same-language execution,
+same-process execution, native filesystem APIs, services, capabilities, Views,
+RPC handlers, Jobs, and tools do not acquire persistence authority merely because
+they can request persistence-related work.
+
+Preserve this strongly.
+
+==============================================================================
+03. REQUIRED FIX: KEEP IOMANAGER AS NAMED AUTHORITY, CLARIFY ROLE WORDING
+==============================================================================
+
+The DA-18 audit used phrasing like:
+
+    DA-07 persistent-I/O authority / mediated I/O
+
+That phrase should not be read as a recommendation to delete IoManager from DA-07.
+
+DA-07 itself confirms IoManager is the named authority.
+
+Recommended DA-07 posture:
+
+    IoManager is the named persistent-I/O authority.
+
+    "Persistent-I/O authority" is the architectural role IoManager owns.
+
+    "Mediated I/O" means durable reads/writes occur through IoManager and its
+    controlled Reader / Writer providers, not through raw filesystem handles or
+    unrestricted path APIs exposed to other components.
+
+Recommended wording pattern:
+
+    Persistent I/O in Turnix routes through IoManager, the centralized
+    persistent-I/O authority.
+
+    Components may request persistence work through Turnix-mediated surfaces, but
+    request capability does not transfer IoManager authority.
+
+    Reader / Writer providers perform concrete format mechanics under IoManager
+    control. They do not become persistence authority roots.
+
+Do not replace IoManager with a vague abstraction unless a separate architecture
+change renames the authority globally.
+
+==============================================================================
+04. REQUIRED FIX: ADD DA-05 PAYLOAD REPRESENTATION STOP-LINE
+==============================================================================
+
+DA-07 should list DA-05 in upstream or local cross-reference visibility.
+
+Add a boundary statement:
+
+    DA-07 owns persistent I/O authority and persistence safety.
+
+    DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode, integrity
+    representation, and retained-root reachability.
+
+    IoManager may store, retrieve, verify, copy, stream, back up, snapshot, and
+    garbage-collect payload material, but it does not redefine Chunk identity,
+    ValueRef semantics, decode semantics, or logical payload identity.
+
+Reason:
+    DA-07 is operational persistence authority. DA-05 is payload representation
+    authority.
+
+This prevents physical storage mapping from redefining logical payload identity.
+
+==============================================================================
+05. REQUIRED FIX: ADD DA-08 / DA-25 / DA-26 ARTIFACT STOP-LINES
+==============================================================================
+
+DA-07 handles persistence of saved data, retained artifacts, backups, snapshots,
+streaming, and recovery. That touches Window, artifact/export, comparison, and
+workflow semantics.
+
+Add or expose owner references:
+
+    DA-08:
+        Window, SafePointWindow, ActiveWindow, AbortedWindow, Window ordering, and
+        Window finalization semantics
+
+    DA-25:
+        WindowManifest, WindowExport, Minimal Audit Bundle, digest
+        representation, partial export, missing material, and offline inspection
+        artifact semantics
+
+    DA-26:
+        comparison, Replay, Resume, Retry, and audit workflow semantics
+
+Recommended boundary wording:
+
+    DA-07 may persist, recover, stream, back up, snapshot, and copy retained
+    Window-related and artifact-related material.
+
+    DA-07 does not define what those artifacts mean.
+
+    Persisting, backing up, snapshotting, restoring, streaming, or copying an
+    artifact does not change its authority class.
+
+    Storage success does not imply comparison success, Replay success, Resume
+    success, Retry success, or audit workflow success.
+
+==============================================================================
+06. REQUIRED FIX: ADD DA-24 / DA-27 / DA-28 STOP-LINES
+==============================================================================
+
+DA-07 mentions Jobs, adapter-executed code, ApplicationRun/old AppInstance, roots,
+workspaces, and persistence requests through runtime surfaces. Add owner
+boundaries:
+
+    DA-24:
+        OrchestrationUnit lifecycle and mutation authority
+
+    DA-27:
+        adapter lifecycle, trust, isolation, disconnect, and adapter-domain trace
+        semantics
+
+    DA-28:
+        RuntimeHost workspace ownership, command-surface semantics, startup modes,
+        LAN/local-first boundaries
+
+Recommended wording:
+
+    Persistence requests may be correlated with Jobs, OrchestrationUnits,
+    adapters, ApplicationRuns, RPC, capabilities, Views, RuntimeHost operations,
+    or tools.
+
+    Correlation does not transfer persistence authority.
+
+    Owning lifecycle documents define their own outcomes.
+
+    IoManager failure, refusal, retry, or recovery evidence does not by itself
+    define Job, OrchestrationUnit, ApplicationRun, adapter, RuntimeHost, Window,
+    Replay, Resume, Retry, comparison, or audit workflow outcome.
+
+==============================================================================
+07. REQUIRED FIX: APPLICATION / APPLICATIONRUN / SAVEBUNDLE TERMINOLOGY
+==============================================================================
+
+DA-07 still contains old AppInstance and durable save ownership wording.
+
+Current target already says ApplicationRun in the does-NOT-define list, but body
+still uses AppInstance in root/write ownership, trace correlation, and save-data
+handling.
+
+Translate according to meaning:
+
+    AppInstance -> ApplicationRun
+        where one live runtime incarnation / owner of active execution is meant
+
+    AppInstance -> Application
+        where durable application identity is meant
+
+    durable save -> SaveBundle
+        where durable persistence closure is meant
+
+    SavePack -> SaveBundle
+        unless a compatibility note explicitly scopes SavePack as an old term
+
+Potential replacement:
+
+    Writable durable save access remains constrained by ApplicationRun ownership,
+    SaveBundle ownership, and IoManager authority rules.
+
+or, if durable Application identity is meant:
+
+    Writable SaveBundle access remains constrained by Application identity,
+    ApplicationRun ownership, and IoManager authority rules.
+
+Do not expand DA-07 into Application/ApplicationRun/SaveBundle lifecycle. DA-20
+and SaveBundle-owner documents own those meanings.
+
+==============================================================================
+08. REQUIRED FIX: TRACE WORDING
+==============================================================================
+
+Follow DA-03 trace wording.
+
+Persistence trace requirements are persistence-domain emission obligations.
+
+DA-03 owns trace substrate, retention, loss, event structure, trace DAG semantics,
+span mechanics, and trace storage semantics.
+
+DA-07 owns the persistence-side obligation to emit trace-visible I/O outcomes.
+
+Trace-visible I/O outcomes may correlate with adapter, ApplicationRun, RPC,
+capability, Job, OrchestrationUnit, RuntimeHost, View, service, tool, or artifact
+identity where the request came through those mediated surfaces.
+
+Correlation does not transfer persistence authority.
+
+Trace evidence remains evidence. Trace evidence is not committed state.
+
+Trace loss does not redefine committed-state truth.
+
+==============================================================================
+09. REQUIRED FIX: CONFIGURATION RELATIONSHIP
+==============================================================================
+
+DA-07 correctly says configuration loading and persistence use IoManager
+mediation, while DA-06 owns configuration semantics.
+
+Preserve and optionally strengthen:
+
+    IoManager may read, write, back up, snapshot, migrate, or recover persisted
+    configuration material under DA-07 authority.
+
+    DA-06 owns configuration scopes, defaults, override semantics,
+    effectiveConfig semantics, schema semantics, and migration semantics.
+
+    IoManager persistence success does not make a configuration semantically
+    valid unless DA-06 configuration rules accept it.
+
+==============================================================================
+10. REQUIRED FIX: PROVIDER REGISTRATION BOUNDARY
+==============================================================================
+
+DA-07 allows extended providers from packs or later platform extensions, usable
+only after the providing pack is activated.
+
+Preserve:
+
+    - provider registration is explicit
+    - provider registration is trace-visible
+    - provider registration does not grant broad backend authority
+    - provider registration does not grant capability permission
+    - provider pack activation is required before use
+    - IoManager remains authority even when provider implementation is pack-provided
+    - provider selection is deterministic and scoped
+    - Turnix does not auto-load providers mid-operation
+    - discovery and indexing use built-in Readers only
+
+Align with DA-13, DA-14, DA-16, DA-23, and DA-27 where relevant, but do not make
+DA-07 own dependency resolution, activation, capability permission, execution
+adapter authority, or adapter lifecycle.
+
+==============================================================================
+11. STREAMING AND EARLY-PHASE DETERMINISM
+==============================================================================
+
+Preserve streaming rules:
+
+    - streaming is explicit
+    - streaming read returns a stream or async iterator only when explicitly
+      requested
+    - streaming write uses staging
+    - cancellation remains safe
+    - final destination update occurs only on commit
+    - partial streaming output is not valid final output
+    - staging artifacts remain cleanup-compatible
+    - streaming is forbidden in deterministic early phases
+
+Deterministic early phases include discovery, indexing, manifest loading,
+configuration schema loading, default configuration loading, userdata
+configuration loading, dependency resolution, and activation-critical reads.
+
+Do not let streaming convenience weaken early-phase determinism.
+
+==============================================================================
+12. WHAT TO PRESERVE FROM CURRENT DA-07
+==============================================================================
+
+Preserve these boundaries, translating stale terminology where needed:
+
+    - all persistent I/O is centralized and mediated
+    - IoManager is the sole authority responsible for persistent I/O
+    - no other component bypasses IoManager for persistent I/O
+    - same-language execution does not create persistence authority
+    - same-process execution does not create persistence authority
+    - Python pack code, in-process adapter code, frontend adapter code, and
+      adapter-executed code remain subject to IoManager mediation
+    - IoManager protects state and persisted artifacts but does not replace DA-04
+      state truth
+    - Reader / Writer providers refine persistence mechanics, not authority
+    - raw filesystem handles and unrestricted path APIs do not escape Reader /
+      Writer boundaries
+    - packs and adapter-executed code do not receive unrestricted filesystem
+      handles or path APIs
+    - built-in providers exist before discovery
+    - pack-provided providers are unavailable until the provider Pack is activated
+    - discovery and indexing use built-in Readers only
+    - custom, first-party, and third-party roots are read-only at runtime
+    - userdata and saves / SaveBundle storage are writable only through mediated
+      authority
+    - root writability does not itself authorize state mutation
+    - identity-bearing data never uses silent fallback
+    - minimal recovery surface must exist before user-decidable recovery is
+      required
+    - I/O outcomes are trace-visible
+    - save-local material remains save-local unless another authoritative document
+      says otherwise
+    - configuration persistence uses IoManager but DA-06 owns configuration
+      semantics
+    - migrators do not provide rollback by themselves
+    - rollback points precede identity-bearing mutations according to policy
+    - backups and snapshots protect recoverability, not truth
+    - streaming is explicit and staged
+    - streaming is forbidden in deterministic early phases
+    - no backdoors through packs, adapters, services, capabilities, Views, RPC
+      handlers, Jobs, tools, RuntimeHost surfaces, or native filesystem APIs
+
+==============================================================================
+13. WHAT TO ADD OR CHANGE IN THE REVISED DA-07
+==============================================================================
+
+13.1. Keep IoManager as named authority
+---------------------------------------
+
+Make explicit that IoManager is the named persistent-I/O authority. Use
+"persistent-I/O authority" as the role/category, not as a replacement name.
+
+13.2. Add DA-05 stop-line
+-------------------------
+
+DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode, integrity
+representation, and retained-root reachability.
+
+13.3. Add DA-08 / DA-25 / DA-26 stop-lines
+------------------------------------------
+
+DA-08 owns Window finalization. DA-25 owns artifacts/exports. DA-26 owns
+comparison, Replay, Resume, Retry, and audit workflow semantics.
+
+13.4. Add DA-24 / DA-27 / DA-28 stop-lines
+------------------------------------------
+
+DA-24 owns OrchestrationUnit lifecycle and mutation authority. DA-27 owns adapter
+lifecycle/trust/isolation. DA-28 owns RuntimeHost workspace/command surfaces.
+
+13.5. Translate AppInstance / SavePack wording
+----------------------------------------------
+
+Use Application/ApplicationRun/SaveBundle terminology as appropriate.
+
+13.6. Strengthen trace ownership wording
+----------------------------------------
+
+DA-07 emits persistence-domain trace evidence. DA-03 owns trace substrate,
+retention, loss, event structure, DAG semantics, span mechanics, and trace
+storage semantics.
+
+13.7. Normalize streaming numbering
+-----------------------------------
+
+Fix local section numbering under section 16 without changing semantics.
+
+13.8. Keep implementation details open
+--------------------------------------
+
+Do not define concrete workspace locking, writable SaveBundle ownership
+implementation, streaming backpressure, resumable streaming, verification hooks,
+encryption, physical storage mapping, provider discovery beyond activation rules,
+provider implementation mechanics, recovery UI implementation, or concrete
+filesystem strategy unless an owning implementation specification fixes them.
+
+==============================================================================
+14. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    centralized I/O authority
+        -> IoManager, the centralized persistent-I/O authority
+        where useful to bind abstract role to named authority
+
+    persistent I/O authority
+        -> IoManager authority
+        when the named component is meant
+
+    mediated persistent I/O
+        -> persistence mediated through IoManager and controlled Reader / Writer
+           providers
+
+    AppInstance
+        -> ApplicationRun where live runtime incarnation is meant
+        -> Application where durable application identity is meant
+
+    appInstanceId
+        -> applicationRunId where live runtime identity is meant
+        -> applicationId only where durable Application identity is meant
+
+    AppInstance ownership
+        -> ApplicationRun ownership, unless durable Application ownership is meant
+
+    SavePack
+        -> SaveBundle, unless explicitly scoped as compatibility terminology
+
+    writable durable save access remains constrained by AppInstance ownership
+        -> writable SaveBundle access remains constrained by Application /
+           ApplicationRun ownership and IoManager authority rules
+
+    custom/, first-party/, third-party/
+        -> keep if these are still canonical root names
+
+    userdata/ and saves/
+        -> keep if these are still canonical writable root names, but add that
+           SaveBundle write authority remains mediated
+
+    Readers and Writers are registered with IoManager
+        -> keep
+
+    IoManager may offer recovery actions
+        -> keep, with DA-17 / DA-22 / DA-28 owner visibility where decisions,
+           frontend recovery surface, or RuntimeHost command surfaces participate
+
+    traces, logs, caches optional / best-effort
+        -> keep, but avoid implying trace substrate is DA-07-owned
+
+    trace-visible
+        -> persistence-domain trace emission obligation; DA-03 owns trace
+           substrate/retention/loss
+
+    backup/snapshot/rollback
+        -> durability/recovery mechanism, not committed-state truth
+
+    recovery surface
+        -> minimal recovery surface; implementation not locked by DA-07
+
+==============================================================================
+15. ACCEPTANCE CONDITIONS FOR THE REVISED DA-07
+==============================================================================
+
+A revised DA-07 is acceptable when all of the following are true:
+
+    - It preserves IoManager as the named central persistent-I/O authority unless a
+      global architecture rename intentionally changes that name.
+
+    - It uses persistent-I/O authority as the role IoManager owns, not as a vague
+      replacement that erases IoManager.
+
+    - It preserves all persistent I/O as centralized and mediated.
+
+    - It preserves no bypass through packs, adapters, same-process execution,
+      same-language execution, services, capabilities, Views, RPC handlers, Jobs,
+      tools, RuntimeHost surfaces, or native filesystem APIs.
+
+    - It preserves Reader / Writer providers as format mechanics under IoManager
+      control, not authority roots.
+
+    - It preserves raw access containment.
+
+    - It preserves built-in providers before discovery and forbids pack-provided
+      providers during discovery/indexing.
+
+    - It preserves streaming as explicit, staged, cancellation-safe, and forbidden
+      in deterministic early phases.
+
+    - It preserves root writability as separate from state-mutation authority.
+
+    - It preserves identity-bearing data no-silent-fallback rule.
+
+    - It preserves user-decidable recovery as unavailable before minimal recovery
+      surface exists.
+
+    - It preserves backups, snapshots, and rollback points as durability/recovery
+      mechanisms, not truth-definition mechanisms.
+
+    - It keeps DA-04 as committed-state/transaction truth owner.
+
+    - It keeps DA-05 as payload identity / Chunk / ChunkId / ValueRef / decode /
+      integrity / retained-root reachability owner.
+
+    - It keeps DA-06 as configuration semantics owner.
+
+    - It keeps DA-08 as Window finalization owner.
+
+    - It keeps DA-09 as root/discovery boundary owner.
+
+    - It keeps DA-13 as dependency resolution owner.
+
+    - It keeps DA-14 as activation owner.
+
+    - It keeps DA-16 as capability permission owner.
+
+    - It keeps DA-17 as policy/user-decision owner.
+
+    - It keeps DA-20 as Application/ApplicationRun lifecycle and identity owner.
+
+    - It keeps DA-24 as OrchestrationUnit lifecycle and mutation-authority owner.
+
+    - It keeps DA-25 as artifact/export owner.
+
+    - It keeps DA-26 as comparison/Replay/Resume/Retry/audit workflow owner.
+
+    - It keeps DA-27 as adapter lifecycle/trust/isolation owner.
+
+    - It keeps DA-28 as RuntimeHost workspace and command-surface owner.
+
+    - It translates AppInstance / SavePack wording to Application / ApplicationRun /
+      SaveBundle terminology where appropriate.
+
+    - It does not define concrete workspace locking, writable SaveBundle ownership
+      implementation, streaming backpressure, resumable streaming, verification
+      hooks, encryption, physical storage mapping, recovery UI implementation, or
+      concrete filesystem strategy unless an owning implementation specification
+      fixes them.
+
+    - It does not mention audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+==============================================================================
+16. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-07.
+
+Do not perform a heavy conceptual rewrite.
+
+Keep IoManager as the named central persistent-I/O authority unless the whole
+architecture intentionally renames that authority. Do not replace IoManager with
+vague abstract wording. Instead, clarify that "persistent-I/O authority" is the
+role owned by IoManager, and "mediated I/O" means durable I/O through IoManager
+and controlled Reader / Writer providers.
+
+Do perform targeted boundary and terminology fixes:
+
+    - add DA-05 as payload identity / ValueRef / Chunk representation owner
+    - add DA-08 / DA-25 / DA-26 as Window, artifact, export, comparison, Replay,
+      Resume, Retry, and audit-workflow stop-lines
+    - add DA-24, DA-27, and DA-28 where OrchestrationUnit, adapter lifecycle, and
+      RuntimeHost workspace/command-surface boundaries are referenced
+    - translate AppInstance / appInstanceId to ApplicationRun / applicationRunId or
+      Application / applicationId where appropriate
+    - translate SavePack / durable save ownership wording to SaveBundle ownership
+      wording where appropriate
+    - preserve Reader / Writer providers as format mechanics under IoManager
+      control, not authority roots
+    - preserve raw access containment
+    - preserve no-backdoor rules for packs, adapters, services, capabilities,
+      Views, RPC handlers, Jobs, tools, RuntimeHost surfaces, and native filesystem
+      APIs
+    - preserve discovery/indexing deterministic early-phase limits
+    - preserve root writability as separate from state-mutation authority
+    - preserve identity-bearing data no-silent-fallback rule
+    - preserve backup/snapshot/rollback as durability/recovery mechanisms, not
+      truth-definition mechanisms
+    - preserve streaming as explicit, staged, cancellation-safe, and forbidden in
+      deterministic early phases
+    - normalize streaming subsection numbering
+
+Use REWRITE-DA-07 only as translated boundary-preservation guidance. Do not copy
+obsolete AppInstance / SavePack wording into the final DA as current terminology.
+
+Do not include audit/source metadata or version/process framing in the final
+DA-07 documentation. The final DA-07 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-07 should remain the IoManager, persistent-I/O authority, Reader / Writer
+provider, root-boundary, raw-access containment, persistence-safety,
+error-classification, backup/snapshot, recovery, streaming-I/O, and no-backdoor
+document.
+
+DA-07 should not become:
+
+    - committed-state truth specification
+    - payload identity / ValueRef / Chunk representation specification
+    - configuration semantics specification
+    - Window finalization specification
+    - artifact/export specification
+    - comparison / Replay / Resume / Retry / audit workflow specification
+    - Application/ApplicationRun lifecycle specification
+    - dependency resolution specification
+    - activation lifecycle specification
+    - capability permission specification
+    - policy/user-decision specification
+    - OrchestrationUnit lifecycle or mutation-authority specification
+    - adapter lifecycle/trust/isolation specification
+    - RuntimeHost workspace/command-surface specification
+    - concrete filesystem implementation specification
+
+The main work is to preserve IoManager as the named central persistent-I/O
+authority while modernizing owner stop-lines and terminology.
+
+==============================================================================
+END OF AUDIT RESULT - DA-07
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-07
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-07_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------

@@ -1,0 +1,92 @@
+FROM
+Actant design owner (explicit user approval)
+
+TO
+integration
+
+SUBJECT
+Approve bounded ER-04C provider-specific graceful abort cleanup correction
+
+STATUS
+authorization / implementation request
+
+CONTEXT
+The design owner reviewed the supervised actual cancellation results
+(ai-workflow/knowledge/execution-resource-er04c-supervised-results.txt,
+source 9ee8c7f and aa2b147). In five real abort scenarios plus one timeout
+evidence repeat, llama.cpp build 12031 / 060b2fea4 stopped the exactly
+identified native task; same-task idle evidence was observed before emergency
+operator disposal. The managed ER-03 adapter nonetheless finalized the aborted
+operation as UNKNOWN, leaving its claim quarantined. The design owner explicitly
+agrees to implement the narrow provider correction proposed in that report.
+
+AUTHORIZED SCOPE
+- Implement a provider-specific owned, interruptible per-operation transport
+  and cancellation path. A stop signal must not synchronously block on a
+  BufferedReader.close against an active reader; the owning reader remains
+  responsible for final stream/transport close. Handle pre-header interruption
+  and blocked-read cases explicitly.
+- Before the operation claim reaches its final cleanup disposition, establish
+  exact native-task identity while actively bound to the admitted slot, and
+  collect bounded provider-side stop/release evidence for that same task,
+  unchanged process and residency generation. Keep SSE completion ID distinct
+  from native integer id_task. Avoid reliance on debug-log access as the
+  production acknowledgement mechanism.
+- Confirm provider quiescence only with reviewed sufficient evidence from the
+  exact owned operation, not an arbitrary idle slot, DELETE HTTP 204,
+  cancellation request, local EOF or Job status. A natural completion racing
+  cancellation can leave the Job cancelled while its provider cleanup succeeds.
+- When exact evidence establishes safe quiescence BEFORE finalization, release
+  the operation claim through accepted ER-01/02 ownership. Preserve the
+  original CANCELLED/FAILED Job outcome and rollback semantics independently.
+  When evidence is missing, stale, conflicting, late or times out, retain the
+  existing UNKNOWN/quarantine behavior without manual or later tombstone repair.
+- Initially prefer the existing header-free cancellation path. The alternative
+  opt-in X-Conversation-Id + DELETE /v1/stream may be explored if needed;
+  do not add resumable headers universally or mistake DELETE 204 for proof.
+
+IMPLEMENTATION AND VERIFICATION BOUNDARIES
+Integration coordinates a bounded provider modification, proposal and API/
+invariant review as necessary, source/tests and independent acceptance.
+Preserve accepted ER-01, ER-02/R1, ER-03/R1/R2, LC and PM/G contracts.
+Durable deterministic tests must include blocked-read and pre-header stop,
+absent/wrong/stale task ID, natural completion versus cancel, changed process/
+residency, multiple slots or queued operations, repeated stop, owner/host
+revocation, duplicate finalization, deadline/unknown quarantine and no
+uncontrolled transport or claim bypass. Run targeted and full Actant tests.
+Then repeat the bounded supervised real abort cases on the corrected code
+with native task correlation and report the actual claim disposition.
+
+The previously approved supervised exact-child termination remains available
+ONLY as operator-controlled cleanup for isolated ER-04C tests, never normal
+provider recovery. No automatic kill/restart, generic recovery subsystem,
+tombstone clearing, scheduler, new isolation guarantees, consumer migrations,
+Experiment Runner or other unrelated work. Keep machine-local raw paths,
+prompts, responses, reasoning, logs and native task identifiers private; commit
+only reviewed redacted verification evidence.
+
+OWNERSHIP EXPECTATION
+Integration owns dispatch/direct implementation, review, real-asset evidence
+and acceptance against the current actant-integration parent. This is
+authorization for the narrow provider correction, not a claim it already works.
+
+BLOCKING / ESCALATION
+If the actual provider APIs cannot establish trustworthy task correlation
+and pre-finalization quiescence, report the precise limit and return for
+design-owner review. Do not loosen structural safety or misrepresent
+eventual physical idle as an approved release.
+
+RELEVANT MATERIAL
+ai-workflow/knowledge/execution-resource-er04c-supervised-results.txt
+ai-workflow/knowledge/execution-resource-er04c-cancellation-investigation.txt
+ai-workflow/assignments/execution-resource-cancellation-probe.txt
+ai-workflow/state/execution-resource-validation.txt
+ai-workflow/knowledge/execution-resource-er03-acceptance.txt
+first-party/llmDrivers/llamaCpp/README.md
+
+REPORT BACK
+Publish exact implementation commits, reviewed test evidence including
+real local aborts, supported/unsupported cancellation boundaries, remaining
+UNKNOWN cases and whether ER-04C/full ER-04 can now be accepted. Preserve
+distinction between production safe cleanup, emergency test-only disposal
+and unrelated consumer adoption.

@@ -1,0 +1,63 @@
+PASSIVE MONITORING HARDENING COMPLETE FOR INDEPENDENT REVIEW
+Date: 2026-10-29
+Sender: user-authorized Codex hardening implementer
+Recipient / accountable acceptance owner: integration
+Status: implemented, tested, published; NOT integrated or accepted.
+Requested action: independently inspect compatibility, verify and decide acceptance.
+Original hardening-review findings remain OPEN until Integration's decision.
+
+Repository: EnterTheNameHere/Turnix
+Branch: passive-monitoring-hardening (published to origin)
+Implementation: 518fc94bfe4e671fad3adf000f5fb7de7df0843a
+Exact starting Integration: 27d483cc51285e919387af9826979f05f0bb2944
+Parent: ee5ee476f7c86bcc6122b55a50a9a65b9c18885d (canonical proposal)
+Isolated checkout: C:\Users\Enter\Documents\ChatGPT\Actant\monitoring-hardening
+No original PM worker commits were reapplied; accepted PM-01/02/03 were present.
+No user/application checkout or consumer branch was modified.
+
+H-01/H-02 both confirmed before backend changes: first twenty deterministic tests
+failed against original service.py version 6. Initial start/end clock failure left
+unreachable subscriptions; Thread construction/start/post-start setup failure also
+leaked claims. Actual background deadline/collection/wall-clock/wait failure left
+dead threads in _thread. Original worker exceptions reached threading.excepthook.
+
+Fix: subscribe rolls back only its pending claim and retains original failure
+evidence even if cleanup raises (type-only exception note). Startup failure clears
+its published worker. Loop finally and identity checks prevent stale workers from
+blocking recovery or collecting/clearing a newer worker. Unexpected failures still
+reach threading.excepthook. No automatic retry/restart loop or fabricated freshness.
+Later subscription acquisition or successful explicit sample requests one poller
+for remaining claims. Existing provider cleanup, bounded histories and consumers
+remain independently owned. Public signatures are unchanged; sample now explicitly
+requests worker recovery after its normal manual collection.
+
+Only production source: backend/telemetry/service.py, version 6 -> 7.
+Tests: new telemetry/test_faultRecovery.py version 1 (27 cases), application/
+test_observation.py version 1 -> 2 (two actual partial-acquisition Job cases).
+Coverage includes both release orders, repeat release, owner teardown, active legacy
+and multiple consumers, borrowed/owned provider cleanup, partial real startup and
+stale/new worker ordering, unknown-age reused samples, truthful recovery gaps and
+successful reacquisition after each injected fault. All workers joined with bounded
+timeouts/events/condition barriers; no sleep races.
+
+This checkout's setup.ps1 installed Python 3.15.0b4. Final verification:
+- focused fault tests: 27 passed in 0.06s;
+- assignment telemetry/observation regressions: 96 passed in 0.39s;
+- relevant cross-boundary regressions: 242 passed in 0.99s;
+- complete explicit tests directory: 1095 passed, zero skips, in 2.53s.
+Exact commands, pre-fix evidence, contracts and limitations are in
+ai-workflow/knowledge/passive-monitoring-hardening.txt.
+Diff checks and all changed Python path/version/docstring audits passed. Ruff not run.
+Sandbox-related LFS/pip/pytest temporary-file restrictions required approved reruns;
+no repository tests/contracts were weakened to accommodate those restrictions.
+
+Limits: native hung-read interruption unchanged; explicit recovery required after
+fault removal; failures retain existing platform thread reporting rather than a
+new health schema; a failing cleanup mechanism may fail to dispose resources, but
+cannot keep the failed subscription registered or replace its original exception.
+No PM redesign, activation authority, UI, optimization, model/server restarts,
+persistence or consumer adoption. Real hardware/provider validation is separate.
+
+Integration should refresh coordination, review and cherry-pick the single named
+implementation commit only if compatible, rerun the recorded tests and then decide
+acceptance. Do not mark this worker report as independent acceptance evidence.

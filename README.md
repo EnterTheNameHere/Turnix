@@ -1,187 +1,114 @@
-# Turnix
+# Tertalis
 
-**Turnix** is a modular AI framework built for **Game Master–style simulations** and other multi-agent, LLM-driven applications.  
-It consists of a **Python backend** (FastAPI + Pydantic v2) and a **JavaScript frontend** (browser or Electron) connected via an **RPC protocol over WebSocket**.
+**Status: experimental platform development — not a stable release.**
 
-The goal is to provide a general and extensible foundation for modular AI interaction — from interactive fiction and world simulation to experimental multi-agent environments.
+Tertalis is a local-first, persistence-oriented modular platform for applications
+that need ongoing work, coordination, reusable capabilities and continuity across
+execution and interruptions. AI is an important motivation, but Tertalis is not
+limited to chatbots or even AI applications.
 
----
+The intended uses include AI buddies and assistants, code completion, experiment
+and analysis tools, model orchestration, games and simulations. Applications
+are assembled from Packs; an application itself can be delivered as an AppPack.
+Tertalis supplies shared runtime infrastructure and contracts rather than
+being any one application or language runtime.
 
-## 🧩 Architecture Overview
+## Should you try it?
 
-```
-┌──────────────┐
-│ Electron /   │
-│ Browser UI   │
-└──────┬───────┘
-       │  (WebSocket RPC)
-┌──────▼──────────┐
-│  FastAPI Server │  ← Truth owner
-│  (Python 3.12)  │
-└──────┬──────────┘
-       │
-┌──────▼────────────────────────────┐
-│ Mods & Pipelines (e.g. Llama.cpp) │
-└───────────────────────────────────┘
-```
+If you want to explore an evolving Python-based platform, inspect its
+architecture, run its tests, or help develop its internals, **yes**.
 
-- **Backend:**  
-  Python 3.12 with FastAPI / Starlette and Pydantic v2.  
-  Owns all canonical state, serves static files, manages mods, and handles RPC.
+If you want a polished AI assistant that you can install and start immediately,
+**not yet**. This repository does not currently offer a complete end-user
+application distribution, a root `run.bat`, or a finished public
+PackageManager/registry/CLI installation workflow. Do not mistake intended
+architecture for implemented features.
 
-- **Frontend:**  
-  Browser-based UI or Electron shell.  
-  Uses `turnixImport()` for dynamic module loading with session cache-busting.  
-  Communicates with backend via a lane-based RPC protocol with ACKs, heartbeats, and streamed responses.
+The current platform work includes shared execution/runtime infrastructure,
+Packs and Python code-entry support, persistence-oriented value and lifecycle
+facilities, tracing, and tests. Some design areas extend beyond what is
+implemented today. Refer to the source and test suite for exact current
+behavior and to `design/index.txt` for architectural direction.
 
-- **LLM Server:**  
-  Local [`llama.cpp`](https://github.com/ggerganov/llama.cpp) server used for inference, connected through `mods/first-party/drivers/llamacpp`.
+## Set up the platform (Windows)
 
----
+You need Git, Windows, and access to install the Python requirements from
+your configured package index. The repository includes the supported embedded
+Python archives; the default is Python 3.15.0b4, with an explicit Python
+3.14.6 fallback.
 
-## ⚙️ Features
+The repository is currently hosted under its former GitHub name while the
+Tertalis migration is in progress. To inspect the current development branch:
 
-- Modular mod system (loadable frontend/back-end extensions)
-- Typed RPC protocol with sequence IDs, ACKs, and graceful reconnection
-- WebSocket streaming for model responses
-- Electron launcher for standalone desktop usage
-- Dev launcher (`launcher.py`) to manage backend, Electron, and `llama.cpp`
-- Configurable default settings via `settings_default.json5`
-
----
-
-## 🧠 Repository Structure
-
-```
-Turnix/
-├── backend/
-│   ├── http/
-│   │   └── client.py
-│   ├── settings_default.json5
-│   └── ...
-│
-├── mods/
-│   └── first-party/
-│       └── drivers/
-│           └── llamacpp/
-│               └── llamacpp_client.py
-│
-├── frontend/
-│   ├── index.html
-│   ├── bootstrap.js
-│   ├── assets/
-│   │   ├── mod-loader.js
-│   │   ├── style.css
-│   │   └── types.d.ts
-│   └── core/
-│       └── turnixImport.js
-│
-├── electron/
-│   ├── main.js
-│   ├── preload.js
-│   └── package.json
-│
-├── launcher.py
-├── launcher_llama_cpp_presets.json5
-├── launcher.bat
-└── requirements.txt
+```powershell
+git clone --branch actant-integration https://github.com/EnterTheNameHere/Turnix.git
+cd Turnix
+.\setup.bat
 ```
 
----
+You can alternatively run `setup.ps1` directly from PowerShell. The BAT
+wrapper uses Windows PowerShell, preserves the setup exit code, and makes
+double-click failures visible. Detailed options and troubleshooting are in
+[SETUP.md](SETUP.md).
 
-## 🚀 Getting Started
+Root setup prepares **Tertalis internals only**. It does not discover, configure
+or run applications. Running setup does not start a Tertalis service.
 
-### 1. Install Dependencies
+### Verify the development environment
 
-Make sure you’re using **Python 3.12** and have **Node.js** (for Electron).
+After a successful setup, from the repository root:
 
-```bash
-setup.ps1
+```powershell
+.\python-embedded\python.exe -X frozen_modules=off -m pytest tests
+.\python-embedded\python.exe -X frozen_modules=off .\scripts\verify_tools.py
 ```
 
-This setup script does all required to setup development environment for Turnix.
+These are commands for the Windows environment described in `SETUP.md`;
+they are not claims that the full test suite was rerun while writing this
+README. Testing individual modules is also possible using pytest paths.
+Ruff and ty executables are installed in `python-embedded/Scripts/`.
 
-- unzips Python embedded into python-embedded/
-- gets pip
-- installs requirements.txt
-- runs npm install in electron/
-- creates link or junction in root/node_modules/ to electron/node_modules/ for eslint to function
+### Running an application
 
-### 2. Start Backend Manually
+Tertalis applications have separate configuration and setup ownership.
+In a combined application checkout, the expected sequence is:
 
-```bash
-launcher.bat
-```
+1. Run root `setup.bat` (Tertalis internals).
+2. Run `first-party/applications/<name>/setup.bat` (that application),
+   when the application supplies it.
+3. Run `first-party/applications/<name>/run.bat`, when supplied.
 
-or manually
+The corresponding PowerShell setup scripts can also be invoked directly.
+An application must not silently rerun root setup or change the platform's
+setup behavior. **This platform-only branch does not currently include
+an application launcher at that path.** Consult each application's own
+README/SETUP instructions for its actual requirements.
 
-```bash
-python-embedded/python.exe -m uvicorn backend.server:app --port 63726
-```
+## Developing Tertalis
 
-### 3. Start Electron Frontend
+- [SETUP.md](SETUP.md): current setup, Python fallback and developer tools.
+- [AGENTS.md](AGENTS.md): entry point for AI coding agents.
+- [design/index.txt](design/index.txt): orientation to platform design.
+- [design/platform.txt](design/platform.txt): platform goals and boundaries.
+- [docs/CMR-04_CANONICAL_INDEX_TERTALIS_SPECIFICATION.txt](docs/CMR-04_CANONICAL_INDEX_TERTALIS_SPECIFICATION.txt):
+  existing authoritative specification index.
+- [ai-workflow/index.txt](ai-workflow/index.txt): workstream coordination.
+- [ai-workflow/coordination-protocol.txt](ai-workflow/coordination-protocol.txt):
+  ownership, messages, start/resume and handoff rules.
 
-```bash
-launcher.bat
-```
+Development presently centers on Windows and repository-local embedded Python.
+The platform is evolving and changes may be breaking. A protected `main`
+branch is intended to present accepted repository work; that does not by
+itself mean a stable product release. At the time of this document, the
+Tertalis migration is still being completed on `actant-integration`.
 
-or manually from the `electron/` directory:
+## Future direction
 
-```bash
-npm run start
-```
+The intended experience is to obtain Tertalis with its PackageManager,
+discover AppPacks through registries, and resolve their declared requirements.
+Application-first distributions should be able to bundle a compatible full
+Tertalis installation. A proper `tertalis` CLI is also intended.
 
-This launches the desktop shell that loads the frontend from
-`http://localhost:63726/`.
-
-### 4. Start Llama.cpp
-
-```bash
-launcher.bat
-```
-
-Currently models and server location are hard-coded. Since you obviously don't have them where I have, edit `launcher_llama_cpp_presets.json5` and set your preferred model paths. Launcher automatically escapes Windows paths.
-
-### 5. Run Tests
-
-Install the optional test dependencies and execute the suite with `pytest`:
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
----
-
-## 🧰 Development Notes
-
-- Frontend uses **`turnixImport()`** for dynamic ES module loading with stable session cache busting.
-- RPC messages are typed; see `frontend/assets/types.d.ts` or pydantic models.
-- Backend is designed to be modular and stateless between requests; mods own runtime contexts.
-- Electron is purely a rendering convenience — no Node.js access in renderer context.
-- All static assets are served directly by the backend for consistency.
-
----
-
-## 🧪 Roadmap (Work in Progress)
-
-- Full mod dependency graph
-- Persistent mod state and hot-reload
-- LLM session pipelines with subscription hooks
-- GUI mod manager
-- Offline packaging & auto-update for Electron
-- Advanced streaming telemetry
-- Much more to list
-
----
-
-## 🧑‍💻 License
-
-MIT License
-
----
-
-## 💬 Credits
-
-- EnterTheNameHere Bohemian  
-- Built with ❤️ and curiosity to explore emergent AI systems.
+**These are goals, not instructions for features already available.** The
+supported entry points today remain the repository's setup scripts and the
+individual applications' own entry points.

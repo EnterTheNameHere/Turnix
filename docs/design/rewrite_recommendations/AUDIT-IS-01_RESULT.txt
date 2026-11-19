@@ -1,0 +1,676 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-01 RPC MESSAGE SCHEMA
+==============================================================================
+
+Document title:
+    IS-01 - RPC Message Schema
+
+Target IS path:
+    docs/design/IS-01_RPC_MESSAGE_SCHEMA.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-01
+    DOC_FILE: docs/design/IS-01_RPC_MESSAGE_SCHEMA.txt
+    DOC_REV: 17
+    DOC_GIT: 6eea5bd
+    GitHub blob SHA seen by assistant:
+        7285600da2d0ae8dfcbc86c0a88c51fcd3bf5591
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-01_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-01 file was
+    read or expected.
+
+    CMR-04 was not read because the assigned IS path was known.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-01_RPC_MESSAGE_SCHEMA.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology and stop-line fixes.
+
+    The concrete RPC wire-envelope schema is structurally useful and mostly
+    respects authority boundaries. It should not be rewritten from scratch.
+    The main corrections are needed because the current source stack supersedes
+    older AppInstance / Session / PackContext terminology with
+    Application / ApplicationRun / SaveBundle / ModCallContext language.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-01 clearly states that it defines the concrete RPC message envelope,
+    fields, helper construction expectations, serialization responsibilities,
+    routing expectations, and completion-marker behavior.
+
+    It also clearly says that it does not introduce new runtime authority,
+    permission, policy, lifecycle, adapter, View, Job, or transport semantics.
+
+2. Correct RPC / transport boundary.
+
+    The document treats the schema as a concrete envelope usable by WebSocket,
+    in-process, testing, or future transport implementations when they carry the
+    same RPCMessage envelope.
+
+    This preserves the higher DA boundary that RPC is the logical communication
+    boundary while transport is only the carrier.
+
+3. Good per-field authority stop-lines.
+
+    The document repeatedly prevents field metadata from becoming authority:
+
+        - id is distinct from runtime and lifecycle identities.
+        - Route does not grant permission, activate packs, or authorize adapter
+          execution.
+        - lane selection does not grant permission or execution authority.
+        - budgetMs does not define Job timeout unless explicitly mapped by a
+          higher-level operation.
+        - acknowledgement metadata confirms message receipt or transport-level
+          handling only.
+        - job metadata does not define Job lifecycle semantics.
+        - idempotencyKey does not bypass permission, adapter authorization, or
+          capability mediation.
+        - origin metadata is correlation evidence only.
+        - final is a series-level marker, not a single-envelope completion
+          marker or Job terminal outcome.
+        - payload content does not gain authority merely because the envelope is
+          valid.
+
+4. Good isComplete boundary.
+
+    isComplete is correctly scoped as a top-level wire-envelope completion
+    marker. The document correctly says it does not prove content correctness,
+    does not replace parsing or schema validation, and does not imply capability
+    permission, Job success, adapter readiness, Application readiness, or
+    committed-state mutation.
+
+5. Good helper-constructor model.
+
+    The helper-constructor section usefully prevents ad-hoc envelope creation.
+    It keeps completion marking, required fields, idempotency key copying,
+    correlation preservation, lane inference, and serialization expectations in
+    one place.
+
+6. Good relation-to-higher-documents section.
+
+    The final section explicitly says that routing, visibility, activation,
+    capability, permission, decision-handling, runtime lifecycle, View lifecycle,
+    execution adapter semantics, transport semantics, and Job lifecycle semantics
+    remain governed by higher documents.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance terminology is superseded by the current Application /
+   ApplicationRun model.
+
+    IS-01 still uses AppInstance in scope text, field descriptions, origin
+    metadata, relation-to-higher-documents text, and isComplete stop-lines.
+
+    Current source-stack correction:
+        Proposal P02 replaces the older combined AppInstance layer with:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of that Application
+
+            SaveBundle
+                durable persistence closure of the Application
+
+    Required consequence for IS-01:
+        Replace AppInstance terminology with Application and/or ApplicationRun,
+        depending on the field meaning.
+
+        For RPC correlation metadata, the envelope should generally distinguish:
+
+            applicationId
+                durable Application identity, when available
+
+            applicationRunId
+                live run identity, when available
+
+        Avoid treating one appInstanceId as the current universal runtime
+        identity.
+
+2. Session wording risks reintroducing a removed core concept.
+
+    The Gen section says Gen is used to detect stale traffic from previous
+    sessions and is embedded where session continuity validation is required.
+
+    Current source-stack correction:
+        Session is removed from the Turnix core model. RPC routing must not
+        become Session-based.
+
+    Required consequence for IS-01:
+        Replace session wording with connection-generation or transport-
+        continuity wording.
+
+        Use wording such as:
+
+            Gen wraps the connection generation assigned by the runtime side.
+
+            Gen contains generation components used to detect stale traffic from
+            previous connection generations.
+
+            Gen is embedded in RPC envelopes where connection-generation
+            continuity validation is required.
+
+        Do not use Session, MainSession, HiddenSession, TemporarySession,
+        SessionRegistry, or Session-based RPC routing terminology.
+
+3. origin calling-context wording could be mistaken for retained
+   ModCallContext.
+
+    IS-01 says origin may include "calling context".
+
+    Current source-stack correction:
+        Proposal P02 replaces PackContext with ModCallContext. ModCallContext is
+        invocation-scoped, Pack-bound, fresh per callback, and must not be
+        retained after callback completion.
+
+    Required consequence for IS-01:
+        origin may carry serializable cause/correlation descriptors, but it must
+        not carry or imply a live ModCallContext, PackContext, transaction,
+        service object, raw backend object, or reusable authority context.
+
+        Replace "calling context" with wording such as:
+
+            cause/correlation descriptor
+            invocation correlation identifiers
+            serialized caller descriptor
+
+        Add a compact stop-line:
+
+            origin never carries a live ModCallContext and never preserves
+            invocation authority across messages.
+
+4. Route object wording is under-specified.
+
+    Route points to either a capability or an object. The document already says
+    route does not grant permission or authority, but "object" is still broad
+    enough to be misread as a raw backend object, service object, application
+    object, or direct object authority.
+
+    Required consequence for IS-01:
+        Keep object routing only if the rewritten document defines it as an RPC
+        routing endpoint identity or handler target known to the routing layer.
+
+        Add a compact stop-line:
+
+            An object route is not raw backend-object access, Service-object
+            access, filesystem access, committed-state authority, or capability
+            permission by itself.
+
+5. idempotencyKey wording risks blurring RPC deduplication with Retry semantics.
+
+    IS-01 says retries using the same effective idempotencyKey are naturally
+    deduplicated by the backend when that behavior is enabled.
+
+    Current source-stack correction:
+        Replay, Resume, and Retry semantics are owned by higher workflow
+        documents. Retry is new work and does not reuse previous Job,
+        OrchestrationUnit, adapter execution, or ProcessingRun identity unless a
+        specific owner defines a narrower relationship.
+
+    Required consequence for IS-01:
+        Clarify that idempotencyKey deduplication is request/message handling
+        behavior only.
+
+        It is not DA-level Retry semantics, not replay, not resume, not Job
+        identity reuse, not OrchestrationUnit identity reuse, and not
+        ProcessingRun identity reuse.
+
+6. cancel message semantics need one additional stop-line.
+
+    IS-01 includes cancel as a message type and says correlatesTo may be used for
+    cancels. The document already prevents type and metadata from defining Job
+    outcomes, but cancel is common enough to deserve an explicit local guardrail.
+
+    Required consequence for IS-01:
+        Add a compact rule:
+
+            A cancel message is a cancellation request or signal carried by RPC.
+            It does not by itself make a Job Cancelled, abort an
+            OrchestrationUnit, close an ApplicationRun, fail an ExecutionAdapter,
+            or finalize runtime history.
+
+7. stateUpdate payload wording should not imply committed-state mutation.
+
+    IS-01 says stateUpdate carries state-update payload / state deltas. That is
+    acceptable as wire-schema language, but the final document should not allow
+    a reader to infer that receiving or routing stateUpdate mutates authoritative
+    Application state.
+
+    Required consequence for IS-01:
+        Add a compact stop-line:
+
+            stateUpdate is an RPC payload category. It does not mutate committed
+            Application state, configuration, retained history, or SaveBundle
+            material merely by being received or routed.
+
+8. Backend/frontend wording should remain concrete implementation shape, not
+   platform identity.
+
+    IS-01 currently names backend helper functions, frontend mirrors, and
+    RpcClient behavior. This is acceptable for an implementation specification as
+    long as it does not imply that Turnix is fundamentally a frontend/backend
+    template or that only one frontend technology or transport can use the
+    schema.
+
+    Required consequence for IS-01:
+        Keep backend/frontend references where they identify current concrete
+        model locations or mirrored helpers, but preserve the existing
+        transport-agnostic statement that any transport may carry the same
+        RPCMessage envelope.
+
+9. Code-location canonicality should not make code silently override the spec.
+
+    IS-01 says the canonical backend RPC message model lives in
+    backend/rpc/models.py and that the frontend mirrors it.
+
+    This is acceptable for an implementation specification, but avoid implying
+    that undocumented code drift becomes architecture truth.
+
+    Required consequence for IS-01:
+        Preserve the existing rule that code and specification are updated
+        together. Do not rewrite the file so that implementation accident becomes
+        semantic authority.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate AppInstance to Application / ApplicationRun according to meaning.
+
+    Use Application when the identity is durable across loads.
+
+    Use ApplicationRun when the identity is live, connection/run-scoped, or
+    relevant to open RPC channels, live adapters, live Views, live Jobs, and
+    current runtime contexts.
+
+2. Do not preserve Session wording as harmless prose.
+
+    In IS-01, "session" appears in the Gen/continuity context. Even if the
+    intended meaning is connection session, the current source stack removes
+    Session from core architecture. Use connection-generation wording instead.
+
+3. Do not preserve PackContext if adding clarification.
+
+    IS-01 does not currently expose PackContext directly, but any clarification
+    around origin/calling context must use ModCallContext and must state that
+    live contexts are not carried in RPC envelopes.
+
+4. Do not preserve older retry wording if it implies old work identity reuse.
+
+    RPC idempotency deduplication is not the same as architectural Retry.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in the target IS text.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention proposal and source-stack history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance terminology.
+
+    Replace examples:
+
+        adapter and AppInstance correlation metadata carried by the envelope
+
+    with:
+
+        adapter, Application, and ApplicationRun correlation metadata carried by
+        the envelope
+
+    Replace:
+
+        appInstanceId
+
+    with one or both of:
+
+        applicationId
+        applicationRunId
+
+    depending on whether the field is durable-identity or live-run correlation.
+
+    Replace:
+
+        AppInstance lifecycle semantics
+        AppInstance lifecycle
+        AppInstance readiness
+
+    with Application / ApplicationRun wording.
+
+2. Replace Session continuity wording.
+
+    Replace:
+
+        reject frames from previous sessions
+        session continuity validation
+        session or transport continuity evidence
+
+    with connection-generation and stale-traffic wording.
+
+3. Clarify origin metadata.
+
+    Replace "calling context" in origin examples with serializable
+    cause/correlation wording.
+
+    Add the stop-line that origin never carries live ModCallContext and never
+    preserves invocation authority across messages.
+
+4. Clarify object routes.
+
+    Define object route as an RPC routing target identity / handler target known
+    to the routing layer.
+
+    Add the stop-line that object route is not raw backend object access,
+    Service-object access, filesystem access, committed-state authority, or
+    capability permission by itself.
+
+5. Clarify idempotencyKey.
+
+    Reword retry/deduplication text so it does not claim DA-level Retry
+    semantics.
+
+    Use "repeated messages" or "repeated requests" unless specifically talking
+    about a higher-level Retry workflow.
+
+6. Clarify cancel.
+
+    Add a cancel stop-line saying cancel messages do not by themselves produce
+    Job, OrchestrationUnit, ApplicationRun, ExecutionAdapter, transport, or
+    history finalization outcomes.
+
+7. Clarify stateUpdate.
+
+    Add a stateUpdate stop-line saying stateUpdate payloads do not mutate
+    committed Application state, configuration, retained history, or SaveBundle
+    material merely by being received or routed.
+
+8. Preserve isComplete as wire-envelope marker only.
+
+    Keep the existing isComplete section substantially intact.
+
+    Do not expand isComplete into authority, correctness, permission, lifecycle,
+    Job, trace, payload, or committed-state semantics.
+
+9. Preserve transport-agnostic schema scope.
+
+    Keep the rule that the schema may be used by WebSocket, in-process, testing,
+    or future transport implementations when those implementations carry the same
+    concrete RPCMessage envelope.
+
+10. Keep implementation references scoped.
+
+    It is acceptable for this IS to name backend/rpc/models.py,
+    frontend/assets/types.d.ts, and RpcClient helper utilities as concrete
+    implementation locations.
+
+    Do not make those implementation locations broader architecture authority.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It defines / It does NOT define sections
+       for Application / ApplicationRun terminology.
+
+    2. Update Gen section to remove Session wording.
+
+    3. Update Route section to clarify object routes.
+
+    4. Update id, origin, job, lane, budgetMs, ackOf, final, payload, and
+       isComplete sections only where needed for current terminology and added
+       stop-lines.
+
+    5. Update Per-Type Field Expectations to add cancel/stateUpdate guardrails
+       if they are not better placed in field-specific sections.
+
+    6. Keep Serialization and Logging focused on envelope construction,
+       validation, and routing.
+
+    7. Update Relation to Higher Documents for Application / ApplicationRun and
+       remove obsolete AppInstance wording.
+
+Do not turn IS-01 into a DA-21 replacement.
+
+Do not expand IS-01 into abstract RPC semantics, transport lifecycle,
+ExecutionAdapter lifecycle, Job lifecycle, View lifecycle, Application lifecycle,
+policy, capability permission, or trace-retention semantics.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Description / Purpose area
+
+    Current risk:
+        adapter and AppInstance correlation metadata carried by the envelope
+
+    Safer wording:
+        adapter, Application, and ApplicationRun correlation metadata carried by
+        the envelope
+
+2. Scope exclusion
+
+    Current risk:
+        AppInstance lifecycle semantics
+
+    Safer wording:
+        Application and ApplicationRun lifecycle semantics
+
+3. Gen section
+
+    Current risk:
+        stale traffic and reject frames from previous sessions
+
+    Safer wording:
+        stale traffic and reject frames from previous connection generations
+
+    Current risk:
+        session continuity validation
+
+    Safer wording:
+        connection-generation continuity validation
+
+4. gen field
+
+    Current risk:
+        Generation mismatch is session or transport continuity evidence.
+
+    Safer wording:
+        Generation mismatch is connection-generation or transport-continuity
+        evidence.
+
+5. id field
+
+    Current risk:
+        id is distinct from appInstanceId, jobId, viewId, and adapter identity.
+
+    Safer wording:
+        id is distinct from applicationId, applicationRunId, jobId, viewId, and
+        adapter identity.
+
+6. origin field
+
+    Current risk:
+        calling context
+        appInstanceId
+
+    Safer wording:
+        cause/correlation descriptor
+        invocation correlation identifiers
+        applicationId
+        applicationRunId
+
+7. origin stop-line
+
+    Add:
+        origin never carries a live ModCallContext and never preserves invocation
+        authority across messages.
+
+8. Route object stop-line
+
+    Add:
+        An object route is an RPC routing target identity, not raw backend object
+        access, Service-object access, filesystem access, committed-state
+        authority, or capability permission by itself.
+
+9. idempotencyKey section
+
+    Current risk:
+        Retries using the same effective idempotencyKey are naturally
+        deduplicated by the backend when that behavior is enabled.
+
+    Safer wording:
+        Repeated messages using the same effective idempotencyKey may be
+        deduplicated by the backend when that behavior is enabled. This is RPC
+        request/message deduplication only; it does not define Replay, Resume,
+        Retry, Job identity reuse, OrchestrationUnit identity reuse, or
+        ProcessingRun identity reuse.
+
+10. stateUpdate expectation
+
+    Add:
+        stateUpdate does not mutate committed Application state, configuration,
+        retained history, or SaveBundle material merely by being received,
+        validated, logged, or routed.
+
+11. cancel expectation
+
+    Add:
+        cancel carries a cancellation request or signal. It does not by itself
+        make a Job Cancelled, abort an OrchestrationUnit, close an
+        ApplicationRun, fail an ExecutionAdapter, close a transport, or finalize
+        runtime history.
+
+12. Relation to higher documents
+
+    Current risk:
+        AppInstance lifecycle
+        DA-20 defines AppInstance runtime identity
+
+    Safer current wording:
+        Application and ApplicationRun lifecycle / runtime identity remain owned
+        by the runtime identity/lifecycle document.
+
+    Do not mention proposal history in final IS wording unless the final document
+    is explicitly a migration or compatibility note.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-01
+==============================================================================
+
+Accept the rewritten IS-01 only if all of the following are true:
+
+1. It defines only the concrete RPCMessage wire-envelope schema and helper /
+   serialization expectations.
+
+2. It does not introduce new authority, policy, permission, lifecycle, transport,
+   adapter, View, Job, Application, ApplicationRun, SaveBundle, trace-retention,
+   or committed-state semantics.
+
+3. All AppInstance terminology has been translated to Application and/or
+   ApplicationRun according to current meaning.
+
+4. Session wording has been removed from Gen / continuity text and replaced with
+   connection-generation or transport-continuity wording.
+
+5. origin metadata is described as serializable correlation / cause descriptors,
+   not a live ModCallContext, PackContext, transaction, service object, or
+   reusable authority context.
+
+6. Route object wording cannot be read as raw backend object access or Service
+   object exposure.
+
+7. ack, correlatesTo, lane, budgetMs, job metadata, idempotencyKey, cancel,
+   final, payload, stateUpdate, and isComplete each remain non-authoritative
+   unless a higher owner accepts the corresponding operation through the proper
+   boundary.
+
+8. idempotencyKey deduplication is not confused with architectural Retry,
+   Replay, Resume, Job identity reuse, OrchestrationUnit identity reuse, or
+   ProcessingRun identity reuse.
+
+9. stateUpdate is clearly an RPC payload category and not a committed-state
+   mutation mechanism by itself.
+
+10. isComplete remains a wire-envelope completion marker only and is not treated
+    as semantic correctness, lifecycle success, permission, authority, trace
+    proof, or committed-state mutation.
+
+11. Backend/frontend implementation references remain scoped to concrete schema
+    mirrors and helper locations. They do not redefine Turnix as a
+    frontend/backend template.
+
+12. The document keeps its transport-agnostic statement that WebSocket is only
+    one possible transport for the same concrete RPCMessage envelope.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-01 with targeted terminology and semantic guardrail fixes.
+
+Do not rewrite the whole schema.
+
+Do not expand this implementation specification into abstract RPC, transport,
+Job, View, adapter, Application, SaveBundle, capability, permission, policy,
+trace, or committed-state doctrine.
+
+Translate obsolete AppInstance and Session wording into the current
+Application/ApplicationRun and connection-generation model. Clarify origin,
+route, idempotencyKey, cancel, and stateUpdate so the wire envelope remains a
+carrier of correlation and payload data, not a source of authority.
+
+==============================================================================
+END OF AUDIT-IS-01 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-01-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-01_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------

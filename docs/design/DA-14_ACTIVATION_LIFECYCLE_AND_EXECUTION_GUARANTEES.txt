@@ -8,38 +8,53 @@ EVOLVING
 
 Description:
 ------------
-Defines when pack code is permitted to execute under Turnix-recognized
-activation, under whose authority execution occurs, and which execution
-behaviors Turnix explicitly guarantees or does not guarantee.
+Defines the activation process, final Activated state, lifecycle phase
+barriers, executable Pack participation, cyclic activation, and execution
+guarantees for Tertalis-controlled Pack code.
 
-Activation is the sole mechanism that transitions a pack from inert metadata
-to an executable participant under Turnix control.
+Activation is the Tertalis-controlled boundary that separates inert Pack
+metadata from recognized executable participation under Tertalis orchestration.
 
 Purpose:
 --------
-This document defines the strict boundary between inert pack metadata and
-Turnix-recognized execution.
+This document defines the strict boundary between inert Pack metadata,
+activation-process participation, final Activated state, and later
+Tertalis-recognized execution.
 
 It defines:
-- lifecycle phase ordering and the activation boundary
-- the meaning of Activated state and PackContext authority
-- pack-level activation semantics and the canonical entrypoint
-- relationship between activation and execution adapters
-- the separation between activation and later runtime execution
-- rules for immediate execution and import-time side effects
-- JavaScript runtime entry semantics relevant to activation
-- orchestrated execution pathways and guarantees
+- the activation process and final Activated state
+- activation entries and executable Pack material roles
+- Tertalis-facing readiness before Pack code is loaded
+- Stage 0 entry evaluation
+- Phase 1, Phase 2, and Phase 3 lifecycle semantics
+- phase barriers and registration publication scopes
+- ordinary Pack activation completion
+- accepted activation-plan consumption by activation
+- cyclic dependency group admission and activation
+- multiple adapter/runtime participation for one Pack
+- ModCallContext use during activation-related invocations
+- immediate execution and top-level side-effect boundaries
+- resolve/ensure activation interface boundaries
 - activation trace obligations
-- failure behavior, including NotActivatedError requirements
+- activation failure, cleanup limits, and NotActivatedError handling
 
 It does NOT define:
 - generic resolution mechanics (see DA-11)
 - dependency semantics and source selection (see DA-13)
 - importing and module-loading boundaries (see DA-12)
 - execution adapter boundary semantics (see DA-23)
-- tracing schema and storage (see DA-03)
+- adapter trust, lifecycle, or sandboxing semantics (see DA-27)
+- tracing schema, storage, or retention policy (see DA-03)
 - capability schemas and permission prompting details (see DA-16)
 - user decision and remembered policy handling (see DA-17)
+- Job lifecycle semantics (see DA-19)
+- OrchestrationUnit mutation authority (see DA-24)
+- RuntimeHost command-surface authority (see DA-28)
+- PackManager catalog and graph-preparation ownership (see DA-29)
+- detailed ModCallContext facade semantics (see DA-30)
+- concrete manifest schema or concrete public hook declaration syntax
+- concrete activation-plan schema
+- concrete loader implementation details
 
 Upstream Documents:
 ------------------
@@ -49,11 +64,20 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-03
 - DA-11
 - DA-12
 - DA-13
 - DA-15
+- DA-16
+- DA-17
+- DA-19
 - DA-23
+- DA-24
+- DA-27
+- DA-28
+- DA-29
+- DA-30
 
 Downstream Documents:
 --------------------
@@ -65,565 +89,1324 @@ Downstream Documents:
 01. INTERPRETATION BASIS
 ===============================================================================
 
-01.1. This document expresses normative meaning through explicit,
+01.01. This document expresses normative meaning through explicit,
       deterministic prose.
 
-01.2. Normative meaning in Turnix derives from sentence structure and
+01.02. Normative meaning in Tertalis derives from sentence structure and
       document context rather than from RFC-style keywords.
 
-01.3. The CORE META-RULES documents define the general rule language and
+01.03. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines activation, lifecycle, and execution-guarantee
+01.04. This document defines activation, lifecycle, and execution-guarantee
       rules within that shared interpretation model.
+
+01.05. This document uses "activation entry" as the canonical lifecycle term
+      for executable Pack code loaded by Tertalis for lifecycle participation.
 
 
 ===============================================================================
 02. CORE CONCEPT
 ===============================================================================
 
-02.1. Activation answers exactly one question:
+02.01. Activation answers exactly one question:
 
-          "Has Turnix intentionally brought this pack into recognized
-           executable participation under Turnix orchestration?"
+          "Has Tertalis intentionally brought this Pack into recognized
+           executable participation under Tertalis orchestration?"
 
-02.2. Activation is a controlled, explicit, one-time state transition.
+02.02. The activation process is the Tertalis-controlled process of preparing
+      and attempting to bring a Pack or cyclic activation group into
+      recognized executable participation.
 
-02.3. Before activation:
-      - a pack exists only as metadata
-      - its code has no execution authority under Turnix
-      - adapter loading or native module evaluation does not make it active
+02.03. Final Activated state is the externally visible state reached only
+      after the required activation protocol succeeds.
 
-02.4. After activation:
-      - the pack may participate in runtime behavior
-      - execution is allowed only through Turnix-controlled orchestration
-        pathways
-      - PackContext defines the pack-facing authority context
+02.04. Final activation boundary is the point where the Pack or admitted
+      cyclic activation group becomes externally Activated.
 
-02.5. Activation is not:
+02.05. Before the activation process:
+      - Pack metadata may exist
+      - Pack code has no Tertalis-recognized executable participation
+      - native import or adapter loading does not make the Pack Activated
+
+02.06. During the activation process, Tertalis may:
+      - load declared activation entries
+      - run Stage 0 entry evaluation
+      - invoke Phase 1, Phase 2, and Phase 3 callbacks
+      - accept provisional registrations
+      - prepare cyclic-group surfaces under phase and barrier rules
+
+02.07. After successful activation:
+      - the Pack or admitted cyclic activation group is externally Activated
+      - eligible public registrations are externally published
+      - later runtime execution may occur through Tertalis orchestration
+
+02.08. If activation fails:
+      - the Pack is not Activated
+      - the cyclic group is not Activated when group activation fails
+      - provisional Tertalis-owned registrations are withdrawn
+      - staged Tertalis-owned mutation is aborted where applicable
+      - the failure is explicit and trace-visible
+
+02.09. Activation is not:
       - discovery
       - indexing
       - dependency resolution
+      - graph preparation
+      - activation-plan preparation
       - importing
       - adapter selection
       - execution authorization
       - adapter loading
       - visibility granting
       - capability permission
+      - RuntimeHost authority
+      - Job terminal outcome
+      - OrchestrationUnit terminal outcome
+      - Window finalization
+      - committed-state mutation
+      - trace substrate ownership
 
-02.6. Those earlier phases may occur before activation, but none of them
-      implies activation.
+02.10. Those other phases or domains may participate in activation causes,
+       inputs, or evidence, but none of them implies final Activated state.
 
-02.7. DA-23 owns the execution adapter boundary in which adapter-mediated
-      activation occurs.
+02.11. Activation consumes accepted activation intent.
+
+02.12. Activation does not create selected graph intent by itself.
+
+02.13. Activation does not repair selected graph intent by itself.
+
+02.14. Activation does not hide dependency ambiguity behind loader behavior.
 
 
 ===============================================================================
-03. LIFECYCLE PHASES (LOCKED)
+03. ACTIVATION PLAN AND LOADER BOUNDARY
 ===============================================================================
 
-03.1. Turnix operates in logically ordered, externally observable phases:
+03.01. An activation plan is selected graph intent refined for activation
+      order and activation readiness.
+
+03.02. PackManager and graph-preparation semantics own activation-plan
+      preparation.
+
+03.03. DA-29 owns PackManager graph-preparation boundaries.
+
+03.04. This document owns what activation does with an accepted activation
+      plan.
+
+03.05. Activation consumes the accepted activation plan as input.
+
+03.06. Activation does not make the activation plan authoritative state by
+      consuming it.
+
+03.07. Activation-plan preparation does not activate Packs.
+
+03.08. Activation-plan preparation does not load Pack code.
+
+03.09. Activation-plan preparation does not import Pack modules.
+
+03.10. Activation-plan preparation does not grant capability permission.
+
+03.11. Activation-plan preparation does not grant ModCallContext gateway
+       authority.
+
+03.12. A mechanical loader loads or evaluates the declared activation entry
+       it is instructed to load.
+
+03.13. A mechanical loader does not own dependency ordering.
+
+03.14. A mechanical loader does not own activation ordering.
+
+03.15. A mechanical loader does not solve dependency graphs.
+
+03.16. A mechanical loader does not repair missing dependencies.
+
+03.17. A mechanical loader does not detect semantic compatibility conflicts
+       by itself.
+
+03.18. A mechanical loader does not decide cyclic activation admission.
+
+03.19. A mechanical loader reports load, evaluation, readiness, or failure
+       information according to its adapter contract.
+
+03.20. Loading a Pack entry in an order not allowed by the accepted
+       activation plan may fail.
+
+03.21. Such failure is valid boundary behavior.
+
+03.22. Such failure is not hidden PackManager repair.
+
+03.23. Such failure is not proof that loading order owns activation order.
+
+03.24. The accepted activation plan exists so Tertalis can attempt activation
+       predictably, explain missing material, expose conflicts, and preserve
+       explicit ordering evidence.
+
+
+===============================================================================
+04. OUTER LIFECYCLE PHASES
+===============================================================================
+
+04.01. Tertalis operates with the following outer lifecycle ordering for Pack
+      executable participation:
 
       1) Discovery
       2) Indexing
       3) Resolution
-      4) Execution adapter preparation where applicable
-      5) Activation
-      6) Running or Finalized
+      4) Graph preparation and accepted activation-plan selection
+      5) Execution adapter preparation where applicable
+      6) Activation process
+      7) Running or Finalized
 
-03.2. Activation is the first moment Turnix may intentionally execute pack
-      code with PackContext authority.
-
-03.3. Execution adapter preparation may include adapter selection,
+04.02. Execution adapter preparation may include adapter selection,
       execution authorization, adapter creation, adapter readiness, and
       artifact loading.
 
-03.4. Execution adapter preparation is not activation.
+04.03. Execution adapter preparation is not final Activated state.
 
-03.5. After activation, pack code may execute during Running only through
-      Turnix-orchestrated execution pathways defined by this document and
-      related higher documents.
+04.04. The activation process is the first Tertalis-supported context in which
+      Tertalis may intentionally invoke declared Pack activation-entry code
+      with ModCallContext gateway authority.
 
-03.6. Code that executes outside Turnix orchestration remains outside Turnix
-      guarantees.
+04.05. Phase 1 and Phase 2 callbacks are activation-process participation.
 
+04.06. Phase 1 and Phase 2 callbacks are not final Activated authority.
 
-===============================================================================
-04. WHAT ACTIVATED MEANS (LOCKED)
-===============================================================================
+04.07. Final Activated state is reached only after the required activation
+      protocol completes successfully.
 
-04.1. When a pack is activated:
-      - Turnix creates a PackContext for that pack instance
-      - Turnix dispatches the pack's activation entrypoint
-      - the pack may participate in Turnix-managed runtime behavior
+04.08. After activation, Pack code may execute during Running only through
+      Tertalis-controlled orchestration pathways.
 
-04.2. When the activated pack's executable artifact belongs to an adapter
-      runtime, activation dispatch occurs through the appropriate execution
-      adapter under DA-23.
-
-04.3. Activated packs may, for example:
-      - register services
-      - register capabilities
-      - subscribe to Turnix events
-      - allocate runtime resources
-      - participate in Turnix-managed orchestration
-
-04.4. Before activation:
-      - pack metadata may be resolved
-      - the pack may appear in graphs
-      - adapter selection may have occurred
-      - artifact loading may have occurred
-      - pack code must not execute under Turnix authority
+04.09. Code that executes outside Tertalis orchestration remains outside
+      Tertalis guarantees.
 
 
 ===============================================================================
-05. PACK-LEVEL ACTIVATION (LOCKED)
+05. READINESS BEFORE ENTRY LOADING
 ===============================================================================
 
-05.1. Activation applies to the pack as a whole.
+05.01. Before Tertalis asks an ExecutionAdapter to load a Pack activation entry,
+      the Tertalis-facing infrastructure required by Pack code is operational.
 
-05.2. Activation does not apply to:
-      - individual files
-      - individual modules
-      - individual imports
-      - individual capabilities
-      - individual adapter-loaded artifacts
+05.02. Tertalis is ready to create and provide ModCallContext values.
 
-05.3. A pack is either activated or not activated.
+05.03. Tertalis is ready to receive valid capability registrations.
 
-05.4. Partial, staged, deferred, or per-file activation is not defined by
-      this document.
+05.04. Tertalis is ready to receive permitted service or handler
+      registrations.
 
-05.5. Adapter loading does not create partial activation.
+05.05. Tertalis is ready to route supported RPC requests.
 
+05.06. Tertalis is ready to accept supported capability invocations.
 
-===============================================================================
-06. PACKCONTEXT (ctx) - EXECUTION AUTHORITY (LOCKED)
-===============================================================================
+05.07. Tertalis is ready to apply capability permission and policy mediation.
 
-06.1. Turnix provides exactly one pack-facing execution-authority context to
-      pack code:
-      PackContext (ctx).
+05.08. Tertalis is ready to emit structured trace evidence.
 
-06.2. PackContext is created only by Turnix.
+05.09. Tertalis is ready to classify and return structured errors.
 
-06.3. PackContext is bound to exactly one pack instance.
+05.10. Tertalis is ready to associate registrations and calls with the current
+       activation attempt.
 
-06.4. PackContext represents execution authority on behalf of that pack.
+05.11. Tertalis is ready to withdraw provisional Tertalis-owned registrations
+       when activation fails.
 
-06.5. PackContext is not a raw backend service object exposed to pack code.
+05.12. Readiness means Tertalis can receive Pack participation.
 
-06.6. PackContext is not unrestricted access to Kernel internals.
+05.13. Readiness does not mean every requested capability, service, handler,
+       event surface, or Pack-provided surface is already available.
 
-06.7. PackContext operations route through Kernel-owned boundaries.
+05.14. Capability-system readiness means Tertalis can accept mediated
+       registration and invocation requests.
 
-06.8. Code executing with a PackContext:
-      - executes under the authority of that pack
-      - is subject to that pack's visibility, permissions, and policy
-      - remains constrained by capability, transaction, persistence, trace,
-        adapter, and lifecycle rules
+05.15. Capability availability means the requested capability has been
+       registered and is visible at the current lifecycle barrier.
 
-06.9. PackContext may be represented differently in different adapters.
-
-06.10. Representation difference does not change authority meaning.
-
-06.11. In-process PackContext calls do not bypass capability mediation,
-       policy, transaction, trace, persistence, or lifecycle rules.
-
-06.12. Passing ctx to other code is an explicit delegation of authority.
-
-06.13. The delegating pack remains fully responsible for actions performed
-       using its ctx.
+05.16. The same distinction applies to services, handlers, events, and other
+       Pack-provided surfaces.
 
 
 ===============================================================================
-07. ACTIVATION ENTRYPOINT (LOCKED)
+06. ACTIVATION ENTRY MODEL
 ===============================================================================
 
-07.1. The sole activation entrypoint is:
+06.01. An activation entry is declared executable Pack material loaded by
+      Tertalis through one ExecutionAdapter for Pack lifecycle participation.
+
+06.02. "Activation entry" is the canonical lifecycle term in this document.
+
+06.03. "Adapter entry" is not a separate platform concept in this document.
+
+06.04. When "adapter entry" appears informally, it means the activation entry
+      for one declared adapter/runtime participation.
+
+06.05. "Pack entry" is not a canonical lifecycle term in this document.
+
+06.06. A Pack may participate through multiple ExecutionAdapters.
+
+06.07. Each declared adapter/runtime participation has at most one activation
+      entry.
+
+06.08. One activation entry coordinates that adapter/runtime participation.
+
+06.09. The activation entry may load private implementation modules owned by
+      the same Pack through mechanisms supported by its ExecutionAdapter.
+
+06.10. Tertalis does not automatically treat every code file as an activation
+       entry.
+
+06.11. Tertalis does not automatically call lifecycle hooks on every code file
+       found in a Pack directory.
+
+06.12. Tertalis does not define a plural list of automatically loaded
+       non-activation entries merely to preload implementation files.
+
+06.13. Executable Pack material has three distinct roles:
+
+      Activation entry:
+      - loaded by Tertalis through one ExecutionAdapter
+      - participates in Pack lifecycle hooks
+
+      Private implementation module:
+      - loaded by Pack code as needed
+      - does not participate in lifecycle merely because it exists
+      - is not externally addressable through Tertalis by default
+
+      Exported module surface:
+      - publicly addressable through a supported mediated module loader
+      - loaded on demand
+      - does not receive lifecycle hooks merely because it is exported
+
+06.14. Only activation entries participate in the activation lifecycle
+       protocol defined by this document.
+
+06.15. Concrete manifest fields that declare activation entries are owned by
+       manifest and Pack-definition documents.
+
+06.16. This document defines the lifecycle meaning of activation entries, not
+       their concrete declaration syntax.
+
+
+===============================================================================
+07. ACTIVATION PROCESS OVERVIEW
+===============================================================================
+
+07.01. The Pack code lifecycle has four observable activation moments:
+
+      Stage 0:
+      - entry evaluation by the ExecutionAdapter
+
+      Phase 1:
+      - entry-local early lifecycle hook
+
+      Phase 2:
+      - all activation entries loaded lifecycle hook
+
+      Phase 3:
+      - canonical Pack activation through onLoad(ctx)
+
+07.02. Stage 0 is unavoidable host-runtime behavior.
+
+07.03. Phase 1, Phase 2, and Phase 3 are Tertalis-supported lifecycle phases.
+
+07.04. The current working hook name for Phase 1 is:
+      onEntryLoaded(ctx)
+
+07.05. The current working hook name for Phase 2 is:
+      onEntriesLoaded(ctx)
+
+07.06. The canonical Phase 3 activation hook is:
       onLoad(ctx)
 
-07.2. Locked rules:
-      - onLoad(ctx) is called exactly once per pack instance
-      - onLoad(ctx) is called only by Turnix
-      - ctx is always provided by Turnix
-      - failure aborts activation of that pack
+07.07. Phase meanings are more important than final public hook names.
 
-07.3. No other function, construct, or mechanism activates a pack.
+07.08. Most Pack creators need only Phase 3.
 
-07.4. Adapter implementations do not introduce alternate activation
-      entrypoints by themselves.
+07.09. Phase 1 and Phase 2 exist for advanced cross-adapter initialization,
+      cyclic prerequisites, and cases that ordinary acyclic onLoad(ctx)
+      ordering cannot safely express.
 
-07.5. Future activation entrypoints, if introduced, follow the same rules
-      and are explicitly defined by Turnix.
+07.10. Earlier lifecycle phases do not by themselves make a Pack externally
+       Activated.
 
+07.11. No function, construct, or mechanism activates a Pack unless the
+       accepted activation plan recognizes it as activation participation.
 
-===============================================================================
-08. ACTIVATION VS EXECUTION (CRITICAL DISTINCTION)
-===============================================================================
+07.12. Adapter implementations do not introduce activation semantics by
+       themselves.
 
-08.1. Activation and execution are distinct concepts.
-
-08.2. Activation:
-      - is a one-time state transition
-      - establishes PackContext authority
-      - occurs exclusively through onLoad(ctx)
-      - may dispatch through an execution adapter when applicable
-
-08.3. Execution:
-      - occurs only after activation when Turnix-recognized
-      - may happen multiple times
-      - occurs only when invoked by Turnix orchestration
-
-08.4. No execution mechanism activates a pack.
-
-08.5. No execution mechanism substitutes for onLoad(ctx).
-
-08.6. Adapter execution without PackContext authority is not
-      Turnix-recognized activated execution.
+07.13. Future lifecycle hook names or activation-entry declaration forms
+       preserve the same ModCallContext, phase/barrier, and publication
+       boundaries defined here.
 
 
 ===============================================================================
-09. IMMEDIATE EXECUTION AND LANGUAGE CONSTRUCTS (LOCKED)
+08. PHASE BARRIERS AND PUBLICATION
 ===============================================================================
 
-09.1. Some languages permit immediate execution constructs, including:
-      - Immediately Invoked Function Expressions (IIFE)
-      - module-level executable statements
-      - top-level side effects
+08.01. Tertalis guarantees phase barriers, not callback order.
 
-09.2. Turnix does not rely on, endorse, or coordinate immediate execution.
+08.02. Callbacks in one phase may be invoked sequentially, concurrently, in
+      adapter-defined order, in scheduler-defined order, or in another
+      implementation order.
 
-09.3. Immediate execution is discouraged in pack code.
+08.03. Callback order inside a phase is not part of the public guarantee
+      unless a separate contract explicitly defines that order.
 
-09.4. Immediate execution does not activate a pack.
+08.04. A callback may rely only on guarantees established by completed
+      earlier phase barriers.
 
-09.5. Immediate execution runs outside Turnix orchestration.
+08.05. A callback does not rely on another callback in the same phase having
+      already run.
 
-09.6. Code that executes immediately on import:
-      - runs without PackContext authority
-      - is not tracked by Turnix
-      - is outside lifecycle guarantees
-      - is not recoverable or abortable by Turnix guarantees
+08.06. A registration made during one phase becomes guaranteed available only
+      after the barrier for that phase has completed for the relevant scope.
 
-09.7. Such execution may technically occur, but its behavior is unsupported.
+08.07. Acceptance is not publication.
 
-09.8. All consequences of such execution are the responsibility of the pack
-      author.
+08.08. Registrations associated with an activation attempt may be:
+      - accepted
+      - provisional
+      - visible inside one Pack
+      - visible inside one cyclic group
+      - externally published
+      - withdrawn
 
-09.9. These rules apply uniformly to:
-      - Python
-      - JavaScript
-      - future supported languages
+08.09. Stage 0 and Phase 1 registrations become guaranteed only after the
+      relevant Phase 1 barrier.
 
-09.10. Same-language execution does not make immediate execution supported.
+08.10. Phase 2 registrations become guaranteed only after the relevant
+       Phase 2 barrier.
 
-09.11. Adapter loading does not make immediate execution supported.
+08.11. Phase 3 registrations become externally published only after
+       successful Pack activation or successful cyclic-group activation.
 
+08.12. After ordinary Pack activation, eligible public registrations become
+       available to later dependents and runtime participants.
 
-===============================================================================
-10. RUNTIME ENTRIES - JAVASCRIPT SEMANTICS (LOCKED)
-===============================================================================
+08.13. After cyclic-group activation, eligible public registrations of every
+       group member become available together.
 
-10.1. Relevant manifest fields include:
-      - runtimes.javascript.entry
-      - runtimes.javascript.entries
+08.14. If activation fails, provisional Tertalis-owned registrations are
+       withdrawn.
 
-10.2. runtimes.javascript.entry:
-      - is imported by Turnix during activation
-      - provides the module from which onLoad(ctx) is invoked
-      - may be loaded through the browser JavaScript adapter
-      - successful completion marks JavaScript activation success
+08.15. If activation fails, external publication does not occur.
 
-10.3. runtimes.javascript.entries:
-      - are never imported automatically by Turnix as activation entries
-      - never receive ctx automatically
-      - never have onLoad(ctx) invoked
-      - are treated strictly as library modules
+08.16. If activation fails, later dependent activation does not begin.
 
-10.4. DA-23 owns the general adapter boundary that applies to JavaScript
-      runtime entries.
+08.17. Registration visibility still obeys Pack visibility, capability
+       identity, service exposure rules, permission decisions, policy,
+       adapter support, and other applicable Tertalis boundaries.
 
-
-===============================================================================
-11. ENTRY VS ENTRIES - EXECUTION RULES (LOCKED)
-===============================================================================
-
-11.1. If runtimes.javascript.entry exists:
-      - it must execute before pack code relies on activation state
-      - entries must not assume activation unless caller logic enforces that
-
-11.2. If runtimes.javascript.entry does not exist:
-      - no JavaScript code is executed during activation
-      - the pack may still activate based on non-JavaScript activation rules
-
-11.3. If only runtimes.javascript.entries exist:
-      - the pack is treated as a library-only pack
-      - all such modules remain activation-independent
-
-11.4. Library-only module loading remains distinct from activation.
+08.18. Early publication does not bypass any of those boundaries.
 
 
 ===============================================================================
-12. ACTIVATION-INDEPENDENT CODE (LOCKED)
+09. STAGE 0 ENTRY EVALUATION
 ===============================================================================
 
-12.1. Activation-independent code:
-      - must not assume its own pack is activated
-      - must not implicitly depend on ctx
-      - must not perform Turnix side effects at module top level
+09.01. Stage 0 begins when the ExecutionAdapter loads or evaluates the
+      declared activation entry.
 
-12.2. Such code may:
-      - accept a PackContext explicitly as a parameter
-      - execute under the authority of the caller pack that provides that ctx
+09.02. Entry evaluation follows the runtime behavior defined by the
+      ExecutionAdapter and host language.
 
-12.3. In that case:
-      - the caller pack owns responsibility
-      - the authority is that of the caller, not the provider
+09.03. Top-level or module-level side effects may occur during entry
+      evaluation.
 
-12.4. If code requires activation-specific state of its own pack, that code
-      is initialized from that pack's activation entry.
+09.04. Tertalis does not prohibit such host-runtime side effects.
 
-12.5. Passing PackContext into activation-independent code does not change
-      the provider pack's activation state.
+09.05. Tertalis may be unable to prevent such host-runtime side effects.
 
+09.06. Tertalis discourages relying on entry-evaluation side effects.
 
-===============================================================================
-13. ACTIVATION ORDER (LOCKED RESPONSIBILITY)
-===============================================================================
+09.07. Entry-evaluation side effects are not the safe ordinary activation
+      pattern.
 
-13.1. Activation order is determined exclusively by:
-      - PackManager
-      - resolved dependencies
-      - visibility constraints
-      - user policy
-      - future category-based ordering if later accepted
+09.08. During entry evaluation, Tertalis does not guarantee that:
+      - another activation entry of the same Pack has loaded
+      - another Pack activation entry has loaded
+      - a dependency has completed Phase 1
+      - a dependency has completed Phase 2
+      - a dependency has activated
+      - another entry has registered a capability
+      - another Pack has registered a capability
+      - a particular adapter runs before another adapter
+      - a particular Pack is loaded before another Pack
 
-13.2. Packs must not assume:
-      - another pack is activated unless explicitly required
-      - services exist unless explicitly requested
-      - capabilities are available unless explicitly granted
+09.09. The supported Tertalis-facing adapter bridge is operational during entry
+      evaluation.
 
-13.3. Adapter readiness does not define activation order.
+09.10. Module-level code may technically use supported Tertalis-facing surfaces
+       during entry evaluation.
 
-13.4. Adapter loading does not define activation order.
+09.11. The creator owns ordering and availability risks created by such
+       entry-evaluation use.
 
+09.12. Tertalis does not guarantee that cross-adapter or cross-Pack calls made
+       during entry evaluation are valid.
 
-===============================================================================
-14. RESOLVEPACK VS ENSUREACTIVATED (LOCKED)
-===============================================================================
+09.13. Tertalis-owned registrations made during entry evaluation are associated
+       with the current activation attempt.
 
-14.1. resolvePack(selector):
-      - resolves metadata
-      - performs visibility checks
-      - does not select an adapter for execution
-      - does not authorize execution
-      - does not load code
-      - does not activate packs
+09.14. Tertalis-owned registrations made during entry evaluation remain
+       provisional until later publication.
 
-14.2. ensureActivated(selector):
-      - ensures the target pack is activated
-      - may trigger activation
-      - returns activation metadata only
-      - activation metadata is immutable and diagnostic
-      - does not return code or symbols
-      - may raise NotActivatedError
+09.15. Tertalis guarantees cleanup only for Tertalis-owned and explicitly
+       controlled activation material.
 
-14.3. ensureActivated may cause adapter-mediated activation when the target
-      pack's executable artifact belongs to an adapter runtime.
-
-14.4. ensureActivated does not expose adapter internals.
+09.16. Tertalis does not guarantee reversal of arbitrary side effects outside
+       Tertalis-controlled boundaries.
 
 
 ===============================================================================
-15. ORCHESTRATED EXECUTION GUARANTEE (LOCKED)
+10. PHASE 1 ENTRY-LOCAL EARLY HOOK
 ===============================================================================
 
-15.1. Turnix guarantees behavior only for execution that is invoked and
-      tracked through Turnix orchestration.
+10.01. Phase 1 invokes the entry-local early lifecycle hook for each declared
+      activation entry that defines it.
 
-15.2. Guaranteed execution pathways include:
-      - activation entrypoints such as onLoad(ctx)
-      - capability calls dispatched by Turnix
-      - Turnix event dispatch for handlers registered through Turnix
-      - Turnix-managed schedulers if such schedulers are later accepted
-      - IoManager-mediated operations, including streaming reads and writes
+10.02. Tertalis invokes Phase 1 for an activation entry only after:
+      - the ExecutionAdapter loaded or evaluated that entry successfully
+      - unavoidable module-level evaluation for that entry completed
+      - Tertalis identified the entry's supported lifecycle hooks
 
-15.3. Execution started outside Turnix orchestration is unsupported.
+10.03. If an activation entry does not define the Phase 1 hook, its Phase 1
+      participation is a successful no-op.
 
-15.4. Unsupported execution may still run, but Turnix provides:
-      - no guarantees
-      - no tracing guarantees
-      - no lifecycle control
-      - no cleanup guarantees
+10.04. Phase 1 is the first supported early lifecycle phase.
 
-15.5. Adapter-mediated execution has Turnix guarantees only when it is
-      invoked and tracked through Turnix orchestration.
+10.05. Phase 1 may be used for:
+      - minimal early capability registration
+      - minimal early service or handler registration where permitted
+      - adapter-local state initialization
+      - a surface needed by another activation entry
+      - a surface needed to handle a declared Pack dependency cycle
+      - setup that does not depend on another entry being ready
 
-15.6. In-process execution has no extra guarantees merely because it runs in
-      the same process as the backend implementation.
+10.06. Phase 1 is not ordinary Pack activation.
 
+10.07. Phase 1 does not begin general application work.
 
-15.1 ACTIVATION TRACE OBLIGATIONS
----------------------------------
+10.08. Phase 1 does not assume another activation entry has loaded.
 
-15.1.1. Activation lifecycle outcomes remain trace-visible.
+10.09. Phase 1 does not assume another Pack's Phase 1 callback has run.
 
-15.1.2. Activation trace evidence distinguishes:
-        - activation start
-        - dependency activation ordering
-        - adapter-mediated activation dispatch when applicable
-        - activation entrypoint invocation
-        - service registration during activation
-        - capability registration during activation
-        - activation success
-        - activation failure
+10.10. Phase 1 does not assume a dependency has completed Phase 2.
 
-15.1.3. Activation trace evidence records enough context to explain:
-        - which pack instance was activated
-        - which activation entrypoint was invoked
-        - which adapter kind or adapter instance was involved when
-          applicable
-        - which dependency or ordering condition caused activation to wait,
-          proceed, or fail
-        - which service or capability registration occurred during activation
-        - which failure caused activation to abort when activation fails
+10.11. Phase 1 does not assume a dependency has activated.
 
-15.1.4. Activation trace evidence defines runtime causality and activation
-        scope boundaries.
+10.12. Phase 1 does not depend on callback ordering inside the phase.
 
-15.1.5. Activation trace evidence does not redefine import, dependency
-        resolution, adapter lifecycle, capability permission, or Job
-        lifecycle semantics.
+10.13. Phase 1 does not commit persistent state merely to establish
+       activation ordering.
 
-15.1.6. DA-03 defines the tracing substrate used to represent activation
-        trace evidence.
+10.14. A Phase 1 callback may use Tertalis-facing infrastructure.
 
-15.1.7. DA-14 owns the activation-domain trace reason identifiers used for
-        activation start, dependency activation ordering, activation
-        entrypoint invocation, activation-time service registration,
-        activation-time capability registration, activation success,
-        activation failure, and not-activated access failure.
+10.15. A Phase 1 callback may use already available external capabilities.
 
-15.1.8. The following activation-domain trace reasons are defined:
+10.16. A Phase 1 callback may use its own module-local state.
 
-        - ActivationStarted
-        - ActivationOrderingEvaluated
-        - ActivationEntrypointInvoked
-        - ActivationServiceRegistered
-        - ActivationCapabilityRegistered
-        - ActivationSucceeded
-        - ActivationFailed
-        - NotActivated
+10.17. A Phase 1 callback may use registrations made earlier only when their
+       availability is guaranteed by a completed barrier.
 
-15.1.9. ActivationStarted is emitted when activation begins for a pack
-        instance.
+10.18. For one ordinary Pack, the Pack Phase 1 barrier completes only after
+       every declared activation entry for that Pack has loaded and every
+       declared activation entry has completed Phase 1 or no-op Phase 1
+       participation.
 
-15.1.10. ActivationOrderingEvaluated is emitted when a dependency or
-         ordering condition causes activation to wait, proceed, or fail.
+10.19. For one cyclic dependency group, the group Phase 1 barrier completes
+       only after every declared activation entry of every Pack in the group
+       has loaded and completed Phase 1 or no-op Phase 1 participation.
 
-15.1.11. ActivationEntrypointInvoked is emitted when Turnix invokes the
-         activation entrypoint for a pack instance.
+10.20. A completed Phase 1 barrier does not mean the Pack is Activated.
 
-15.1.12. ActivationServiceRegistered is emitted when a service registration
-         occurs during activation.
+10.21. A completed Phase 1 barrier does not mean the cyclic group is
+       Activated.
 
-15.1.13. ActivationCapabilityRegistered is emitted when a capability
-         registration occurs during activation.
+10.22. A completed Phase 1 barrier does not mean Phase 2 or Phase 3
+       registrations are available.
 
-15.1.14. ActivationSucceeded is emitted when activation succeeds for a pack
-         instance.
-
-15.1.15. ActivationFailed is emitted when activation fails for a pack
-         instance.
-
-15.1.16. NotActivated is emitted when a Turnix-mediated action is refused
-         because the target pack is not activated.
-
-15.1.17. DA-23 owns adapter-domain trace evidence that may causally relate
-         to activation dispatch.
+10.23. A completed Phase 1 barrier does not make external dependent Packs
+       eligible to use the Pack.
 
 
 ===============================================================================
-16. ACTIVATION FAILURE AND NOTACTIVATEDERROR (LOCKED)
+11. PHASE 2 ALL ENTRIES LOADED HOOK
 ===============================================================================
 
-16.1. Activation failure indicates a system-level error such as:
-      - unresolved dependency
-      - policy violation
-      - visibility violation
-      - execution authorization failure
-      - adapter loading failure
-      - activation entry failure
+11.01. Phase 2 invokes the all-entries-loaded lifecycle hook for each
+      activation entry that defines it.
 
-16.2. Locked consequences:
-      - activation failure leaves the pack inactive
-      - dependent activations do not proceed
-      - failure is surfaced to the user
-      - silent fallback is forbidden
+11.02. If an activation entry does not define the Phase 2 hook, its Phase 2
+      participation is a successful no-op.
 
-16.3. NotActivatedError must not be swallowed by pack code.
+11.03. For an ordinary non-cyclic Pack, Tertalis invokes Phase 2 only after:
+      - the Pack Phase 1 barrier completed
+      - every hard dependency required by the activation plan completed its
+        Phase 2 barrier
 
-16.4. Swallowing NotActivatedError hides orchestration failure.
+11.04. For a cyclic dependency group, Tertalis invokes Phase 2 only after:
+      - the group Phase 1 barrier completed
+      - every hard dependency outside the cyclic group completed its Phase 2
+        barrier
 
-16.5. Activation failure is not a Job terminal outcome merely because the
-      activation path used adapter-executed code.
+11.05. Phase 2 may be used for:
+      - cross-adapter coordination
+      - use of Phase 1 registrations
+      - registration of surfaces required during onLoad(ctx)
+      - completion of cyclic prerequisites
+      - validation that required early registrations exist
+
+11.06. Phase 2 callbacks may rely on completed Phase 1 barriers within the
+      applicable Pack or cyclic-group scope.
+
+11.07. Phase 2 callbacks may not rely on another Phase 2 callback in the same
+      scope having already run.
+
+11.08. For one ordinary Pack, the Pack Phase 2 barrier completes only after
+      every Phase 2 callback completed successfully or no-op Phase 2
+      participation completed successfully.
+
+11.09. For one cyclic dependency group, the group Phase 2 barrier completes
+      only after every Phase 2 callback of every Pack in the group completed
+      successfully or no-op Phase 2 participation completed successfully.
+
+11.10. After the relevant Phase 2 barrier, accepted Phase 2 registrations
+       become available within the scope allowed by the activation plan.
+
+11.11. A completed Phase 2 barrier does not mean the Pack is Activated.
+
+11.12. A completed Phase 2 barrier does not mean the cyclic group is
+       Activated.
+
+11.13. A completed Phase 2 barrier does not mean Phase 3 callbacks have run.
+
+11.14. A completed Phase 2 barrier does not externally publish Phase 3
+       registrations.
 
 
 ===============================================================================
-17. ACTIVATION RESULT (LOCKED)
+12. PHASE 3 CANONICAL ONLOAD ACTIVATION
 ===============================================================================
 
-17.1. ensureActivated may return:
-      - activation status
-      - warnings
-      - diagnostics
+12.01. Phase 3 is the normal Pack activation phase.
 
-17.2. ensureActivated does not return:
-      - executable code
-      - module namespaces
-      - runtime symbols
-      - adapter internals
+12.02. The canonical Phase 3 activation hook is onLoad(ctx).
+
+12.03. Most Pack creators use only onLoad(ctx).
+
+12.04. Phase 3 may be used for:
+      - the Pack's ordinary capability registrations
+      - ordinary actions and handlers
+      - dependency-provided public surfaces
+      - normal activation setup
+      - ordinary runtime contributions
+      - preparing the Pack for ordinary participation
+
+12.05. For an ordinary acyclic Pack, Tertalis invokes Phase 3 only after:
+      - all activation entries of this Pack loaded
+      - this Pack completed Phase 1
+      - this Pack completed Phase 2
+      - every declared hard dependency activated successfully
+
+12.06. Ordinary acyclic onLoad(ctx) may assume every hard dependency is
+      Activated.
+
+12.07. Ordinary acyclic onLoad(ctx) may use dependency public surfaces
+      published by successful dependency activation according to normal
+      visibility, capability, service, permission, and policy rules.
+
+12.08. Ordinary acyclic onLoad(ctx) may assume every activation entry of this
+      Pack exists.
+
+12.09. Ordinary acyclic onLoad(ctx) may assume every Phase 1 and Phase 2
+      callback of this Pack completed.
+
+12.10. Ordinary acyclic onLoad(ctx) may use Phase 1 and Phase 2 registrations
+       that are available in the allowed scope.
+
+12.11. No ordering is guaranteed among multiple onLoad(ctx) callbacks that
+       belong to different activation entries of the same Pack.
+
+12.12. If one activation entry needs a same-Pack surface during onLoad(ctx),
+       that surface is established in Phase 1 or Phase 2.
+
+12.13. Phase 3 does not create same-phase ordering dependencies between
+       activation entries.
+
+12.14. If an activation entry does not define onLoad(ctx), its Phase 3
+       participation is a successful no-op unless a Pack-kind or adapter
+       contract requires the hook.
+
+12.15. Public Phase 3 registrations become externally available only after
+       the Pack or cyclic group successfully crosses the final activation
+       boundary.
 
 
 ===============================================================================
-18. EXPLICITLY OPEN QUESTIONS
+13. ORDINARY PACK ACTIVATION COMPLETION
 ===============================================================================
 
-18.1. OPEN questions include:
-      - category-based activation ordering
-      - staged or phased activation
-      - activation retry semantics
-      - exact adapter-mediated activation diagnostics
+13.01. An ordinary non-cyclic Pack becomes Activated only after:
+      - every declared activation entry loaded successfully
+      - every Phase 1 callback completed successfully or no-op Phase 1
+        participation completed successfully
+      - every Phase 2 callback completed successfully or no-op Phase 2
+        participation completed successfully
+      - every Phase 3 callback completed successfully or allowed no-op
+        Phase 3 participation completed successfully
+      - activation validation completed successfully
+      - no required registration or dependency check failed
+
+13.02. Ordinary Pack activation is atomic at the Pack boundary.
+
+13.03. A Pack is not partially Activated.
+
+13.04. A Pack with one successful activation entry and one failed required
+      activation entry is not mostly activated.
+
+13.05. No public Phase 3 registration becomes externally available merely
+      because one entry completed early.
+
+13.06. After successful ordinary Pack activation, the Pack's eligible public
+      registrations become available according to visibility, capability,
+      service, permission, and policy rules.
+
+13.07. After successful ordinary Pack activation, dependent Packs may begin
+      Phase 3 according to the accepted activation plan.
+
+13.08. After successful ordinary Pack activation, the Pack may participate in
+      ordinary runtime work.
 
 
 ===============================================================================
-19. LOCKED SUMMARY
+14. CYCLIC DEPENDENCY ACTIVATION
 ===============================================================================
 
-19.1. LOCKED:
-      - activation is explicit and pack-level
-      - onLoad(ctx) is the only activation entrypoint
-      - activation establishes PackContext authority
-      - PackContext is a pack-facing authority context, not raw backend
-        internals
-      - execution is allowed only after activation when Turnix-recognized
-      - adapter selection, execution authorization, adapter readiness, and
-        adapter loading do not imply activation
-      - immediate execution, including IIFE-style patterns and top-level
-        code, is unsupported
-      - execution requires Turnix orchestration
-      - adapter-mediated execution has guarantees only when invoked and
-        tracked through Turnix orchestration
-      - activation is distinct from import, resolution, and adapter lifecycle
-      - activation lifecycle outcomes remain trace-visible
-      - activation-domain trace reason identifiers are owned by DA-14
-      - adapter-domain trace evidence remains owned by DA-23
-      - failures are visible and abort activation
+14.01. A strongly connected component is a set of Packs where every Pack is
+      reachable from every other Pack through hard dependency edges.
 
-19.2. OPEN:
-      - ordering refinements
-      - adapter-mediated activation diagnostics
+14.02. A non-cyclic Pack is treated as a one-Pack activation component.
+
+14.03. A cyclic component is treated as one cyclic activation group when the
+      accepted activation plan admits it for cyclic activation.
+
+14.04. The component graph formed by collapsing strongly connected components
+      is acyclic.
+
+14.05. The component graph defines the outer activation order.
+
+14.06. Canonical Phase 3 ordering alone cannot satisfy a dependency cycle.
+
+14.07. Tertalis does not pretend that a dependency cycle has a total onLoad(ctx)
+      order that satisfies every member.
+
+14.08. A cyclic activation group is admitted only through the accepted
+      activation plan.
+
+14.09. A cyclic activation group is admitted only when the hard-dependency
+      strongly connected component is intended to use the early activation
+      protocol.
+
+14.10. A cyclic activation group is admitted only when at least one activation
+       entry in the group defines a supported Phase 1 or Phase 2 hook.
+
+14.11. The presence of at least one early hook means one or more cycle
+       participants intentionally opted into the early activation protocol.
+
+14.12. The presence of an early hook does not prove the cycle is logically
+       correct.
+
+14.13. The presence of an early hook does not prove every required early
+       surface is registered.
+
+14.14. The presence of an early hook does not prove the selected early phase
+       is sufficient.
+
+14.15. If no Pack in the cycle provides Phase 1 or Phase 2 handling, Tertalis
+       rejects the cycle.
+
+14.16. UnsupportedActivationCycle identifies a cyclic dependency group that
+       cannot be satisfied through ordinary onLoad(ctx) ordering and has no
+       supported early lifecycle handler.
+
+14.17. For a cyclic activation group, Tertalis may load entries in any order
+       allowed by adapter availability and implementation scheduling.
+
+14.18. Loader execution order is not cyclic activation authority.
+
+14.19. No dependency order is guaranteed inside the cycle before the group
+       crosses its final activation boundary.
+
+14.20. The group Phase 1 barrier completes only after every group entry
+       loaded successfully and completed Phase 1 or no-op Phase 1
+       participation.
+
+14.21. The group Phase 2 barrier completes only after every group Phase 2
+       callback completed successfully or no-op Phase 2 participation
+       completed successfully.
+
+14.22. Cyclic Phase 3 begins only after:
+       - every external hard dependency is Activated
+       - every group activation entry loaded
+       - every group Phase 1 callback completed
+       - every group Phase 2 callback completed
+       - all eligible Phase 1 and Phase 2 registrations inside the group
+         are available within permitted scope
+
+14.23. During cyclic Phase 3, no intra-cycle onLoad(ctx) order is guaranteed.
+
+14.24. During cyclic Phase 3, no group member may assume another group member
+       is already Activated.
+
+14.25. Every intra-cycle capability, service, handler, or other surface
+       required during onLoad(ctx) must have been established in Phase 1 or
+       Phase 2.
+
+14.26. If cyclic onLoad(ctx) requests an intra-cycle required surface that is
+       not available, Tertalis fails immediately.
+
+14.27. Tertalis does not wait for another onLoad(ctx) callback to register a
+       missing cyclic surface.
+
+14.28. Tertalis does not suspend the request indefinitely.
+
+14.29. Tertalis does not retry the same phase in another order.
+
+14.30. CyclicDependencySurfaceNotReady identifies a cyclic Phase 3 request for
+       an intra-cycle surface that was not established in an earlier phase.
+
+14.31. After every group onLoad(ctx) callback succeeds, every Pack in the
+       group becomes Activated together.
+
+14.32. The cyclic group is atomic at its external activation boundary.
+
+14.33. External dependent Packs do not begin Phase 3 until the entire cyclic
+       group has activated successfully.
+
+14.34. One member failure fails the entire cyclic activation group.
+
+14.35. Cycles weaken availability assumptions only inside the cyclic group.
+
+14.36. Cycles do not weaken the component graph outside the cyclic group.
+
+14.37. Cyclic activation is not a loader ordering trick.
+
+14.38. Cyclic activation is not best-effort retry in different orders.
+
+14.39. Cyclic activation is explicit activation-plan admission plus DA-14
+       phase/barrier execution.
+
+
+===============================================================================
+15. MULTIPLE ADAPTERS IN ONE PACK
+===============================================================================
+
+15.01. A Pack may declare multiple activation entries, one per adapter/runtime
+      participation.
+
+15.02. Tertalis does not define a universal adapter order.
+
+15.03. Tertalis may load activation entries in any order allowed by adapter
+      availability and implementation scheduling.
+
+15.04. Phase 1 is entry-local.
+
+15.05. Phase 2 guarantees that all Pack activation entries completed Phase 1.
+
+15.06. Phase 3 guarantees that all Pack activation entries completed Phase 2.
+
+15.07. One activation entry's Phase 2 callback may use another activation
+      entry's Phase 1 registration only after that registration is available
+      under the completed Phase 1 barrier.
+
+15.08. One activation entry's onLoad(ctx) callback may use another activation
+      entry's Phase 1 or Phase 2 registration only after that registration is
+      available under the completed earlier barrier.
+
+15.09. One activation entry's onLoad(ctx) callback may not assume another
+      activation entry's onLoad(ctx) callback already ran.
+
+15.10. Ordinary outward-facing functionality is normally registered during
+       onLoad(ctx).
+
+15.11. Cross-adapter prerequisites required during onLoad(ctx) are registered
+       earlier in Phase 1 or Phase 2.
+
+15.12. Early phases are exceptional tools for cross-adapter and cyclic
+       activation needs.
+
+15.13. Early phases are not mandatory ceremony for ordinary Packs.
+
+
+===============================================================================
+16. MODCALLCONTEXT (ctx) GATEWAY
+===============================================================================
+
+16.01. Tertalis provides Pack-facing invocation authority through ModCallContext
+      (ctx).
+
+16.02. ModCallContext is created only by Tertalis.
+
+16.03. Every Tertalis invocation of Pack code receives a fresh ModCallContext
+      when the invoked Pack code needs platform access.
+
+16.04. ModCallContext is bound to the acting Pack and invocation scope.
+
+16.05. ModCallContext may also be bound to Application, ApplicationRun,
+      cause/correlation, current OrchestrationUnit, current transaction,
+      current Job, current ProcessingRun, current lifecycle phase,
+      cancellation, deadline, and stage-specific granted operations where
+      those bindings exist.
+
+16.06. ModCallContext represents scoped gateway authority for that invocation.
+
+16.07. ModCallContext is not a raw backend service object exposed to Pack code.
+
+16.08. ModCallContext is not unrestricted access to Kernel internals.
+
+16.09. ModCallContext operations route through Kernel-owned boundaries.
+
+16.10. Code executing with a ModCallContext executes under the authority of
+       the acting Pack.
+
+16.11. Code executing with a ModCallContext is subject to the acting Pack's
+       visibility, permissions, and policy.
+
+16.12. Code executing with a ModCallContext remains constrained by capability,
+       transaction, persistence, trace, adapter, lifecycle, cancellation, and
+       deadline rules.
+
+16.13. ModCallContext may be represented differently in different adapters.
+
+16.14. Representation difference does not change authority meaning.
+
+16.15. In-process ModCallContext calls do not bypass capability mediation,
+       policy, transaction, trace, persistence, or lifecycle rules.
+
+16.16. Pack code does not retain ModCallContext after the invocation
+       completes.
+
+16.17. Registrations retain owner, callback endpoint, registration metadata,
+       and registration scope.
+
+16.18. Registrations do not retain the ModCallContext that created them.
+
+16.19. Later callbacks always receive a fresh ModCallContext when Pack code
+       needs platform access.
+
+16.20. Detailed ModCallContext facade semantics are owned by DA-30.
+
+
+===============================================================================
+17. ACTIVATION-INDEPENDENT CODE AND MODULE SURFACES
+===============================================================================
+
+17.01. Activation-independent code does not assume its own Pack is Activated.
+
+17.02. Activation-independent code does not implicitly depend on ctx.
+
+17.03. Activation-independent code does not perform Tertalis side effects at
+      module top level.
+
+17.04. Activation-independent code may accept a ModCallContext explicitly as a
+      parameter.
+
+17.05. Code using a caller-provided ModCallContext executes under the
+      authority of the caller Pack.
+
+17.06. The authority is that of the caller, not the provider.
+
+17.07. Passing ModCallContext into activation-independent code does not change
+      the provider Pack's activation state.
+
+17.08. If code requires activation-specific state of its own Pack, that code is
+      initialized from that Pack's activation entry.
+
+17.09. Private implementation modules do not participate in lifecycle merely
+      because Pack code loads them.
+
+17.10. Exported module surfaces do not participate in lifecycle merely
+       because they are exported.
+
+17.11. The activation protocol guarantees that declared activation entries
+       are loaded.
+
+17.12. The activation protocol does not guarantee that every private or
+       exported code file in the Pack has been evaluated.
+
+17.13. Pack dependency cycles and native language module-import cycles are
+       different problems.
+
+17.14. The early activation protocol resolves Pack lifecycle availability.
+
+17.15. The early activation protocol does not repair arbitrary host-language
+       import recursion.
+
+17.16. Cross-Pack code access remains mediated through supported Tertalis
+       mechanisms.
+
+
+===============================================================================
+18. RESOLUTION AND ACTIVATION INTERFACE BOUNDARY
+===============================================================================
+
+18.01. A resolution operation may resolve metadata.
+
+18.02. A resolution operation may perform visibility checks.
+
+18.03. A resolution operation does not select an adapter for execution by
+      itself.
+
+18.04. A resolution operation does not authorize execution by itself.
+
+18.05. A resolution operation does not load code by itself.
+
+18.06. A resolution operation does not activate Packs by itself.
+
+18.07. An ensure-activation operation ensures that the target Pack is Activated
+      or fails explicitly.
+
+18.08. An ensure-activation operation may trigger activation.
+
+18.09. An ensure-activation operation may cause adapter-mediated activation
+      when the target Pack participates through an ExecutionAdapter.
+
+18.10. An ensure-activation operation returns activation metadata,
+       diagnostics, status, or warnings.
+
+18.11. Activation metadata is immutable and diagnostic.
+
+18.12. An ensure-activation operation does not return executable code.
+
+18.13. An ensure-activation operation does not return module namespaces.
+
+18.14. An ensure-activation operation does not return runtime symbols.
+
+18.15. An ensure-activation operation does not expose adapter internals.
+
+18.16. An ensure-activation operation may raise NotActivatedError.
+
+18.17. Concrete public API names for resolution and ensure-activation
+       operations are owned by API-specific documents or implementation
+       specifications.
+
+18.18. An ensure-activation operation may consume an accepted activation plan.
+
+18.19. An ensure-activation operation does not prepare a replacement
+       activation plan by itself.
+
+18.20. If no accepted activation plan is available where one is required,
+       ensure-activation fails explicitly.
+
+
+===============================================================================
+19. ORCHESTRATED EXECUTION GUARANTEE
+===============================================================================
+
+19.01. Tertalis guarantees behavior only for execution invoked and tracked
+      through Tertalis orchestration.
+
+19.02. Guaranteed execution pathways include:
+      - activation lifecycle callbacks invoked by Tertalis
+      - capability calls dispatched by Tertalis
+      - Tertalis event dispatch for handlers registered through Tertalis
+      - Tertalis-managed timers and schedulers where accepted
+      - IoManager-mediated operations
+      - other explicitly defined Tertalis-controlled pathways
+
+19.03. Execution started outside Tertalis orchestration is unsupported.
+
+19.04. Unsupported execution may still run, but Tertalis provides:
+      - no activation guarantee
+      - no tracing guarantee
+      - no lifecycle control guarantee
+      - no cleanup guarantee
+
+19.05. Adapter-mediated execution has Tertalis guarantees only when Tertalis
+      invokes and tracks it through Tertalis orchestration.
+
+19.06. In-process execution has no extra guarantees merely because it runs in
+      the same process as trusted backend implementation code.
+
+19.07. Same host language does not grant backend implementation authority.
+
+19.08. Physical possibility does not create a supported Tertalis contract.
+
+
+===============================================================================
+20. ACTIVATION TRACE OBLIGATIONS
+===============================================================================
+
+20.01. Activation lifecycle outcomes remain trace-visible.
+
+20.02. Activation trace evidence records enough context to explain:
+      - which Pack identity participated
+      - which activation attempt was involved
+      - which activation plan was consumed when applicable
+      - which activation entry was involved
+      - which adapter identity was involved when applicable
+      - which dependency component was involved
+      - which cyclic group was involved when applicable
+      - which lifecycle phase was active
+      - which callback was invoked
+      - which registration was accepted, published, or withdrawn
+      - which dependency or ordering condition caused waiting or failure
+      - which failure caused activation to abort
+      - which cleanup result occurred when cleanup was attempted
+
+20.03. Activation-domain evidence categories include:
+      - activation plan accepted
+      - activation plan consumed
+      - dependency component identified
+      - cyclic group detected
+      - cyclic group admitted
+      - cyclic group rejected
+      - activation entry load requested
+      - activation entry loaded
+      - activation entry load failed
+      - Phase 1 callback started, completed, or failed
+      - Phase 1 barrier completed
+      - Phase 2 callback started, completed, or failed
+      - Phase 2 barrier completed
+      - Phase 3 callback started, completed, or failed
+      - registration accepted
+      - registration published to Pack scope
+      - registration published to cyclic-group scope
+      - registration published externally
+      - registration withdrawn
+      - cyclic dependency surface unavailable
+      - Pack activation completed
+      - Pack activation failed
+      - cyclic-group activation completed
+      - cyclic-group activation failed
+      - cleanup requested, completed, or failed
+      - not-activated access failure
+      - loader-order failure
+
+20.04. Exact trace reason identifier names remain implementation-facing until
+      the tracing documents or implementation specifications lock them.
+
+20.05. DA-14 owns activation-domain trace reason meaning.
+
+20.06. DA-03 owns the tracing substrate used to represent activation trace
+      evidence.
+
+20.07. DA-23 and DA-27 own adapter-domain trace evidence that may causally
+      relate to activation dispatch or adapter behavior.
+
+20.08. DA-29 owns PackManager graph-preparation and activation-plan
+      preparation evidence.
+
+20.09. Activation trace evidence defines runtime causality and activation
+      scope boundaries.
+
+20.10. Activation trace evidence does not redefine import, dependency
+       resolution, graph preparation, adapter lifecycle, capability
+       permission, Job lifecycle, OrchestrationUnit lifecycle, Window
+       finalization, committed-state authority, or trace substrate semantics.
+
+20.11. Trace evidence describes what Tertalis observed.
+
+20.12. Trace evidence does not make external side effects reversible.
+
+20.13. Trace evidence does not make retained evidence authoritative committed
+       state.
+
+20.14. Trace persistence and retention remain separate from activation
+       semantics.
+
+
+===============================================================================
+21. ACTIVATION FAILURE AND CLEANUP LIMITS
+===============================================================================
+
+21.01. The following failures fail an ordinary Pack activation:
+      - activation entry load or evaluation failure
+      - unsupported entry format
+      - missing required adapter
+      - Phase 1 hook failure
+      - Phase 2 hook failure
+      - Phase 3 hook failure
+      - required early registration missing
+      - dependency activation failure
+      - capability, service, or handler registration rejection
+      - permission or policy denial where activation requires acceptance
+      - activation validation failure
+      - required activation-plan input missing
+      - loader-order failure
+
+21.02. The following failures fail an entire cyclic activation group:
+      - any member entry load or evaluation failure
+      - any member Phase 1 failure
+      - any member Phase 2 failure
+      - any member Phase 3 failure
+      - missing required early cyclic surface
+      - unsupported cycle with no early handler
+      - external dependency activation failure
+      - cyclic-group validation failure
+      - cyclic group not admitted by the accepted activation plan
+
+21.03. On activation failure, Tertalis marks no failed Pack as Activated.
+
+21.04. On cyclic-group activation failure, Tertalis marks no cyclic-group member
+      as Activated.
+
+21.05. On activation failure, Tertalis withdraws provisional Tertalis-owned
+      registrations.
+
+21.06. On activation failure, Tertalis aborts staged Tertalis-owned state mutation
+      where applicable.
+
+21.07. On activation failure, Tertalis prevents external dependents from
+      activating.
+
+21.08. On activation failure, Tertalis classifies the failure.
+
+21.09. On activation failure, Tertalis emits trace evidence.
+
+21.10. On activation failure, Tertalis invokes supported cleanup or deactivation
+       paths where available.
+
+21.11. Tertalis cannot guarantee reversal of arbitrary effects performed
+       outside Tertalis-controlled boundaries.
+
+21.12. Effects outside Tertalis-controlled boundaries include:
+       - arbitrary network requests
+       - writes outside Tertalis persistence authority
+       - external process side effects
+       - host-language module-level side effects
+       - direct unsupported backend access
+
+21.13. Creators who perform irreversible effects before successful activation
+       own those effects.
+
+21.14. Tertalis guarantees cleanup only for Tertalis-owned and explicitly
+       controlled activation material.
+
+21.15. Silent fallback is forbidden.
+
+21.16. Activation failure is not a Job terminal outcome merely because the
+       activation path used adapter-executed code.
+
+21.17. Activation failure is not an OrchestrationUnit terminal outcome merely
+       because the activation path used orchestrated work.
+
+21.18. NotActivatedError identifies a Tertalis-mediated action refused because
+       the target Pack is not Activated.
+
+21.19. Pack code does not swallow NotActivatedError.
+
+21.20. Swallowing NotActivatedError hides orchestration failure.
+
+
+===============================================================================
+22. ASYNC HOOK COMPLETION
+===============================================================================
+
+22.01. A lifecycle hook completes only when its returned synchronous or
+      asynchronous result completes according to the adapter contract.
+
+22.02. Required setup is awaited by the hook.
+
+22.03. Starting detached background work and returning does not extend the
+      phase barrier.
+
+22.04. Detached work started outside Tertalis orchestration does not receive
+      Tertalis lifecycle guarantees by implication.
+
+22.05. A Pack does not publish a capability at a barrier while its
+      implementation is still being prepared by untracked detached work.
+
+22.06. If a capability is published at a barrier, it is callable according to
+      the guarantees of that barrier.
+
+22.07. Hook timeout, cancellation, and host-disconnect behavior remain explicit
+      activation-policy topics.
+
+22.08. No hidden retry or alternate callback order is implied.
+
+
+===============================================================================
+23. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+23.01. The final public names for Phase 1 and Phase 2 hooks remain open.
+
+23.02. The exact manifest schema for declaring activation entries and hooks
+      remains open.
+
+23.03. Exact adapter-mediated activation diagnostics remain open.
+
+23.04. Activation retry semantics remain open.
+
+23.05. Category-based activation ordering remains open.
+
+23.06. Exact cleanup or deactivation hooks remain open.
+
+23.07. Exact timeout, cancellation, and host-disconnect policy for activation
+      hooks remain open.
+
+23.08. Placeholder registration or late-binding protocols for early phases
+      remain open.
+
+23.09. Exact activation-plan schema remains open.
+
+23.10. Exact loader and activation-executor API boundaries remain open.
+
+23.11. Open questions do not weaken the activation boundary, final
+       Activated-state boundary, phase-barrier model, or publication rules
+       defined by this document.
+
+
+===============================================================================
+24. SUMMARY
+===============================================================================
+
+24.01. Activation is executable Pack participation under Tertalis orchestration.
+
+24.02. Activation consumes accepted activation intent.
+
+24.03. Activation-plan preparation belongs to PackManager and graph-preparation
+      semantics.
+
+24.04. Loader execution order is not activation authority.
+
+24.05. The activation process may contain Stage 0, Phase 1, Phase 2, and
+      Phase 3 before final Activated state is reached.
+
+24.06. Final Activated state is externally visible only after the Pack or
+      admitted cyclic activation group crosses its activation boundary.
+
+24.07. Tertalis guarantees phase barriers, not same-phase callback order.
+
+24.08. A Pack may have multiple adapter/runtime participations.
+
+24.09. A Pack or cyclic activation group is not partially Activated.
+
+24.10. Private implementation modules and exported module surfaces are not
+       activation entries merely because they exist or are exported.
+
+24.11. ModCallContext is a fresh invocation-scoped gateway, not raw backend
+       internals.
+
+24.12. Activation and later runtime execution are distinct.
+
+24.13. Immediate execution and top-level side effects are unsupported as
+       activation authority.
+
+24.14. Execution has Tertalis guarantees only when invoked and tracked through
+       Tertalis orchestration.
+
+24.15. Activation failures are explicit, trace-visible, and do not silently
+       fall back.
+
+24.16. DA-14 owns activation lifecycle semantics while leaving resolution,
+       dependencies, importing, adapters, capabilities, policy, Jobs,
+       OrchestrationUnits, RuntimeHost, PackManager, and ModCallContext
+       facade details to their owning documents.
 
 
 ===============================================================================
@@ -633,6 +1416,6 @@ END OF DA-14 - ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
 --- doc-meta ---
 DOC_ID: DA-14
 DOC_FILE: docs/design/DA-14_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
-DOC_REV: 16
-DOC_GIT: 35f9a71
+DOC_REV: 20
+DOC_GIT: a4e363d
 ----------------

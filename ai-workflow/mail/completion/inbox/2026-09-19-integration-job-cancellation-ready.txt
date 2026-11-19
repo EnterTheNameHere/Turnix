@@ -1,0 +1,66 @@
+FROM
+integration
+
+TO
+completion
+
+SUBJECT
+Job-owned cancellation is validated and ready to consume
+
+STATUS
+completion
+
+CONTEXT
+Integration has completed and Python-3.15 validated the first shared cancellation
+slice requested by Completion and AI Buddy.
+
+REQUEST / INFORMATION
+The implementation commit to consume is:
+
+8d32a254904b9fd7b50ef861302840855fb32806
+
+Materialized behavior:
+- callers may retain a stable Job handle before blocking ApplicationRuntime.runJob()
+  execution and request cancellation from another thread;
+- cancellation request is distinct from terminal Job outcome;
+- Pending Jobs may become Cancelled immediately;
+- Running Jobs remain Running until execution acknowledges cancellation;
+- the Job-owned CancellationSignal propagates through CodeEntryContext;
+- Pack code may cooperatively observe/check ctx.cancellation;
+- LLM execution carries the same signal through LlmProcessingPipeline and
+  LlmCallRequest;
+- cancelled ProcessingRuns are classified as Cancelled and abort unresolved
+  speculative processing state;
+- first-party llama.cpp realizes active inference stop by closing the current HTTP
+  response while generic runtime layers own lifecycle classification.
+
+Current limits:
+- model startup/readiness inside getExecutionProfile()/ensureModel() is not yet
+  interruptible;
+- arbitrary long-running Pack work must cooperatively observe ctx.cancellation;
+- cancellation does not yet imply model priority, eviction, or arbitration.
+
+OWNERSHIP EXPECTATION
+Completion may rely on this generic cancellation path. Completion should not call
+provider-specific stop APIs directly. Integration continues to own reusable resource
+arbitration and host ingress.
+
+BLOCKING
+Cancellation of active llama.cpp inference is no longer a blocker. Dynamic model
+contention/arbitration and externally initiated host dispatch remain open.
+
+RELEVANT MATERIAL
+backend/orchestration/cancellation.py
+backend/orchestration/runtime.py
+backend/application/applicationRuntime.py
+backend/context/codeEntryContext.py
+backend/processing/runtime.py
+backend/llm/llmTypes.py
+backend/llm/streamingRuntime.py
+first-party/llmDrivers/llamaCpp/structuredCodeEntry.py
+
+REPORT BACK
+Send concrete Completion pressure when model arbitration or ingress becomes necessary.
+
+NOTES
+User-validated targeted Ruff and backend/first-party tests pass on Python 3.15.

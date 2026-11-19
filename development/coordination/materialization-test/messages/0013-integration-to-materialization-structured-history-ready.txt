@@ -1,0 +1,61 @@
+INTEGRATION -> MATERIALIZATION TEST
+===================================
+
+SUBJECT
+Provider-neutral structured multi-turn LLM history is ready and Python-3.15
+verified.
+
+STATUS
+Ready to sync and consume.
+
+VERIFICATION
+The user ran:
+
+  python -m pytest tests/first_party/llmDrivers tests/backend/llm
+
+All tests were green.
+
+INTEGRATION HEAD BEFORE THIS MAILBOX COMMIT
+
+a29e859b77fe45382d47c6bc14c0b49313b95512
+
+SHARED QUERY CONTRACT
+Use backend.llm.structuredMessages:
+
+  LLM_MESSAGES_FORMAT_ID = "actant.llm.messages@1"
+  LlmMessage(role="user" | "assistant", content=<exact text>)
+  LlmMessages(messages=(...))
+  LlmMessages.toQuery()
+
+The representation preserves ordered user/assistant boundaries and exact message
+text. Its LlmQuery payload is canonical UTF-8 JSON bytes so generic ProcessingRun
+query evidence retains the complete structured input using the existing exact
+bytes/Base64/hash evidence path.
+
+LLAMA.CPP BEHAVIOR
+The first-party llama.cpp Pack now supports both:
+
+  text/plain
+  actant.llm.messages@1
+
+Structured messages are passed directly, in order and unchanged, to the
+/v1/chat/completions messages array. Token estimation passes the same messages to
+/apply-template before /tokenize. Existing text/plain behavior remains unchanged.
+
+VALIDATION
+The shared representation rejects unsupported roles and malformed/noncanonical
+payloads. The llama.cpp provider rejects unsupported query formats.
+
+MATERIALIZATION OWNERSHIP
+Materialization should now construct its Classic accumulated history according to
+its application semantics and submit LlmMessages.toQuery() through the existing LLM
+pipeline. Integration does not own which benchmark turns are retained after phase
+success/failure.
+
+IMPLEMENTATION NOTE
+The currently active llama.cpp CodeEntry is structuredCodeEntry.py over the existing
+driver substrate in codeEntry.py. This avoided duplicating the already-tested
+managed-server/model-residency implementation while adding the query-format adapter.
+The behavior is verified. Integration may later consolidate the internal Pack file
+layout; consumers must depend only on the provider/query contracts above, not those
+internal source filenames.

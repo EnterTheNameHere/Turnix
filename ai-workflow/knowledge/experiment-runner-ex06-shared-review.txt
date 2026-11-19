@@ -1,0 +1,115 @@
+EX-06 SHARED DELIVERY4430418 - INDEPENDENT INTEGRATION REVIEW
+============================================================
+Date: 2026-11-06. Owner: Integration coordinator/implementer.
+Canonical reviewed delivery metadata:1076e0d, parent533fe5f.
+Shared source:443041805a170ccad50dd8fbc4f3fe5c08b9cf48,
+exact parent/authorization533fe5feedaea7713f9031a0eaae4553dccb06b8.
+Application:0d84010bc64095c1080dc44842247c92945b48b8 unchanged.
+Read delivery mail, implementation report, full changed source/tests, corrected
+App addendum and budget evidence. This review does not import shared/App source.
+
+DECISION
+--------
+NOT ACCEPTED; EX-06-SHARED-R1 correction required before Integration/adoption.
+Existing1876 tests independently pass, but one new deterministic regression fails.
+No shared source integrated, no App source authorization, no upstream App import.
+Bounded shared authorization remains valid for the correction on its source branch.
+App semantic-input contract correction and concrete budget direction are accepted
+for later implementation; they do not remove the failed shared first-exit gate.
+
+P2 / R1 - LATER CALLER INTERRUPTION REPLACES EARLIER WORKER PRIMARY
+-----------------------------------------------------------------
+Path: backend/process/capture.py at4430418, particularly lines309/318/379,
+519/538/552/560/570. Caller and worker keep separate primary variables.
+Line560 selects caller-local primary before the already recorded operation.primary.
+Therefore observation order across threads is lost.
+
+Independent deterministic sequence:
+1. Actual supervisor's beforeLaunch raises exact KeyboardInterrupt A, before spawn.
+2. Supervisor stores operation.primary is A and signals its real done Event.
+3. Instrumented caller wait observes BOTH done and operation.primary is A, THEN
+   raises exact SystemExit B. The ordering is explicit, not a scheduling guess.
+4. execute catches B into caller-local primary, then line560 chooses B over A.
+5. API raises B with confirmed cleanup. Expected: same original A remains primary.
+
+This violates the binding same-object/first-BaseException contract. It can change
+outer signal/exit semantics even though owned resources have settled. The ordinary
+single-critical-error tests do not cover two ordered errors across owner threads.
+No native child, model or configured executable was launched by this regression.
+Workspace removed and runner active root released; this is an exception-precedence
+defect, not a claim of child leakage or failed cleanup.
+
+Raw runnable test (preserve unchanged):
+ai-workflow/knowledge/experiment-runner-ex06-shared-r1-reproducer.txt.
+Copy bytes unchanged to temporary test_primary.py; run with exact source first
+on sys.path. It uses public prepare/execute through a bound test facade plus one
+test-only instrumentation of the real completion wait. Result on4430418:
+1 failed in0.05s: SystemExit('caller-second') is not KeyboardInterrupt('worker-first').
+
+REQUIRED CORRECTION
+-------------------
+Use one operation-owned first-critical-observation arbitration mechanism across
+supervisor, readers, caller wait/start/unregister and retained-owner setup paths.
+Record first object once under a short shared state lock; use explicit None tests,
+not exception truthiness. No lock held over OS wait/pipe close/archive callbacks.
+All later critical/ordinary cleanup failures remain secondary. Preserve exception
+identity and private opaque evidence, actual Job cancellation and immutable UNKNOWN.
+Do not fix only the final selection by always preferring worker primary: that
+would reverse the bug when caller observed its primary first.
+
+Keep the raw regression unchanged; add reverse caller-first/worker-second and
+reader-versus-caller/secondary-cleanup cases, including first object with false
+truth value. Verify safe tracing/causes, no spawn after failed ACK, no new resource
+root leaks at confirmed boundaries and existing1876 tests unchanged. Report exact
+corrected source/ref/parent and focused/relevant/full actual platform results.
+Stay within authorized platform paths; no App/platform API expansion required.
+
+INDEPENDENT VERIFICATION
+------------------------
+Exact source exported to ignored python-embedded/ex06-review-4430418/; runtime
+remains Integration's existing Python3.15.0b4, pytest9.2. No source branch checkout
+or production modification. Initial -m pytest attempt imported Integration backend
+from embedded search path and had2 collection errors; this was reviewer bootstrap,
+not worker code failure. Corrected bootstrap explicitly inserts export cwd before
+imports and asserts backend.process.__file__ is under that cwd.
+
+Actual final original-suite command from source export:
+ <Integration python-embedded/python.exe> -X frozen_modules=off -c
+ "import sys,pathlib; sys.path.insert(0,str(pathlib.Path.cwd()));
+ import backend.process,pytest;
+ assert pathlib.Path(backend.process.__file__).resolve().is_relative_to(pathlib.Path.cwd());
+ raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','tests']))"
+Result:1876 passed in15.98s, zero skips. New raw R1 separately1 failed/0.05s.
+Earlier direct stdin diagnostic also reproduces the same ordered identity loss.
+Existing embedded-home warning remains. No Ruff/model/browser/ty/tool installation.
+
+Independent diff:13 authorized platform-only Python paths; source versions/path
+headers and AST/docstrings checked, zero missing class/function docstrings;
+git diff --check passes. Existing platform tests unchanged; only2 new test files.
+App source/tests absent from patch. Reviewed actual callback/worker/pin roots,
+empty worker Context, capture bounds, sticky admissions, trace privacy and bounded
+file snapshot implementation; no claim that1876 tests prove every native race.
+
+APP CONTRACT / BUDGET CHECK
+---------------------------
+Semantic sorted {inputId,bytes,sha256} frozen-input hash correction is present;
+volatile index observations stay provenance. Current addendum section09 supplies
+concrete fixture and source-backed serializer bound for the approved driver shape.
+Independently recomputed the supplied recurrence from host fixture values:
+query5142/135272, request323848/1885408; archive one-unit39953361 bytes and
+2x2 53240974 bytes, both within256MiB. Record counts114/288 and per-unit step/
+partial reserves agree. Host fixture uses deliberately small finite source/stream
+caps; broader inputs may validly reject. No App validator/procedure executed.
+Sidecar/command/export figures remain contract budgets to enforce/test in App
+implementation, not independent actual memory/export measurements here.
+Actual approved Ruff/ty flags/assets and real one-pass gate remain later work.
+
+CONTINUATION / OWNERSHIP
+-------------------------
+Worker corrects shared branch, preserves raw R1 and reports back. Integration
+independently reviews correction before cherry-picking platform-only source and
+acceptance. Then owning Application consumes LATEST COMPLETE actant-integration,
+preserving its exclusive files and recording exact refs/projection/combined tests,
+before separate App source authorization. No Application source is imported here.
+Review delivery mail archived; bounded R1 correction notice in worker inbox.
+EX-01..05 acceptance remains unchanged; EX-06 shared/App acceptance outstanding.

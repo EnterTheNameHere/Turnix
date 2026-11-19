@@ -1,0 +1,1006 @@
+==============================================================================
+AUDIT RESULT - DA-18 DEBUGGING, INSPECTION AND BREAKPOINTS
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-18_RECOMMENDATION.txt
+
+Files read for this audit turn:
+    docs/design/rewrite_recommendations/REWRITE-DA-18_RECOMMENDATION.txt
+    docs/design/DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
+
+Standing audit context:
+    docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Correct in substance, with current-name translation required.
+
+    The recommendation correctly preserves DA-18's central model: debugging is
+    semantic, intentional, observable, scoped, mediated, and Turnix-concept-first;
+    memory breakpoints align with committed-state/transaction authority;
+    debugger inspection is read-only by default; debugger mutation is explicit,
+    staged, trace-visible, and subject to normal authority paths; manual pause and
+    apply-at-safe-point are non-terminal; debugger-originated Job control remains
+    governed by Job and policy documents; undo of authoritative state is new
+    explicit mutation; redo history is local and non-authoritative; debugger UI
+    does not own debugger semantics; debugger safe points are not SafePointWindows;
+    and DA-26 owns formal Replay / Resume / Retry semantics.
+
+Document verdict:
+    Keep with targeted terminology, cross-reference, and safe-point wording fixes.
+
+DA-18 is architecturally strong and should not be heavily rewritten.
+
+The target already includes important updated stop-lines for debugger Resume,
+DA-26 Resume, snapshot/restore boundaries, DA-05/DA-07/DA-08/DA-25/DA-26, and
+trace retention. The remaining issues are mostly stale terminology and owner
+visibility.
+
+The main required fixes are:
+
+    - split the does-NOT-define line so committed state and transactions point to
+      DA-04, while Window / SafePointWindow / ActiveWindow / AbortedWindow /
+      Window finalization point to DA-08
+    - add modern owner references to the upstream list or local cross-reference
+      sections where DA-18 already depends on them
+    - translate AppInstance / appInstanceId to ApplicationRun / applicationRunId
+      where live runtime incarnation is meant, or Application / applicationId
+      where durable application identity is meant
+    - translate pipeline/pipeline-stage wording to ProcessingPipeline /
+      ProcessingRun where the first-class current architecture terms are meant, or
+      explicitly define pipeline as local shorthand if retained
+    - replace IoManager example wording with DA-07 persistent-I/O authority /
+      mediated I/O wording unless IoManager remains a canonical concrete manager
+      name
+    - clarify service-registry inspection as metadata/diagnostic inspection, not
+      direct Service authority or Pack-facing service access
+    - clarify debugger resume / continue as DA-18 debugger pause behavior, not
+      DA-26 Resume
+    - clarify replay-from-trace / replay and time travel wording as trace-based
+      causal-history inspection unless explicitly routed through DA-26 Replay
+    - preserve debugger safe point as execution/mutation safety boundary, not
+      SafePointWindow or Window finalization
+    - normalize duplicate local subsection numbering under section 03
+    - avoid final-document version/process metadata leakage
+
+Primary conclusion:
+    Keep DA-18 as the semantic debugging, inspection, breakpoint, controlled
+    mutation, manual pause, apply-at-safe-point, debugger undo/redo,
+    debugger-originated Job-control request, debugger UI boundary, debugger
+    disconnect, and debugger-domain trace document. Apply targeted owner-boundary
+    and terminology fixes only.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-18 should not keep older terminology merely because it appears in older source
+material or recommendations.
+
+Specifically, the rewrite should not preserve:
+
+    - AppInstance as current runtime identity vocabulary
+    - appInstanceId as current trace identity where ApplicationRun is meant
+    - pipeline as an overloaded old model when ProcessingPipeline / ProcessingRun
+      is the current first-class architecture terminology
+    - IoManager as a required final architecture name if DA-07 now owns the
+      persistent-I/O authority layer under another name
+    - service registry inspection as direct access to Service authority
+    - debugger safe point as SafePointWindow
+    - debugger pause-at-safe-point as Window finalization
+    - debugger Resume as DA-26 Resume
+    - replay-from-trace as DA-26 Replay unless explicitly routed through DA-26
+    - trace evidence as committed state
+    - trace evidence alone as sufficient restoration/replay material
+    - snapshot/restore as an alternate persistence, Window, export, or Replay path
+    - debugger-created transactional overlays as authoritative merely because the
+      debugger created them
+    - staged debugger mutations as committed state
+    - undo as rollback magic
+    - redo history as authoritative system history
+    - debugger UI as debugger authority
+    - debugger tooling as Kernel authority, persistence authority, committed-state
+      authority, payload representation authority, configuration authority,
+      Window finalization authority, RuntimeHost authority, OrchestrationUnit
+      authority, adapter authority, or DA-26 workflow authority
+
+Canonical translations:
+
+    AppInstance -> ApplicationRun where one live runtime incarnation is meant
+    AppInstance -> Application where durable application identity is meant
+    appInstanceId -> applicationRunId where live runtime identity is meant
+    appInstanceId -> applicationId only where durable Application identity is meant
+    pipeline-stage breakpoint -> ProcessingPipeline / ProcessingRun stage
+        breakpoint, if the current model requires canonical names
+    pipelineId -> processingPipelineId or processingRunId depending on whether the
+        reusable procedure or one execution is meant
+    IoManager -> persistent-I/O authority / DA-07 mediated I/O, unless IoManager
+        remains an intentional concrete manager name
+    Resume -> debugger resume / continue from debugger pause, unless DA-26 Resume
+        is explicitly meant
+    replay-from-trace -> trace-based causal-history inspection, unless DA-26
+        Replay is explicitly meant
+
+The useful part of the recommendation is the debugging boundary:
+
+    DA-18 owns debugger semantics. It does not own committed-state authority,
+    payload representation, persistence, Window finalization, artifacts, exports,
+    Replay, Resume, Retry, ApplicationRun lifecycle, Job lifecycle, adapter
+    lifecycle, RuntimeHost lifecycle, or frontend UI authority.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-18 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, debugger Resume is different from DA-26 Resume.
+    - The new design separates SafePointWindow from debugger safe point.
+    - This rewrite added DA-25 and DA-26 stop-lines.
+    - Unlike V2, trace replay is not committed state.
+    - Codex kept AppInstance wording.
+    - This audit decided DA-18 should not own Window finalization.
+    - DA-18 was rewritten because of the audit.
+
+Those facts may be useful in audit files, migration notes, compatibility notes,
+branch notes, changelogs, or explicitly historical documents. They do not belong
+in the architecture document itself.
+
+The final DA-18 should simply define semantic debugging, breakpoints, inspection,
+controlled mutation, mutation while running, manual pause, apply-at-safe-point,
+undo/redo, debugger trace obligations, debugger UI integration, step modes,
+Job-aware debugging, scoping, failure modes, unsupported behaviors, open
+questions, and locked summary.
+
+==============================================================================
+02. WHAT DA-18 GETS RIGHT
+==============================================================================
+
+02.1. Debugging is semantic and mediated
+----------------------------------------
+
+DA-18 correctly says Turnix debugging is intentional, observable, reversible where
+state permits, scoped, and concept-first rather than arbitrary language-runtime
+internals first.
+
+Preserve this.
+
+02.2. Semantic breakpoints are the right model
+----------------------------------------------
+
+DA-18 correctly focuses on semantic breakpoint classes such as pipeline-stage,
+memory, capability, and Job-scoped breakpoints rather than arbitrary code-line
+breakpoints.
+
+Preserve this while aligning pipeline terms with ProcessingPipeline /
+ProcessingRun where needed.
+
+02.3. Memory breakpoint transaction semantics are strong
+--------------------------------------------------------
+
+DA-18 correctly says memory breakpoints observe state transitions rather than
+storage mechanics, committed mutations are breakpoint-visible by default, staged
+observation must be explicit, child transaction commit into parent is not a
+committed mutation, and only outermost transaction commit creates authoritative
+committed-mutation events.
+
+Preserve this strongly.
+
+02.4. Inspection is read-only by default
+----------------------------------------
+
+DA-18 correctly says inspection is read-only by default and does not collapse
+committed and staged state into one undifferentiated view.
+
+Preserve this.
+
+02.5. Debugger actions are mediated
+-----------------------------------
+
+DA-18 correctly says debugger actions execute through Turnix-controlled RPC,
+capabilities, or equivalent mediated interfaces, do not bypass orchestration, do
+not access raw filesystem I/O directly, and do not write Job terminal state
+directly.
+
+Preserve this, but update persistent-I/O wording to DA-07 language.
+
+02.6. Controlled mutation is explicit and staged
+------------------------------------------------
+
+DA-18 correctly says debugger mutation is explicit, user-confirmed where needed,
+trace-visible, can use temporary transactional overlays, and remains
+non-authoritative until normal commit rules make it authoritative.
+
+Preserve this.
+
+02.7. Apply-at-safe-point is deterministic and non-terminal
+-----------------------------------------------------------
+
+DA-18 correctly says debugger mutations while running require manual pause or
+deterministic apply-at-safe-point behavior when active execution may read affected
+data.
+
+Preserve this.
+
+02.8. Undo and redo semantics are strong
+----------------------------------------
+
+DA-18 correctly says undo affecting authoritative state is a new explicit
+debugger-initiated mutation, while redo history is local, ephemeral, and
+non-authoritative.
+
+Preserve this strongly.
+
+02.9. Job-aware debugger behavior is scoped
+-------------------------------------------
+
+DA-18 correctly says Job lifecycle remains DA-19-owned, paused-at-safe-point Jobs
+remain non-terminal, and debugger-originated Job control is trace-visible and
+policy/lifecycle constrained.
+
+Preserve this.
+
+02.10. Debugger UI boundary is correct
+--------------------------------------
+
+DA-18 correctly says debugger user interfaces are optional and supported, but DA-
+22 owns debugger UI as frontend surface while DA-18 owns debugger semantics.
+
+Preserve this.
+
+02.11. Trace ownership is mostly strong
+---------------------------------------
+
+DA-18 correctly owns debugger-domain trace obligations and reason identifiers
+while DA-03 owns the tracing substrate.
+
+Preserve this and add missing owner references where needed.
+
+==============================================================================
+03. REQUIRED FIX: DOES-NOT-DEFINE SPLIT FOR DA-04 AND DA-08
+==============================================================================
+
+The target currently says DA-18 does not define:
+
+    authoritative committed state, transactions, or windows (see DA-04)
+
+This should be split.
+
+Recommended replacement:
+
+    DA-18 does not define:
+
+        - authoritative committed state or transaction semantics (see DA-04)
+        - Window, SafePointWindow, ActiveWindow, AbortedWindow, or Window
+          finalization semantics (see DA-08)
+
+Reason:
+
+    DA-04 owns committed-state truth and transaction semantics.
+
+    DA-08 owns Window kinds, Window ordering, ActiveWindow, SafePointWindow,
+    AbortedWindow, Window finalization, and Window-domain trace obligations.
+
+This is a cross-reference correction, not a conceptual rewrite.
+
+==============================================================================
+04. REQUIRED FIX: APPLICATION / APPLICATIONRUN TERMINOLOGY
+==============================================================================
+
+DA-18 still uses AppInstance and appInstanceId.
+
+Translate according to meaning:
+
+    AppInstance -> ApplicationRun
+        where one live runtime incarnation / active execution region is meant
+
+    AppInstance -> Application
+        where durable application identity is meant
+
+Examples:
+
+    mutation-capable execution for the owning AppInstance pauses
+        -> mutation-capable execution for the owning ApplicationRun pauses
+
+    other AppInstances may continue
+        -> other ApplicationRuns may continue
+
+    AppInstance stop
+        -> ApplicationRun stop or ApplicationRun lifecycle outcome
+
+    AppInstance lifecycle outcome
+        -> ApplicationRun lifecycle outcome
+
+    AppInstance active-region semantics
+        -> ApplicationRun active-region semantics, if DA-20 uses that current term
+
+    appInstanceId when applicable
+        -> applicationRunId when live runtime identity is meant
+
+DA-20 owns Application/ApplicationRun lifecycle and runtime identity.
+DA-18 may reference those identities only to scope debugger pause, breakpoint,
+trace, and mutation behavior.
+
+==============================================================================
+05. REQUIRED FIX: PROCESSINGPIPELINE / PROCESSINGRUN WORDING
+==============================================================================
+
+The target uses pipeline-stage breakpoints, pipeline objects, pipelineId, and
+pipelineRunId.
+
+Because ProcessingPipeline and ProcessingRun replace the old overloaded Pipeline
+model, DA-18 should either:
+
+    - translate these terms to ProcessingPipeline / ProcessingRun where current
+      first-class terms are meant, or
+    - explicitly define pipeline as a local shorthand for ProcessingPipeline /
+      ProcessingRun concepts if retained for readability.
+
+Recommended approach:
+
+    Use ProcessingPipeline when referring to the reusable staged procedure.
+
+    Use ProcessingRun when referring to one execution of that procedure.
+
+    Use stageId for the stage inside a ProcessingPipeline / ProcessingRun.
+
+Possible replacements:
+
+    pipeline-stage breakpoints
+        -> ProcessingPipeline / ProcessingRun stage breakpoints
+
+    pipeline objects
+        -> ProcessingPipeline and ProcessingRun objects
+
+    pipelineId
+        -> processingPipelineId if reusable procedure identity is meant
+        -> processingRunId if one execution is meant
+
+This prevents DA-18 from reviving the old overloaded Pipeline object model.
+
+==============================================================================
+06. REQUIRED FIX: PERSISTENT-I/O WORDING
+==============================================================================
+
+The target currently says persistence-affecting debugger action executes through
+normal authority path, for example IoManager or services that use it.
+
+Recommended replacement:
+
+    Any persistence-affecting debugger action executes through DA-07 persistent-
+    I/O authority and the same mediated persistence paths as normal runtime
+    actions.
+
+    Debugger tooling does not access raw filesystem input or output directly as a
+    bypass path.
+
+    Debugger tooling does not become persistent-I/O authority.
+
+If IoManager remains the intended concrete manager name, it can be mentioned as
+an implementation/provider name, but the architecture authority should be DA-07
+persistent-I/O authority.
+
+==============================================================================
+07. REQUIRED FIX: SERVICE INSPECTION BOUNDARY
+==============================================================================
+
+The target lists `services registry` as an inspectable object.
+
+This can stay if it means diagnostic metadata / registered service identity /
+service status / ownership metadata.
+
+It should not imply Pack-facing direct Service access or direct Service authority.
+
+Recommended clarification:
+
+    Debugger inspection may inspect service registry metadata when permitted.
+
+    Service registry inspection does not grant direct Service authority.
+
+    Pack-facing operation access remains mediated through capabilities,
+    ModCallContext-exposed surfaces, or other explicitly defined mediated paths.
+
+If this wording becomes too broad, replace `services registry` with:
+
+    service registry metadata
+
+or:
+
+    internal service registry diagnostics where exposed by Kernel policy
+
+==============================================================================
+08. REQUIRED FIX: DEBUGGER RESUME VS DA-26 RESUME
+==============================================================================
+
+The target already adds a good early boundary that debugger pause and debugger-
+resume wording means continuation from debugger pause and does not imply DA-26
+Resume.
+
+Keep and expand consistently in later sections.
+
+Recommended replacements:
+
+    debugger-resume
+        -> debugger resume / continue from debugger pause
+
+    resume of a paused Job
+        -> debugger resume / continue of a paused Job
+
+    BreakpointResumed
+        -> keep as a debugger-domain trace reason if already established, but the
+           surrounding prose should say this is debugger resume / continue, not
+           DA-26 Resume
+
+Preserve:
+
+    DA-18 owns debugger pause/step/resume/continue semantics.
+
+    DA-26 owns formal Resume after SafePointWindow restoration.
+
+The same word should not silently carry both meanings.
+
+==============================================================================
+09. REQUIRED FIX: REPLAY / TRACE-BASED INSPECTION WORDING
+==============================================================================
+
+The target leaves open:
+
+    replay and time travel
+
+The recommendation also warns about replay-from-trace wording.
+
+Recommended replacement:
+
+    trace-based causal-history inspection and time-travel debugging
+
+or:
+
+    trace-based causal-history inspection
+
+Add boundary:
+
+    Trace-based causal-history inspection is not DA-26 Replay unless explicitly
+    routed through DA-26 Replay semantics.
+
+    Trace evidence by itself is not committed-state truth.
+
+    Trace evidence by itself does not restore committed state.
+
+    Deterministic restoration requires the committed material and artifact/workflow
+    rules owned by DA-04, DA-08, DA-25, and DA-26.
+
+This prevents DA-18 from implying trace-as-state.
+
+==============================================================================
+10. REQUIRED FIX: DEBUGGER SAFE POINT VS SAFEPOINTWINDOW
+==============================================================================
+
+Preserve this distinction explicitly:
+
+    Debugger safe point:
+        execution/mutation safety boundary used for debugger pause or
+        apply-at-safe-point mutation
+
+    SafePointWindow:
+        finalized committed Window boundary owned by DA-08
+
+Rules to preserve:
+
+    - debugger safe point is not SafePointWindow by default
+    - debugger pause-at-safe-point does not automatically create Window
+      finalization
+    - SafePointWindow AtQuiescence does not automatically imply debugger pause
+    - Job pause-at-safe-point remains non-terminal
+    - if debugger safe-point behavior affects Window creation, DA-08 governs
+      Window finalization and SafePointWindow creation semantics
+
+==============================================================================
+11. REQUIRED FIX: UPSTREAM / OWNER VISIBILITY
+==============================================================================
+
+The DA-18 upstream list is too narrow for the boundaries already present in the
+body.
+
+Add or otherwise expose these owner references where DA-18 keeps touching them:
+
+    DA-05:
+        ValueRef, Chunk, ChunkId, payload identity, decode, integrity, and
+        committed-value representation when debugger inspection or mutation
+        presents or changes committed values
+
+    DA-06:
+        configuration semantics when debugger mutation affects configuration
+
+    DA-07:
+        persistent-I/O authority when debugger action reads, writes, snapshots,
+        restores, exports, prunes, clears, or otherwise affects persistent material
+
+    DA-08:
+        Window finalization and SafePointWindow creation
+
+    DA-20:
+        Application/ApplicationRun lifecycle and active-region semantics
+
+    DA-21:
+        RPC/channel/transport semantics
+
+    DA-22:
+        debugger UI as frontend surface
+
+    DA-23:
+        execution adapter authority boundaries
+
+    DA-24:
+        OrchestrationUnit lifecycle and mutation authority
+
+    DA-25:
+        Window artifacts, exports, Minimal Audit Bundles, missing material, and
+        artifact authority
+
+    DA-26:
+        Replay, Resume, Retry, comparison, and audit workflow semantics
+
+    DA-27:
+        adapter lifecycle, trust, isolation, failure, and disconnect semantics
+
+    DA-28:
+        RuntimeHost command-surface and lifecycle semantics
+
+    DA-30:
+        ModCallContext gateway semantics if debugger tooling inspects or affects
+        Pack-facing invocation context
+
+This does not mean DA-18 owns those domains. It means DA-18 should identify the
+owner where debugger wording touches their boundaries.
+
+==============================================================================
+12. TRACE WORDING
+==============================================================================
+
+Follow the DA-03 cross-document trace wording check.
+
+Debugger trace requirements are debugger-domain emission obligations.
+
+Trace retention, trace pruning, trace loss, event structure, trace DAG semantics,
+span mechanics, and trace storage semantics remain owned by DA-03.
+
+DA-18 owns debugger-domain trace reason identifiers used for debugger inspection,
+breakpoints, manual pause, safe-point pause, debugger disconnect outcomes, and
+debugger-initiated mutation.
+
+Debugger-domain trace reasons describe debugger-domain behavior only.
+
+They do not define:
+
+    - committed-state mutation outcome
+    - Job terminal outcome
+    - OrchestrationUnit terminal outcome
+    - ApplicationRun lifecycle outcome
+    - adapter lifecycle outcome
+    - RuntimeHost lifecycle outcome
+    - Window finalization
+    - artifact/export outcome
+    - comparison outcome
+    - Replay outcome
+    - Resume outcome
+    - Retry outcome
+    - audit workflow outcome
+
+Trace evidence remains evidence. Trace evidence is not committed state.
+
+==============================================================================
+13. WHAT TO PRESERVE FROM CURRENT DA-18
+==============================================================================
+
+Preserve these boundaries, translating stale terminology where present:
+
+    - debugging is semantic, intentional, observable, scoped, mediated, and Turnix-
+      concept-first
+    - Python frames and JavaScript call stacks may be context, but are not the
+      primary debugging model
+    - semantic breakpoint classes remain semantic
+    - memory breakpoints trigger on committed mutations by default
+    - staged mutation observation is explicit
+    - child transaction commit into parent is not committed mutation
+    - only outermost transaction commit creates authoritative committed-mutation
+      events
+    - breakpoint hits pause triggering execution and mutation-capable execution
+      region without mutating state by default
+    - breakpoints do not auto-resume, alter execution order, silently cancel Jobs,
+      or silently supersede Jobs
+    - live inspection is read-only by default
+    - inspection does not turn staged values into authoritative state
+    - debugger actions are mediated through Turnix-controlled RPC, capabilities, or
+      equivalent mediated surfaces
+    - debugger tooling does not access raw filesystem I/O directly as a bypass path
+    - debugger tooling does not write Job terminal state directly
+    - explicit debugger mutation is user-visible, trace-visible, staged where
+      needed, and subject to normal authority rules
+    - debugger-created transactional overlays are not authoritative by origin
+    - controlled mutation while running requires manual pause or deterministic
+      apply-at-safe-point where concurrent reads matter
+    - manual pause is deterministic, explicit, non-terminal, and trace-visible
+    - apply-at-safe-point staging and application are trace-visible and do not
+      partially apply
+    - undo affecting authoritative state is new explicit mutation
+    - redo history is debugger-local, ephemeral, and non-authoritative
+    - debugger UI is optional and supported, but DA-22 owns frontend surface
+      semantics
+    - debugger step modes do not redefine Job lifecycle states
+    - paused-at-safe-point Jobs remain non-terminal
+    - debugger-originated Job control remains constrained by DA-17 and DA-19
+    - debugger disconnect outcome is policy-governed, trace-visible, and cannot
+      deadlock
+    - debugger-domain trace reasons do not define owning-domain outcomes
+    - time travel is not supported as runtime debugger mode in DA-18
+
+==============================================================================
+14. WHAT TO ADD OR CHANGE IN THE REVISED DA-18
+==============================================================================
+
+14.1. Split DA-04 / DA-08 does-not-define wording
+-------------------------------------------------
+
+Point committed state and transactions to DA-04. Point Window kinds and
+finalization to DA-08.
+
+14.2. Translate Application identity wording
+--------------------------------------------
+
+Replace AppInstance/appInstanceId with ApplicationRun/applicationRunId or
+Application/applicationId depending on meaning.
+
+14.3. Translate ProcessingPipeline / ProcessingRun wording
+----------------------------------------------------------
+
+Replace overloaded pipeline wording with ProcessingPipeline / ProcessingRun where
+needed, or explicitly define pipeline as local shorthand.
+
+14.4. Replace IoManager authority wording
+-----------------------------------------
+
+Use DA-07 persistent-I/O authority / mediated I/O wording unless IoManager remains
+an intentional concrete manager name.
+
+14.5. Clarify service registry inspection
+-----------------------------------------
+
+Keep service inspection to metadata/diagnostic surfaces. Do not imply direct
+Service authority.
+
+14.6. Preserve debugger Resume distinction
+------------------------------------------
+
+Use debugger resume / continue from debugger pause for DA-18 behavior. Use DA-26
+Resume only for formal restoration workflow semantics.
+
+14.7. Preserve Replay distinction
+---------------------------------
+
+Use trace-based causal-history inspection unless DA-26 Replay is explicitly meant.
+
+14.8. Preserve debugger safe point distinction
+----------------------------------------------
+
+Do not collapse debugger safe point and SafePointWindow.
+
+14.9. Add owner visibility
+--------------------------
+
+Add DA-05, DA-06, DA-07, DA-08, DA-20, DA-21, DA-22, DA-23, DA-24, DA-25, DA-26,
+DA-27, DA-28, and DA-30 where the document touches those boundaries.
+
+14.10. Normalize numbering
+--------------------------
+
+Fix duplicate local numbering under section 03 without changing semantics.
+
+14.11. Keep implementation details open
+---------------------------------------
+
+Do not define concrete debugger UI layout, concrete breakpoint-condition language,
+snapshot/restore implementation, time-travel runtime debugging, trace-based
+causal-history tooling, exact debugger UI affordances for Job lifecycle control,
+exact pause protocol, exact overlay implementation, exact trace payload fields, or
+language-runtime debugger internals unless an owning implementation specification
+fixes them.
+
+==============================================================================
+15. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    authoritative committed state, transactions, or windows (see DA-04)
+        -> authoritative committed state or transaction semantics (see DA-04)
+        -> Window, SafePointWindow, ActiveWindow, AbortedWindow, or Window
+           finalization semantics (see DA-08)
+
+    AppInstance
+        -> ApplicationRun where one live runtime incarnation is meant
+        -> Application where durable Application identity is meant
+
+    appInstanceId
+        -> applicationRunId where live runtime identity is meant
+        -> applicationId only where durable Application identity is meant
+
+    owning AppInstance
+        -> owning ApplicationRun
+
+    other AppInstances may continue
+        -> other ApplicationRuns may continue
+
+    AppInstance stop / AppInstance failure / AppInstance lifecycle outcome
+        -> ApplicationRun stop / ApplicationRun failure / ApplicationRun lifecycle
+           outcome
+
+    AppInstance active-region semantics
+        -> ApplicationRun active-region semantics, if DA-20 uses that current term
+
+    pipeline-stage breakpoints
+        -> ProcessingPipeline / ProcessingRun stage breakpoints, if first-class
+           current terminology is required
+
+    pipeline objects
+        -> ProcessingPipeline and ProcessingRun objects
+
+    pipelineId
+        -> processingPipelineId or processingRunId depending on meaning
+
+    IoManager or services that use it
+        -> DA-07 persistent-I/O authority and mediated persistence providers
+
+    services registry
+        -> service registry metadata, if the intent is diagnostic inspection
+
+    debugger-resume
+        -> debugger resume / continue from debugger pause
+
+    resume of a paused Job
+        -> debugger resume / continue of a paused Job
+
+    replay and time travel
+        -> trace-based causal-history inspection and time-travel debugging
+        -> or trace-based causal-history inspection, if time travel remains
+           unsupported
+
+    Replay / replay-from-trace
+        -> DA-26 Replay only when formal Replay semantics are intended; otherwise
+           trace-based causal-history inspection
+
+    trace-visible
+        -> debugger-domain trace emission obligation, with retention/loss governed
+           by DA-03
+
+    current Dv3 terminology / current Dv3 type names / current Dv3 names
+        -> canonical architecture terminology / canonical architecture type names
+
+    Any final-document wording like "In V3, debugger Resume..."
+        -> replace with direct architecture language such as "Debugger resume..."
+
+==============================================================================
+16. ACCEPTANCE CONDITIONS FOR THE REVISED DA-18
+==============================================================================
+
+A revised DA-18 is acceptable when all of the following are true:
+
+    - It preserves DA-18 as owner of debugging, inspection, breakpoint, controlled
+      mutation, manual pause, apply-at-safe-point, undo/redo, debugger UI boundary,
+      debugger disconnect, debugger-originated Job-control request, and debugger-
+      domain trace obligations.
+
+    - It preserves debugging as semantic, intentional, observable, scoped, and
+      mediated.
+
+    - It preserves semantic breakpoints rather than arbitrary code-line breakpoints.
+
+    - It preserves memory breakpoints as committed-mutation-only by default.
+
+    - It preserves explicit staged mutation observation.
+
+    - It preserves child transaction commit into parent as not committed mutation.
+
+    - It preserves only outermost transaction commit as creating authoritative
+      committed-mutation events.
+
+    - It preserves live inspection as read-only by default.
+
+    - It preserves inspection as not turning staged values into authoritative
+      state.
+
+    - It preserves debugger mutation as explicit, staged where needed,
+      trace-visible, and subject to normal authority rules.
+
+    - It preserves debugger-created temporary transactional overlays as non-
+      authoritative until normal commit rules make a mutation authoritative.
+
+    - It preserves manual pause and apply-at-safe-point as non-terminal and
+      deterministic.
+
+    - It preserves debugger safe point as execution/mutation safety boundary, not
+      SafePointWindow by default.
+
+    - It preserves debugger pause-at-safe-point as not automatically creating
+      Window finalization.
+
+    - It preserves paused-at-safe-point Jobs as non-terminal.
+
+    - It preserves debugger-originated Job control as explicit, trace-visible, and
+      governed by DA-17 and DA-19 where policy and Job lifecycle participate.
+
+    - It preserves debugger tooling as not directly writing Job terminal state.
+
+    - It preserves undo of authoritative state as new explicit mutation.
+
+    - It preserves redo history as debugger-local, ephemeral, and non-authoritative.
+
+    - It preserves debugger UI as not owning debugger semantics.
+
+    - It preserves debugger resume / continue from pause as not DA-26 Resume.
+
+    - It preserves trace-based causal-history inspection as not DA-26 Replay unless
+      explicitly routed through DA-26.
+
+    - It preserves snapshot / restore as not currently defined by DA-18 and not a
+      bypass of DA-04, DA-05, DA-07, DA-08, DA-25, or DA-26 if later introduced.
+
+    - It splits committed-state/transaction ownership from Window ownership in the
+      does-NOT-define section.
+
+    - It translates AppInstance/appInstanceId into ApplicationRun/Application
+      terminology where appropriate.
+
+    - It translates pipeline terminology into ProcessingPipeline/ProcessingRun
+      terminology or explicitly scopes pipeline as local shorthand.
+
+    - It replaces IoManager authority wording with DA-07 persistent-I/O authority
+      wording unless IoManager remains a deliberate concrete manager name.
+
+    - It clarifies service-registry inspection as metadata/diagnostic inspection,
+      not direct Service authority.
+
+    - It keeps DA-03 as trace substrate/retention/loss owner.
+
+    - It keeps DA-04 as committed-state/transaction owner.
+
+    - It keeps DA-05 as payload representation owner.
+
+    - It keeps DA-06 as configuration owner where configuration mutation is touched.
+
+    - It keeps DA-07 as persistent-I/O owner.
+
+    - It keeps DA-08 as Window finalization owner.
+
+    - It keeps DA-20 as Application/ApplicationRun lifecycle and identity owner.
+
+    - It keeps DA-21 as RPC/channel/transport owner.
+
+    - It keeps DA-22 as debugger UI frontend surface owner.
+
+    - It keeps DA-23 as execution adapter boundary owner.
+
+    - It keeps DA-24 as OrchestrationUnit lifecycle and mutation-authority owner.
+
+    - It keeps DA-25 as artifact/export owner.
+
+    - It keeps DA-26 as Replay/Resume/Retry/comparison/audit workflow owner.
+
+    - It keeps DA-27 as adapter lifecycle owner.
+
+    - It keeps DA-28 as RuntimeHost owner.
+
+    - It keeps DA-30 as ModCallContext owner where Pack-facing invocation gateway
+      semantics are touched.
+
+    - It does not define concrete debugger UI layout, concrete breakpoint-condition
+      language, snapshot/restore implementation, time-travel runtime debugging,
+      exact debugger UI affordances for Job lifecycle control, exact pause
+      protocol, exact overlay implementation, exact trace payload fields, or
+      language-runtime debugger internals unless an owning implementation
+      specification fixes them.
+
+    - It does not mention audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+==============================================================================
+17. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-18.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform targeted terminology and owner-boundary fixes:
+
+    - split the does-NOT-define section so committed state and transactions point
+      to DA-04, while Window semantics point to DA-08
+    - translate AppInstance / appInstanceId to ApplicationRun / applicationRunId or
+      Application / applicationId where appropriate
+    - translate pipeline wording to ProcessingPipeline / ProcessingRun where the
+      first-class current concepts are meant, or explicitly scope pipeline as
+      local shorthand
+    - replace IoManager authority wording with DA-07 persistent-I/O authority /
+      mediated I/O wording unless IoManager remains a deliberate concrete manager
+      name
+    - clarify service-registry inspection as metadata/diagnostic inspection, not
+      direct Service authority
+    - clarify debugger resume / continue from pause as DA-18 debugger behavior,
+      not DA-26 Resume
+    - clarify replay-from-trace / replay wording as trace-based causal-history
+      inspection unless explicitly routed through DA-26 Replay
+    - preserve debugger safe point as execution/mutation safety boundary, not
+      SafePointWindow by default
+    - add modern owner stop-lines for DA-05, DA-06, DA-07, DA-08, DA-20, DA-21,
+      DA-22, DA-23, DA-24, DA-25, DA-26, DA-27, DA-28, and DA-30 where needed
+    - normalize duplicate local subsection numbering under section 03
+
+Use REWRITE-DA-18 only as translated boundary-preservation guidance. Do not copy
+process metadata or obsolete wording into the final DA.
+
+Do not include audit/source metadata or version/process framing in the final
+DA-18 documentation. The final DA-18 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-18 should remain the debugging, semantic inspection, breakpoint, manual pause,
+apply-at-safe-point, debugger mutation, debugger undo/redo, debugger UI
+integration, debugger-originated Job-control request, debugger disconnect, and
+debugger-domain trace document.
+
+DA-18 should not become:
+
+    - committed-state authority specification
+    - payload identity / ValueRef / Chunk representation specification
+    - configuration specification
+    - persistent-I/O authority specification
+    - Window finalization specification
+    - artifact/export specification
+    - comparison / Replay / Resume / Retry / audit workflow specification
+    - Application/ApplicationRun lifecycle specification
+    - RPC/channel/transport specification
+    - debugger UI frontend implementation specification
+    - execution adapter boundary specification
+    - adapter lifecycle specification
+    - OrchestrationUnit lifecycle or mutation-authority specification
+    - RuntimeHost lifecycle/command/entry/workspace specification
+    - concrete debugger UI or language-runtime debugger implementation specification
+
+The main work is to preserve DA-18's strong semantic-debugging and mediated-
+mutation model while translating stale terminology and preventing debugger safe
+points, trace inspection, snapshot/restore, Resume, and replay wording from
+becoming hidden authority paths.
+
+==============================================================================
+END OF AUDIT RESULT - DA-18
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-18
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-18_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------

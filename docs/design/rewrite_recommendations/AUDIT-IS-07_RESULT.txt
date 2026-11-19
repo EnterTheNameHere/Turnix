@@ -1,0 +1,714 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-07 RUNTIME HOST TRACE SCHEMA
+==============================================================================
+
+Document title:
+    IS-07 - Runtime Host Trace Schema
+
+Target IS path:
+    docs/design/IS-07_RUNTIME_HOST_TRACE_SCHEMA.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-07
+    DOC_FILE: docs/design/IS-07_RUNTIME_HOST_TRACE_SCHEMA.txt
+    DOC_REV: 1
+    DOC_GIT: cc0e1f2
+    GitHub blob SHA seen by assistant:
+        765d3fd076cba3e52573c98726dbeabca35e1df1
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-07_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-07 file was
+    read or expected.
+
+    CMR-04 was read only as an index because the user supplied the document
+    identifier IS-07 without the exact IS path.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as an index to locate IS-07
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-07_RUNTIME_HOST_TRACE_SCHEMA.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, serialization-boundary, and authority-
+    boundary fixes.
+
+    IS-07 is a useful concrete implementation specification for RuntimeHost-
+    domain trace field vocabulary. It should not be rewritten from scratch.
+
+    Its strongest invariant is correct: IS-07 defines RuntimeHost-domain trace
+    field names and meanings, while DA-03 owns the trace substrate and DA-28 owns
+    RuntimeHost-domain trace reason identifiers and semantic meanings.
+
+    The required fixes are targeted: replace obsolete AppInstance / SavePack
+    terminology, align ownership identity fields with the current Workspace /
+    TurnixRuntime / RuntimeHost identity model, remove process-history wording
+    from final specification text, and prevent serialization aliases or
+    cross-domain fields from becoming semantic authority.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-07 correctly defines field vocabulary for RuntimeHost-domain trace
+    evidence instead of defining trace substrate semantics, trace DAG semantics,
+    span mechanics, storage, query behavior, RuntimeHost semantics, trace reason
+    ownership, workspace ownership, command behavior, startup behavior, LAN/client
+    behavior, RPC semantics, UI trace ownership, adapter trace ownership,
+    OrchestrationUnit trace ownership, concrete trace-store serialization, file
+    layout, or UI display.
+
+2. Good DA-03 / DA-28 boundary.
+
+    The document repeatedly says DA-03 owns the trace substrate, trace DAG, and
+    span semantics, while DA-28 owns RuntimeHost-domain trace reason identifiers
+    and their semantic meaning.
+
+    This is the central boundary and should be preserved.
+
+3. Good field-vocabulary role.
+
+    IS-07 is framed as a shared vocabulary for RuntimeHost-adjacent
+    implementation specifications so IS-03, IS-04, IS-05, and IS-06 do not invent
+    incompatible trace payload shapes.
+
+4. Good field-presence discipline.
+
+    The document says field presence depends on event kind, available context,
+    and owning workflow. It also says absence of a field does not imply absence
+    of the represented domain fact unless the emitting schema or workflow
+    requires that field.
+
+5. Good cross-domain correlation boundary.
+
+    IS-07 correctly says fields from another domain may appear only as
+    correlation fields unless the owning domain document permits more detailed
+    inclusion.
+
+    It also says cross-domain correlation fields do not transfer authority or
+    semantic ownership into RuntimeHost trace evidence and do not replace trace
+    evidence owned by the referenced domain.
+
+6. Good transport/channel boundary.
+
+    Transport and channel fields are treated as RuntimeHost-domain correlation
+    fields. They do not redefine DA-21 RPC, channel, or transport semantics.
+
+7. Good extension-field limits.
+
+    Extension fields may be added by later implementation specifications, but
+    they do not redefine IS-07 base fields, DA-28 trace reason meanings, or DA-03
+    trace substrate semantics.
+
+8. Good identity caution.
+
+    The field presence rules say records do not invent unknown identities merely
+    to fill optional fields and do not copy stale or inferred identities into
+    fields as if they were confirmed.
+
+    This is a strong and important trace-quality rule.
+
+9. Good open-question discipline.
+
+    Exact identifier representations, status vocabularies, accessMode
+    vocabulary, extension namespace convention, JSON schema publication,
+    trace-store serialization, and redaction rules remain open.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-07 still uses AppInstance in multiple places:
+
+        - AppInstance trace reason ownership
+        - AppInstance lifecycle outcome
+        - appInstanceId cross-domain field
+        - related AppInstance
+        - AppInstance evidence
+        - locked-summary identity list
+
+    Current source-stack correction:
+        Proposal P02 defines:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of an Application
+
+    Required consequence for IS-07:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        meaning.
+
+        Likely trace field replacement:
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+        Lifecycle-outcome replacement:
+
+            AppInstance lifecycle outcome
+                -> Application lifecycle outcome and/or ApplicationRun lifecycle
+                   outcome, usually ApplicationRun when live runtime state is
+                   meant.
+
+2. SavePack terminology is superseded by SaveBundle.
+
+    IS-07 still uses:
+
+        activeSavePackId
+        active SavePack
+
+    Current source-stack correction:
+        Proposal P02 defines SaveBundle as the durable persistence closure of one
+        Application. SaveBundle is not a Pack, not an Application, not an
+        ApplicationRun, not a RuntimeHost, not a live process snapshot, not a Job
+        store, and not authority by itself.
+
+    Required consequence for IS-07:
+        Replace activeSavePackId with activeSaveBundleId or saveBundleId,
+        depending on intended field meaning.
+
+        Do not call SaveBundle a Pack or treat it as authority.
+
+3. activeAppPackId may be too narrow for accepted AppDefinition sources.
+
+    P02 allows an Application to be created from an AppPack or another accepted
+    AppDefinition source.
+
+    Risk:
+        activeAppPackId as the only definition correlation field may make AppPack
+        seem mandatory for every Application or ApplicationRun trace event.
+
+    Required consequence for IS-07:
+        Either keep activeAppPackId as AppPack-specific correlation only, or add a
+        more general appDefinitionId / appDefinitionSourceId field if the current
+        architecture needs non-AppPack sources.
+
+        Do not make AppPack the universal Application definition identity unless
+        later sources intentionally require it.
+
+4. RuntimeHost ownership fields may preserve the older ownerRuntimeHostId model.
+
+    IS-07 ownership fields include ownerRuntimeHostId and
+    existingOwnerRuntimeHostId.
+
+    Current source-stack correction from the Workspace/RuntimeHost model:
+        Workspace ownership must distinguish Workspace identity, TurnixRuntime
+        execution identity, RuntimeHost / entry boundary identity if retained,
+        coordinator process identity, process lifetime identity, machine identity,
+        and owner token/nonce.
+
+    Required consequence for IS-07:
+        Align ownership trace fields with the current IS-03 rewrite direction.
+
+        If ownerRuntimeHostId remains, clarify whether it is a RuntimeHost boundary
+        identity, a runtime execution identity alias, or only historical
+        correlation evidence.
+
+        Consider fields such as:
+
+            ownerRuntimeId
+            existingOwnerRuntimeId
+            runtimeHostId
+            coordinatorProcessId
+            processIdentity or coordinatorProcessStartIdentity
+            ownerToken / ownerNonce
+
+        Exact names may remain open, but the distinction must not collapse.
+
+5. kernelContextId may over-specify a Kernel identity model.
+
+    IS-07 includes kernelContextId and says it identifies the active Kernel or
+    KernelContext when such identity is defined.
+
+    This is acceptable only because the phrase "when such identity is defined"
+    limits it.
+
+    Required consequence for IS-07:
+        Preserve that limiting phrase. Do not make KernelContext a mandatory
+        architecture object or a replacement for Kernel authority.
+
+6. DA-03 field inheritance section contains final-document process wording.
+
+    Section 04A says it is a "temporary inheritance anchor for the future trace
+    serialization specification."
+
+    Audit files may use process-history language, but final architecture and
+    implementation specifications should state the current model directly.
+
+    Required consequence for IS-07:
+        Replace the temporary/process wording with direct architecture wording.
+
+        Safer wording:
+
+            IS-07 defines RuntimeHost-domain fields layered onto the DA-03 trace
+            event model. Trace serialization specifications may define concrete
+            names, aliases, nesting, indexing, and storage layout while preserving
+            DA-03 substrate semantics, DA-28 RuntimeHost trace reason meanings,
+            and IS-07 field meanings.
+
+        Do not say "temporary," "future anchor," "rewrite," "migration," or
+        similar process terms in the final IS text unless the document is
+        explicitly a migration note.
+
+7. Base trace fields and DA-03 substrate fields need alias/mapping caution.
+
+    IS-07 lists base fields such as schemaVersion, traceRecordId, timestampUtc,
+    traceLevel, sourceDomain, traceReason, message, and details. It also lists
+    DA-03 substrate fields such as eventId, timestamp, level, domain, reason,
+    attributes, and parentEventIds.
+
+    This is acceptable if IS-07 is explicit that RuntimeHost-domain fields are
+    attributes unless a later serialization specification maps them directly.
+
+    Risk:
+        A reader could treat traceRecordId/eventId, timestampUtc/timestamp,
+        traceLevel/level, sourceDomain/domain, traceReason/reason as competing
+        canonical substrate fields.
+
+    Required consequence for IS-07:
+        Clarify alias/projection status.
+
+        IS-07 should not define duplicate DA-03 substrate fields. If these names
+        are RuntimeHost-layer aliases or projected names, say so. If they are
+        examples of substrate fields, leave serialization naming to the trace
+        serialization specification.
+
+8. Client/principal fields need anti-forgery and privacy/redaction guardrails.
+
+    IS-07 includes frontendClientId, remoteEndpointSummary, pairingId,
+    authenticatedPrincipalId, userId, workspacePath, localBindAddressSummary, and
+    lanBindAddressSummary.
+
+    The target already leaves redaction rules open, which is good.
+
+    Required consequence for IS-07:
+        Add or preserve wording that these fields are trace evidence only. They
+        do not let a client or trace emitter forge identity, authority,
+        capability permission, authenticated principal, user identity,
+        Application/ApplicationRun identity, workspace ownership, or committed
+        state.
+
+        Keep exact redaction rules open unless later security/serialization
+        sources resolve them.
+
+9. Status/outcome fields must not define owning-domain outcomes.
+
+    IS-07 already says startupStatus, commandStatus, runtimeOperationStatus,
+    error/reason/outcome fields, and other status fields do not redefine Job,
+    AppInstance, adapter, OrchestrationUnit, or Window outcomes.
+
+    Required consequence for IS-07:
+        Preserve this and translate AppInstance to Application/ApplicationRun.
+
+10. Extension fields must not become compatibility loopholes.
+
+    IS-07 already says extension fields do not redefine base fields, DA-28 trace
+    reason meanings, or DA-03 trace substrate semantics.
+
+    Required consequence for IS-07:
+        Preserve this. Also ensure implementation-specific extension fields do
+        not become required for portable RuntimeHost trace interpretation unless
+        promoted by later specification.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate to Application and/or ApplicationRun according to meaning.
+
+2. Do not preserve appInstanceId as a current cross-domain correlation field.
+
+    Replace with applicationId and/or applicationRunId.
+
+3. Do not preserve activeSavePackId.
+
+    Replace with activeSaveBundleId, saveBundleId, or another current field name
+    that matches the accepted persistence model.
+
+4. Do not preserve activeAppPackId as universal application-definition identity
+   if non-AppPack AppDefinition sources remain supported.
+
+5. Do not preserve ownerRuntimeHostId as the only workspace owner identity if the
+   current model distinguishes TurnixRuntime execution identity from RuntimeHost
+   boundary identity.
+
+6. Do not preserve "temporary inheritance anchor" in the final IS text.
+
+    Final documents should describe current architecture directly.
+
+7. Do not preserve duplicate substrate-field naming in a way that conflicts with
+   DA-03 or later serialization specifications.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+One process-metadata leakage risk was found.
+
+Section 04A says:
+
+    This section is a temporary inheritance anchor for the future trace
+    serialization specification.
+
+That wording should not remain in final specification text unless the section is
+explicitly a migration or compatibility note. Replace it with direct current
+architecture wording about DA-03 field inheritance and future serialization
+mapping.
+
+The final rewritten IS should also avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance terminology.
+
+    Replace:
+
+        AppInstance trace reason ownership
+        appInstanceId
+        related AppInstance
+        AppInstance lifecycle outcome
+        AppInstance evidence
+
+    with Application / ApplicationRun terminology.
+
+    Likely fields:
+
+        applicationId
+        applicationRunId
+
+2. Replace SavePack terminology.
+
+    Replace:
+
+        activeSavePackId
+        active SavePack
+
+    with SaveBundle terminology:
+
+        activeSaveBundleId
+        saveBundleId
+
+    Choose the exact field name according to whether the field means the current
+    bound SaveBundle, the active persisted generation, or a broader persistence
+    correlation identifier.
+
+3. Review activeAppPackId.
+
+    Keep activeAppPackId only as AppPack-specific correlation.
+
+    Add a more general AppDefinition correlation field if the final architecture
+    needs to support accepted non-AppPack AppDefinition sources.
+
+4. Align ownership fields with the current Workspace ownership identity model.
+
+    Review:
+
+        ownerRuntimeHostId
+        existingOwnerRuntimeHostId
+        hostMachineId
+        ownerNonce
+        processId
+        processIdentity
+
+    against the current distinction between Workspace identity, TurnixRuntime
+    execution identity, RuntimeHost boundary identity, coordinator process
+    identity, process lifetime identity, machine identity, and owner token/nonce.
+
+5. Preserve kernelContextId optionality.
+
+    Keep "when such identity is defined." Do not make KernelContext a mandatory
+    architectural object through IS-07.
+
+6. Replace temporary/process wording in Section 04A.
+
+    Remove:
+
+        temporary inheritance anchor
+        future trace serialization specification
+
+    as process framing.
+
+    Replace with direct current wording about RuntimeHost-domain fields being
+    layered onto DA-03 and concrete serialization being owned by later trace
+    serialization specifications.
+
+7. Clarify DA-03 field alias/projection behavior.
+
+    Make clear whether schemaVersion, traceRecordId, timestampUtc, traceLevel,
+    sourceDomain, traceReason, message, and details are RuntimeHost-layer fields,
+    aliases/projections, or substrate-provided fields.
+
+    Do not let IS-07 redefine DA-03 eventId, timestamp, level, domain, reason,
+    attributes, parentEventIds, trace DAG, span, storage, or query semantics.
+
+8. Add client/principal/redaction guardrails.
+
+    Add wording that userId, authenticatedPrincipalId, frontendClientId,
+    remoteEndpointSummary, workspacePath, bind address summaries, pairingId, and
+    related fields are trace evidence only.
+
+    They do not grant authority, permission, identity, workspace ownership,
+    Application identity, ApplicationRun identity, or committed-state mutation.
+
+    Keep redaction rules open unless later sources resolve them.
+
+9. Preserve status/outcome non-redefinition.
+
+    Keep status/outcome fields from redefining Job, Application, ApplicationRun,
+    adapter, OrchestrationUnit, RuntimeHost, command, startup, workspace
+    ownership, transport, RPC, View, transaction, or Window outcomes.
+
+10. Preserve extension-field limits.
+
+    Keep namespacing/distinguishability requirements.
+
+    Keep extension fields from redefining base fields, DA-28 trace reason
+    meanings, DA-03 substrate semantics, or portable RuntimeHost trace
+    interpretation.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun terminology.
+
+    2. Keep Core Concept and RuntimeHost Trace Field Groups.
+
+    3. Keep Base Trace Fields and DA-03 Field Inheritance, but remove temporary /
+       process-history wording and clarify alias/projection boundaries.
+
+    4. Keep RuntimeHost Identity Fields, but preserve kernelContextId optionality.
+
+    5. Update Ownership Fields to align with the current Workspace ownership
+       identity tuple.
+
+    6. Update Startup, Command, RuntimeHost Operation, Client, LAN, Transport,
+       Cross-Domain, Error/Outcome, and Correlation sections with current
+       Application / ApplicationRun / SaveBundle field names.
+
+    7. Preserve Field Presence Rules, Extension Fields, Relation to
+       Implementation Specifications, Unsupported, Open Questions, and Locked
+       Summary sections.
+
+    8. Add client/principal/redaction evidence-only guardrails where the identity
+       and client fields are defined.
+
+Do not turn IS-07 into DA-03, DA-28, IS-03, IS-04, IS-05, IS-06, IS-08, a trace
+store serialization specification, a query model, a UI trace viewer specification,
+or a security/redaction specification.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. It does NOT define section
+
+    Current risk:
+        AppInstance trace reason ownership
+
+    Safer wording:
+        Application and ApplicationRun trace reason ownership
+
+2. Startup/status stop-line
+
+    Current risk:
+        startupStatus does not redefine ... AppInstance lifecycle outcome ...
+
+    Safer wording:
+        startupStatus does not redefine ... Application lifecycle outcome,
+        ApplicationRun lifecycle outcome ...
+
+3. Command/status stop-line
+
+    Current risk:
+        commandStatus does not redefine ... AppInstance lifecycle outcome ...
+
+    Safer wording:
+        commandStatus does not redefine ... Application lifecycle outcome,
+        ApplicationRun lifecycle outcome ...
+
+4. RuntimeHost operation/status stop-line
+
+    Current risk:
+        runtimeOperationStatus does not redefine ... AppInstance lifecycle outcome
+
+    Safer wording:
+        runtimeOperationStatus does not redefine ... Application lifecycle outcome
+        or ApplicationRun lifecycle outcome
+
+5. Cross-domain correlation fields
+
+    Current risk:
+        appInstanceId
+        activeSavePackId
+
+    Safer wording:
+        applicationId
+        applicationRunId
+        activeSaveBundleId or saveBundleId
+
+6. Cross-domain definitions
+
+    Current risk:
+        appInstanceId identifies the related AppInstance when applicable.
+        activeSavePackId identifies the active SavePack when applicable.
+
+    Safer wording:
+        applicationId identifies the related Application when applicable.
+        applicationRunId identifies the related ApplicationRun when applicable.
+        activeSaveBundleId identifies the related active SaveBundle when
+        applicable.
+
+7. Section 04A process wording
+
+    Current risk:
+        This section is a temporary inheritance anchor for the future trace
+        serialization specification.
+
+    Safer wording:
+        This section defines how RuntimeHost-domain field vocabulary is layered
+        onto the DA-03 trace event model until a trace serialization
+        implementation specification assigns concrete serialized names, aliases,
+        nesting, indexing, and storage layout.
+
+    Even better, avoid "until" if that reads as process history:
+
+        RuntimeHost-domain field vocabulary is layered onto the DA-03 trace event
+        model. Trace serialization specifications may assign concrete serialized
+        names, aliases, nesting, indexing, and storage layout while preserving the
+        meanings defined by DA-03, DA-28, and IS-07.
+
+8. Locked Summary
+
+    Current risk:
+        runtimeHostId is distinct from ... appInstanceId ...
+
+    Safer wording:
+        runtimeHostId is distinct from ... applicationId, applicationRunId ...
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-07
+==============================================================================
+
+Accept the rewritten IS-07 only if all of the following are true:
+
+1. It remains an implementation specification for RuntimeHost-domain trace field
+   vocabulary.
+
+2. It does not redefine DA-03 trace substrate, trace DAG, span, storage, query,
+   serialization, or trace-store behavior.
+
+3. It does not redefine DA-28 RuntimeHost trace reason identifiers or their
+   semantic meanings.
+
+4. It does not redefine IS-03 workspace ownership, IS-04 command, IS-05 startup,
+   IS-06 client/LAN, DA-21 RPC, DA-22 View/UI, DA-24 OrchestrationUnit, DA-27
+   adapter, Job, Application, ApplicationRun, SaveBundle, transaction, or Window
+   semantics.
+
+5. All AppInstance and appInstanceId terminology has been translated to
+   Application, ApplicationRun, applicationId, and/or applicationRunId according
+   to meaning.
+
+6. All SavePack terminology has been translated to SaveBundle terminology.
+
+7. activeAppPackId is either clearly AppPack-specific or replaced/supplemented by
+   a general AppDefinition correlation field where needed.
+
+8. Ownership trace fields do not collapse Workspace identity, TurnixRuntime
+   execution identity, RuntimeHost boundary identity, coordinator process
+   identity, process lifetime identity, machine identity, and owner token/nonce.
+
+9. kernelContextId remains optional and does not make KernelContext a mandatory
+   architecture object or a source of authority.
+
+10. Section 04A contains no temporary/process-history wording in final spec text.
+
+11. DA-03 substrate fields and IS-07 RuntimeHost-domain fields cannot be read as
+    competing canonical substrate schemas.
+
+12. Client, principal, endpoint, workspace path, bind address, user, and pairing
+    fields remain trace evidence only and do not grant authority or identity.
+
+13. Redaction/security-sensitive field handling remains open unless later sources
+    resolve it.
+
+14. Status/outcome fields remain RuntimeHost-domain evidence only and do not
+    redefine owning-domain outcomes.
+
+15. Cross-domain correlation fields do not transfer authority or semantic
+    ownership into RuntimeHost trace evidence and do not replace trace evidence
+    owned by the referenced domain.
+
+16. Extension fields are namespaced or otherwise distinguishable, do not redefine
+    base fields or owning-domain semantics, and are not required for portable
+    interpretation unless later specifications promote them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-07 with targeted terminology, serialization-boundary, and authority-
+boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into DA-03 trace substrate
+semantics, DA-28 RuntimeHost trace reason doctrine, IS-03 workspace ownership,
+IS-04 command surfaces, IS-05 startup modes, IS-06 LAN/client behavior, IS-08
+trace serialization, trace-store layout, query behavior, trace UI behavior, or
+security/redaction rules.
+
+Translate obsolete AppInstance / SavePack wording into current Application /
+ApplicationRun / SaveBundle terminology. Align ownership and cross-domain fields
+with the current runtime identity model. Remove temporary/process-history wording
+from Section 04A. Clarify that DA-03 substrate fields and IS-07 RuntimeHost-domain
+fields are layered/mapped without redefining each other. Preserve the existing
+field-presence, cross-domain correlation, extension-field, and trace-not-authority
+guarantees.
+
+==============================================================================
+END OF AUDIT-IS-07 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-07-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-07_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------

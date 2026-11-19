@@ -1,0 +1,455 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - ODA-D
+==============================================================================
+
+Document title:
+    OPTIONAL DESIGN AREA ODA-D - MINIMAL PACK / MOD CONTRACT
+
+Target ODA path:
+    docs/design/ODA-D_MINIMAL_PACK_MOD_CONTRACT.txt
+
+Branch:
+    CODEX_Dv3
+
+Loaded target file metadata:
+    DOC_REV: 9
+    DOC_GIT: ad877cc
+    GitHub blob SHA seen by assistant:
+        4d48f8a498f4b5cbb783fff87bc4522372a85cb4
+
+Audit result status:
+    Direct ODA audit result.
+    ODA files do not have rewrite recommendation files.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt, used only to carry
+      forward the ODA-D path identified in the ODA index
+    - docs/design/ODA-D_MINIMAL_PACK_MOD_CONTRACT.txt
+
+Recommendation file:
+    None.
+
+Recommendation verdict:
+    Not applicable because ODA files do not have rewrite recommendation files.
+
+ODA document verdict:
+    Keep with larger terminology and model-alignment fixes.
+
+==============================================================================
+SUMMARY
+==============================================================================
+
+ODA-D contains a useful practical compatibility idea: Turnix should prefer
+reproducibility, reversibility, and explicit uncertainty over pretending that
+compatibility can always be proven in advance.
+
+The three-way split between hard compatibility, soft compatibility, and
+capability compatibility is worth preserving. The document also correctly says
+that adapter compatibility declarations do not prove safe execution and that
+capability compatibility declarations do not grant capability permission.
+
+The main issue is that ODA-D is still centered on the older SavePack and
+AppInstance model. Current architecture uses Application, ApplicationRun,
+SaveBundle, AppPack/AppDefinition, accepted Pack graph, and SaveBundle
+generations. The final rewrite should preserve the compatibility-contract idea
+but re-anchor it in the current persistence and runtime-identity model.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. The practical baseline is sound.
+
+    Reproducibility, reversibility, and explicit uncertainty are the right
+    low-burden foundation for compatibility tooling. The document correctly avoids
+    claiming that author declarations can prove broad compatibility.
+
+2. The compatibility split is useful.
+
+    Hard compatibility, soft compatibility, and capability compatibility describe
+    different classes of information and should remain separated.
+
+3. Hard compatibility is correctly non-negotiable within this optional model.
+
+    If a required engine/API/adapter/runtime boundary is outside the accepted
+    range, loading should be blocked rather than converted into a vague warning.
+
+4. Soft compatibility is correctly informational.
+
+    Tested-with declarations can improve diagnostics without forcing authors to
+    republish just to silence warnings.
+
+5. Capability compatibility is correctly separated from permission.
+
+    A pack declaring that it relies on a capability does not receive capability
+    permission merely by declaring that reliance.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. SavePack is obsolete as the central persistence term.
+
+    The current model uses SaveBundle as the durable persistence closure of one
+    Application. SaveBundle preserves applicationId, AppDefinition/AppPack
+    binding, accepted concrete Pack graph, committed state, save-bound
+    configuration and policy, retained finalized history, retained trace/journal
+    evidence, and published generations.
+
+    ODA-D repeatedly uses SavePack as the source-of-truth concept, including:
+
+        - SavePack pinning as deterministic source of truth
+        - SavePack pins exact pack versions
+        - updates do not overwrite a SavePack
+        - a SavePack loads with pinned versions
+        - SavePacks do not auto-update packs by default
+        - SavePack behavior remains deterministic
+        - versions referenced by any SavePack are not deleted
+        - SavePack identity versus AppInstance identity
+        - multi-writer SavePack mutation
+
+    Required correction:
+        Replace SavePack with SaveBundle where durable persistence closure is
+        meant.
+
+    Suggested local model:
+        SaveBundle records the accepted concrete Pack graph and exact Pack
+        bindings for each published generation. Loading a SaveBundle restores
+        from a published generation and creates a new ApplicationRun of the same
+        Application.
+
+2. AppInstance is obsolete as the current primary runtime identity term.
+
+    ODA-D uses AppInstance for lifecycle semantics, running updates, identity,
+    subordinate documents, and higher-document ownership. Current terminology
+    should use Application for durable identity and ApplicationRun for live
+    execution.
+
+    Required correction:
+        Replace AppInstance with Application/ApplicationRun according to meaning.
+
+    Suggested replacements:
+
+        Updating a pack does not silently change an already running AppInstance.
+
+    should become:
+
+        Updating a Pack does not silently change an already running
+        ApplicationRun or the accepted Pack graph of an already published
+        SaveBundle generation.
+
+    and:
+
+        DA-20 owns AppInstance runtime identity.
+
+    should become:
+
+        The current lifecycle/runtime-identity design owns Application and
+        ApplicationRun identity.
+
+3. "Source of truth" wording must not make SaveBundle override domain ownership.
+
+    ODA-D says SavePack pinning is a deterministic source-of-truth concept. In
+    the current model, SaveBundle is a persistence carrier and published
+    generation head, but it does not replace semantic ownership of Memory,
+    configuration, policy, trace, Pack graph, migration, or Application lifecycle
+    domains.
+
+    Required correction:
+        Say SaveBundle published generations preserve the accepted concrete Pack
+        graph and exact version/fingerprint bindings used for restoration. Do not
+        say the SaveBundle is the sole truth for all related semantics.
+
+4. Compatibility declarations must not become dependency, resolution, activation,
+   adapter, or permission authority.
+
+    The document already says it does not define dependency semantics, generic
+    resolution, activation, or adapter semantics. Preserve that. Also strengthen
+    the local language so compatibility fields do not silently become hard
+    dependencies, visibility grants, import grants, adapter execution grants,
+    capability permissions, or policy decisions.
+
+    Required correction:
+        Compatibility declarations are inputs to validation, diagnostics, graph
+        preparation, and policy/user decision surfaces where owning documents
+        allow them. They do not replace DA-11, DA-13, DA-14, DA-16, DA-23, or the
+        current Application/SaveBundle model.
+
+5. "The pack does not load" is too broad for hard compatibility.
+
+    Section 04.1 says if hard compatibility fails, the pack does not load. That
+    is directionally correct, but the final wording should distinguish discovery,
+    graph selection, import/module loading, activation-entry loading, and Pack
+    activation.
+
+    Required correction:
+        Say hard compatibility failure blocks inclusion in the accepted runtime
+        graph or blocks activation/loading at the owning boundary, depending on
+        when the failure is detected. Do not use "load" as a catch-all for
+        discovery, resolution, import, adapter loading, and activation.
+
+6. Rolling profiles must not mutate already-published generations.
+
+    The document says global rolling profiles may exist and SavePack behavior
+    remains deterministic within that rolling-profile environment. Current
+    SaveBundle generation semantics require immutable published generations.
+
+    Required correction:
+        If rolling profiles remain, they may affect future graph preparation or
+        future SaveBundle generations. They do not rewrite already-published
+        generations and do not silently change an active ApplicationRun.
+
+7. Storage cleanup must align with SaveBundle generations and retained material.
+
+    Section 07 says versions referenced by any SavePack are not deleted and
+    unreferenced versions may be deleted by policy. The current model needs this
+    in terms of SaveBundle published generations, copied or pinned Pack material,
+    accepted graph evidence, and retained material required for restoration or
+    audit.
+
+    Required correction:
+        Cleanup may remove only material that is not required by retained
+        published generations, accepted graph evidence, explicit pins, retained
+        compatibility policy, or other owning-domain retention rules.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+The main obsolete-preservation risk is preserving SavePack/AppInstance as the
+center of the compatibility model.
+
+Do not preserve these terms as current architecture merely because the ODA source
+uses them. Translate into the current model:
+
+    AppPack / AppDefinition
+        reusable application definition or accepted application-definition source
+
+    Application
+        durable application individual
+
+    ApplicationRun
+        one live execution period of that Application
+
+    SaveBundle
+        durable persistence closure of the Application
+
+    SaveBundle generation
+        immutable published restoration head containing accepted graph and
+        retained state/evidence roots
+
+For ODA-D, the most important rewrite move is not to delete the compatibility
+model. It is to move the model from SavePack/AppInstance language into
+SaveBundle/Application/ApplicationRun language.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major final-document process leakage was found.
+
+The target document does not appear to mention Codex, rewrite history, candidate
+status, or old/new design as ordinary architecture.
+
+The LOCKED / OPEN markers are acceptable design-status markers if retained. They
+should not lock stale SavePack/AppInstance terminology.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+Fix 1: Replace SavePack with SaveBundle where persistence closure is meant.
+
+    Replace:
+
+        SavePack pinning as a deterministic source-of-truth concept
+
+    With:
+
+        SaveBundle published-generation Pack binding as a deterministic
+        restoration concept
+
+    Replace:
+
+        SavePack pins exact pack versions
+
+    With:
+
+        A SaveBundle generation records the exact accepted Pack versions,
+        fingerprints, copied or pinned bindings, and compatibility evidence
+        needed for restoration.
+
+Fix 2: Replace AppInstance with Application/ApplicationRun.
+
+    Replace:
+
+        Updating a pack does not silently change an already running AppInstance.
+
+    With:
+
+        Updating a Pack does not silently change an already running
+        ApplicationRun or the accepted Pack graph of an already published
+        SaveBundle generation.
+
+    Replace:
+
+        DA-20 owns AppInstance runtime identity.
+
+    With:
+
+        The current lifecycle/runtime-identity design owns Application and
+        ApplicationRun identity.
+
+Fix 3: Avoid broad "source of truth" inflation.
+
+    Add or preserve:
+
+        SaveBundle generations preserve restoration evidence and accepted graph
+        bindings. They do not replace semantic ownership of state, policy,
+        configuration, trace, resolution, activation, adapter, or lifecycle
+        domains.
+
+Fix 4: Qualify hard compatibility failure.
+
+    Replace broad "the pack does not load" wording with:
+
+        hard compatibility failure blocks graph acceptance, activation, adapter
+        binding, or runtime loading at the owning boundary where the failure is
+        detected.
+
+    Keep the important rule that hard compatibility failure is not overridden by
+    ordinary "try anyway" behavior.
+
+Fix 5: Keep compatibility declarations non-authoritative outside their lane.
+
+    Add:
+
+        Compatibility declarations are inputs to validation, diagnostics, graph
+        preparation, and policy/user decision surfaces where owning documents
+        allow them. They do not grant visibility, dependency satisfaction,
+        import permission, adapter execution authorization, capability permission,
+        persistence authority, or lifecycle authority by themselves.
+
+Fix 6: Align rolling profiles with immutable generations.
+
+    Add:
+
+        Rolling-profile behavior may affect future graph preparation or future
+        SaveBundle generations. It does not rewrite already-published
+        generations and does not silently change an active ApplicationRun.
+
+Fix 7: Align storage cleanup with retained restoration material.
+
+    Replace:
+
+        Versions referenced by any SavePack are not deleted.
+
+    With:
+
+        Pack material referenced by retained published SaveBundle generations,
+        explicit pins, accepted graph evidence, copied/pinned bindings, or
+        required compatibility/audit retention policy is not deleted by ordinary
+        cleanup.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+The current structure can remain, but Section 05 needs a model update.
+
+Suggested section-level edits:
+
+    01. Interpretation Basis
+        Keep.
+
+    02. Core Assumption
+        Keep. Preserve that compatibility cannot be guaranteed in advance.
+
+    03. Ownership Model
+        Keep, but clarify that "system" means owning runtime/domain mechanisms,
+        not one monolithic object.
+
+    04. Three Kinds of Compatibility
+        Keep the split.
+        Tighten hard-compatibility wording around graph acceptance, activation,
+        adapter binding, and runtime loading.
+        Preserve capability compatibility does not grant permission.
+
+    05. SavePack as a Source-of-Truth Concept
+        Rename and rewrite around SaveBundle published-generation Pack binding.
+        Remove SavePack/AppInstance identity wording.
+
+    06. Update Policy
+        Translate SavePacks/AppInstance into SaveBundle/ApplicationRun.
+        Clarify immutable published generations and future-generation behavior.
+
+    07. Storage and Cleanup
+        Translate SavePack references into SaveBundle generations and retained
+        Pack material.
+
+    08. What This Contract Does Not Require
+        Keep.
+
+    09. What This Contract Guarantees
+        Keep practical guarantees, but qualify them under retained material,
+        published generations, and owning-domain rules.
+
+    10. Relation to Higher Documents
+        Translate DA-20/AppInstance wording into current lifecycle/runtime-identity
+        wording.
+
+    11. Locked and Open
+        Preserve the compatibility split and uncertainty foundation.
+        Add SaveBundle/ApplicationRun terminology.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR THE FINAL ODA-D REWRITE
+==============================================================================
+
+The final rewritten ODA-D is acceptable when:
+
+    - it no longer uses SavePack as the current persistence model
+    - it no longer uses AppInstance as the current primary runtime identity term
+    - it uses SaveBundle, SaveBundle generation, Application, ApplicationRun,
+      AppPack/AppDefinition, and accepted Pack graph correctly
+    - it preserves the hard / soft / capability compatibility split
+    - it preserves the baseline of reproducibility, reversibility, and explicit
+      uncertainty
+    - it does not imply compatibility declarations prove safe execution
+    - it does not imply adapter compatibility declarations grant adapter authority
+    - it does not imply capability compatibility declarations grant capability
+      permission
+    - it does not use "load" as a catch-all for discovery, resolution, import,
+      adapter loading, and activation
+    - it does not let rolling-profile behavior rewrite already-published
+      SaveBundle generations or silently change an active ApplicationRun
+    - it does not let cleanup delete material required by retained published
+      generations, accepted graph evidence, explicit pins, or retention policy
+    - it contains no rewrite/history/Codex/process framing as final architecture
+      text
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep ODA-D, but perform a stronger model-alignment pass than ODA-B or ODA-C. The
+compatibility-contract idea is useful and should not be discarded. The rewrite
+should preserve the three-way compatibility split and the practical baseline of
+reproducibility, reversibility, and explicit uncertainty, while replacing the old
+SavePack/AppInstance center with SaveBundle, SaveBundle generations,
+Application, ApplicationRun, and accepted Pack graph terminology.
+
+==============================================================================
+END OF AUDIT RESULT - ODA-D
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-ODA-D
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-ODA-D_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------

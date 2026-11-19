@@ -1,0 +1,65 @@
+# file: ai-workflow/knowledge/execution-resource-er03-r2-cleanup-reproducer.txt ; version: 1
+"""Independent host finalization versus failed initialization cleanup ownership."""
+import importlib.util
+import sys
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+import pytest
+
+spec = importlib.util.spec_from_file_location('integrationEr03CleanupFixtures',
+    Path.cwd() / 'tests/first_party/llmDrivers/test_llamaCppExecutionResources.py')
+fixtures = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = fixtures
+spec.loader.exec_module(fixtures)
+rig = fixtures.rig
+
+
+def test_host_stop_retains_process_while_abort_lease_callback_is_outstanding(rig):
+    """Pending failed-start cleanup owns the provider until its callback returns."""
+    host, create, composer, processes, _, _, app, _, _ = rig
+    source = app / 'entry.py'
+    source.write_text(source.read_text() + '''
+def onApplicationCreate(ctx, state):
+    """Use the allowed capability bridge, then fail before the first save."""
+    ctx.capabilities.call('switch@1', 'A')
+    raise ValueError('hook failed after materialization')
+''')
+    caller = fixtures.adapter.EntrySelector.fromSource('example', '1', 'main', source)
+    composer.grants = (fixtures.adapter.LlamaCppGrant(caller, (None, 'A', 'B'), True),)
+    entered, release = Event(), Event()
+    original = composer.compose
+    held = {}
+
+    def compose(snapshot):
+        """Wrap only the real broker-owned lease finalizer to control its lifetime."""
+        original(snapshot)
+        held['runtime'] = snapshot.ticket.runtime
+        registration = snapshot.registry.requireRegistration('llama.cpp')
+        binding = snapshot.bindings.binding(snapshot.registry, registration)
+        close = binding.leaseCloser
+
+        def closeLease():
+            """Keep the lease callback live while host shutdown attempts finalization."""
+            entered.set()
+            assert release.wait(5)
+            close()
+
+        binding.leaseCloser = closeLease
+
+    composer.compose = compose
+    with ThreadPoolExecutor(max_workers=1) as initializers:
+        initialization = initializers.submit(create)
+        assert entered.wait(5)
+        try:
+            runtime = held['runtime']
+            assert runtime._compositionAttempt.phase == 'cleanup'
+            assert runtime._cleanupAdmissions
+            assert len(processes) == 1 and not processes[0].terminated
+            with pytest.raises(fixtures.LlmExecutionCleanupError):
+                host.stop()
+            assert not processes[0].terminated, 'Host finalized process across live abort cleanup callback'
+        finally:
+            release.set()
+            with pytest.raises(ValueError, match='hook failed after materialization'):
+                initialization.result(5)

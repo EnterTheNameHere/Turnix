@@ -1,0 +1,865 @@
+==============================================================================
+AUDIT RESULT - DA-12 IMPORTING, MODULE LOADING AND CODE BOUNDARIES
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-12_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-12_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-12_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-12_RECOMMENDATION.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-14_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-16_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-23_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-27_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Partially superseded by Proposal P01, DA-16, and DA-30.
+
+    The recommendation correctly preserves DA-12's core import/module-loading
+    boundaries: native language imports do not understand Turnix semantics,
+    arbitrary native cross-Pack imports are forbidden, turnixImport is a mediated
+    JavaScript loading mechanism, importing is separate from activation,
+    import-time evaluation is not Turnix-recognized execution, and import errors
+    stay hard/explicit.
+
+    However, the recommendation still uses stale PackContext, SavePack, and
+    AppInstance vocabulary and preserves older single-onLoad activation-entry
+    assumptions. It also includes service-access examples that conflict with the
+    DA-16/DA-30 service and ModCallContext boundary.
+
+    Use the recommendation only as translated boundary-preservation guidance.
+
+Document verdict:
+    Keep with targeted but important rewrite.
+
+DA-12 is architecturally strong as the importing, module-loading, and code-
+boundary document.
+
+No heavy conceptual rewrite is recommended.
+
+The main required fixes are:
+
+    - align activation-entry wording with Proposal P01 and DA-14
+    - remove the implication that onLoad(ctx) is the only activation entrypoint
+      forever or the first meaningful activation phase
+    - distinguish activation entries, private implementation modules, and exported
+      module surfaces
+    - keep turnixImport as mediated loading, not activation or authority
+    - remove ctx.services / direct service-object examples from Python-mediated
+      cross-Pack access guidance
+    - replace stale PackContext / AppInstance / SavePack wording with
+      ModCallContext / ApplicationRun / SaveBundle where those concepts must be
+      named
+    - preserve JavaScript turnixImport as the required dynamic module loader for
+      Turnix front-end / browser-side Pack code
+
+Primary conclusion:
+    Keep DA-12, but rewrite the activation-entry and service-access portions so
+    they do not contradict P01, DA-16, or DA-30. DA-12 should remain the document
+    that says how code is obtained and loaded; it must not become the activation
+    lifecycle protocol or a service/capability gateway specification.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-12 should not keep older terminology or pre-P01 activation assumptions as a
+historical artifact.
+
+Specifically, the rewrite should not preserve:
+
+    - PackContext as the Pack-facing gateway name
+    - ctx.services as an ordinary ModCallContext surface
+    - direct service-object retrieval as a normal Python cross-Pack access path
+    - AppInstance as runtime identity vocabulary
+    - SavePack as durable persistence vocabulary
+    - save scoping where SaveBundle/Application context is meant
+    - onLoad(ctx) as the only possible activation lifecycle participation point
+      if DA-14/P01 defines earlier/later phases
+    - module evaluation as activation
+    - turnixImport as activation or execution authorization
+    - default JavaScript entry as a hidden activation entry
+    - exported module surface as a lifecycle participant merely because it is
+      exported
+    - private implementation module as lifecycle participant merely because it is
+      imported by Pack code
+
+If a legacy alias or compatibility wording is intentionally retained, DA-12 must
+scope it explicitly and still state the canonical architecture term as primary.
+
+Otherwise, the old terms and assumptions should be removed or translated.
+
+The useful part of the old recommendation is not the old terminology. The useful
+part is the import boundary:
+
+    Importing and module loading answer how a permitted code artifact is obtained
+    and made available. Importing is not discovery, dependency declaration,
+    resolution, visibility override, adapter selection, execution authorization,
+    activation, execution authority, capability permission, Kernel authority,
+    ModCallContext authority, Job lifecycle, OrchestrationUnit lifecycle,
+    background work guarantee, native backend import authority, or filesystem
+    path lookup.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-12 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, PackContext became ModCallContext.
+    - The new design uses Proposal P01.
+    - This rewrite changed activation entrypoints.
+    - Unlike V2, onLoad is no longer the only activation phase.
+    - Codex kept old entrypoint wording.
+    - This audit decided to remove ctx.services.
+    - DA-12 was rewritten because of the audit.
+
+Those facts may be useful in audit files, branch notes, migration notes,
+compatibility notes, changelogs, or editor instructions. They do not belong in
+the architecture document itself.
+
+The final DA-12 should simply define import boundaries, module-loading rules,
+turnixImport semantics, dependency consistency during imports, import-time module
+evaluation boundaries, activation/import separation, background-work boundaries,
+and import error semantics.
+
+==============================================================================
+02. WHAT DA-12 GETS RIGHT
+==============================================================================
+
+02.1. Native imports do not understand Turnix semantics
+-------------------------------------------------------
+
+DA-12 correctly states that native language import systems do not understand
+Turnix Pack resolution, visibility, SaveBundle/Application scoping, adapter
+selection, execution authorization, activation boundaries, or execution
+authority.
+
+Preserve this.
+
+02.2. Arbitrary native cross-Pack imports are forbidden
+-------------------------------------------------------
+
+DA-12 correctly forbids arbitrary language-native importing across Packs.
+
+It correctly allows native imports only for language internals, local same-file or
+same-directory code under normal local language rules, and explicitly allowed
+Turnix platform surfaces.
+
+Preserve this.
+
+02.3. Python Pack code is not backend implementation code
+---------------------------------------------------------
+
+DA-12 correctly says Python Pack code remains adapter-executed Pack code and does
+not become backend implementation code merely because the backend implementation
+is Python.
+
+It correctly forbids imports of backend internals such as Kernel or IoManager as
+Pack authority.
+
+Preserve this strongly.
+
+02.4. JavaScript dynamic cross-Pack loading uses turnixImport
+------------------------------------------------------------
+
+DA-12 correctly keeps browser JavaScript Pack code away from Node.js assumptions,
+filesystem access, per-Pack import maps, and native cross-Pack imports.
+
+It correctly routes dynamic cross-Pack JavaScript loading through turnixImport.
+
+Preserve this. Turnix front-end / browser-side Pack code should continue to use
+the custom Turnix dynamic loader instead of ordinary ESM imports for cross-Pack
+loading.
+
+02.5. turnixImport is mediated loading, not authority
+-----------------------------------------------------
+
+DA-12 correctly says turnixImport is a Turnix-aware resolver, controlled loader,
+and mediated ESM importer.
+
+It correctly says turnixImport is not native import(), not a second independent
+resolution system, not activation, not execution authorization, not capability
+permission, not a visibility override, and not a permissive/best-effort loader.
+
+Preserve this.
+
+02.6. turnixImport selectors are identity-based
+-----------------------------------------------
+
+DA-12 correctly says turnixImport selectors are not filesystem paths, URIs, or
+semver-qualified references.
+
+It correctly forbids `../`, absolute paths, filesystem guessing, semver in the
+selector, and author mismatch against the already-resolved dependency identity.
+
+Preserve this.
+
+02.7. Import dependency consistency is strong
+---------------------------------------------
+
+DA-12 correctly says importing respects the concrete identity already chosen by
+dependency resolution and does not reopen dependency resolution.
+
+Preserve this.
+
+02.8. File matching/default-entry behavior avoids guessing
+----------------------------------------------------------
+
+DA-12 correctly says sub-entry imports resolve against declared JavaScript entry
+mappings, ambiguous and missing matches are errors, and no implicit index.js,
+filename guessing, or directory guessing is used.
+
+Preserve this, but align entry mapping names with P01 if the manifest vocabulary
+changed.
+
+02.9. Importing and activation are separate
+-------------------------------------------
+
+DA-12 correctly says module evaluation caused by import is not Turnix-recognized
+activation, and turnixImport does not activate the Pack, grant execution
+authority, grant capability permission, or imply lifecycle participation.
+
+Preserve this.
+
+02.10. Import-time side effects are outside Turnix guarantees
+-------------------------------------------------------------
+
+DA-12 correctly says module-level statements, IIFE-style patterns, and top-level
+side effects are discouraged, unsupported by Turnix guarantees, untracked, and
+outside Turnix-recognized activation or orchestration.
+
+Preserve this.
+
+02.11. Import errors stay hard and explicit
+-------------------------------------------
+
+DA-12 correctly says import errors are hard, visible, classified, and explainable.
+
+It correctly prevents import errors from collapsing into capability permission
+failures or Job terminal outcomes.
+
+Preserve this.
+
+==============================================================================
+03. MAJOR REQUIRED FIX: ALIGN ACTIVATION-ENTRY LANGUAGE WITH P01 / DA-14
+==============================================================================
+
+DA-12 currently contains a section titled `CANONICAL ENTRYPOINTS` that says:
+
+    The currently supported activation entrypoint is onLoad(ctx).
+
+    onLoad(ctx) is called exactly once by Turnix.
+
+    onLoad(ctx) is the only supported activation entrypoint.
+
+    onLoad(ctx) is the first moment Turnix intentionally executes pack code.
+
+    Turnix recognizes no alternative activation path.
+
+This conflicts with the P01 activation model and the updated DA-14 audit.
+
+P01 distinguishes:
+
+    Stage 0:
+        activation entry evaluation by the adapter; top-level code may run but is
+        not a safe ordinary activation pattern
+
+    Phase 1:
+        onEntryLoaded(ctx)
+
+    Phase 2:
+        onEntriesLoaded(ctx)
+
+    Phase 3:
+        onLoad(ctx)
+
+P01 also distinguishes activation entries, private implementation modules, and
+exported module surfaces.
+
+03.1. DA-12 should not own the activation lifecycle
+---------------------------------------------------
+
+DA-12 should keep only the import/activation boundary:
+
+    Importing and module loading are not activation.
+
+    Module evaluation caused by import is not final Activated state.
+
+    Loading a module through turnixImport does not make that module a lifecycle
+    participant.
+
+    DA-14 owns activation phases, phase barriers, cyclic activation handling,
+    registration publication, final Activated state, and activation failure
+    semantics.
+
+03.2. Replace `only supported activation entrypoint` wording
+------------------------------------------------------------
+
+Do not keep `onLoad(ctx) is the only supported activation entrypoint` as current
+architecture text if DA-14/P01 defines Phase 1/Phase 2/Phase 3 lifecycle
+participation.
+
+Recommended direction:
+
+    DA-12 does not define the complete activation-entry protocol.
+
+    DA-12 may refer to declared activation entries only to distinguish them from
+    private implementation modules, exported module surfaces, and modules loaded
+    by turnixImport.
+
+    DA-14 owns the supported activation lifecycle callbacks and phase semantics.
+
+03.3. Add activation-entry / private-module / exported-surface distinction
+--------------------------------------------------------------------------
+
+DA-12 should define or reference the module-loading implication of P01:
+
+    Activation entry:
+        loaded by Turnix for lifecycle participation through an ExecutionAdapter.
+
+    Private implementation module:
+        loaded by Pack code as ordinary implementation material; not externally
+        addressable by default; not lifecycle participant merely by existing.
+
+    Exported module surface:
+        publicly addressable only through explicitly supported mediated module
+        loading; loaded on demand; does not receive lifecycle callbacks merely
+        because it is exported.
+
+This belongs in DA-12 because it owns importing/module-loading boundaries.
+
+03.4. Keep turnixImport out of activation lifecycle semantics
+-------------------------------------------------------------
+
+DA-12 should state:
+
+    turnixImport may load and evaluate a permitted JavaScript module.
+
+    That loaded module may expose exports to the importer.
+
+    That loading/evaluation does not make the imported module an activation
+    entry, does not call lifecycle callbacks, does not create final Activated
+    state, and does not publish registrations.
+
+    If an exported module needs Pack lifecycle setup, the owning Pack's activation
+    protocol must have already established that setup through DA-14-owned
+    lifecycle semantics.
+
+03.5. Align default entry and sub-entry wording
+-----------------------------------------------
+
+DA-12 currently uses:
+
+    runtimes.javascript.entry
+    runtimes.javascript.entries
+
+P01 warns against treating `entries` as automatically preloaded non-activation
+files because module loading can run top-level code. It also distinguishes
+activation entries from private implementation modules and exported module
+surfaces.
+
+DA-12 should keep default/sub-entry import behavior only as mediated module
+loading, not activation entry semantics.
+
+If manifest terms remain `runtimes.javascript.entry` and
+`runtimes.javascript.entries`, DA-12 should state that these are module-loading
+surfaces, not automatically activation entries unless the activation manifest
+field explicitly declares them as activation entries.
+
+If P01 changes the canonical manifest vocabulary, DA-12 should be updated to that
+canonical vocabulary and should not fossilize the older `entry` / `entries`
+naming as activation semantics.
+
+==============================================================================
+04. MAJOR REQUIRED FIX: SERVICE ACCESS AND MODCALLCONTEXT SURFACES
+==============================================================================
+
+DA-12 currently says Python mediated categories include:
+
+    - services where allowed by DA-16
+    - capabilities
+    - pack metadata and activation control
+
+and gives examples:
+
+    ctx.registerService(name, instance)
+    ctx.services.get(name)
+    ctx.callCapability("llm.pipeline@1", args)
+    ctx.resolvePack(selector)
+    ctx.ensureActivated(selector)
+
+This conflicts with the DA-16 audit and DA-30 audit.
+
+DA-30 treats ctx.services as an absent/forbidden ModCallContext backdoor.
+
+DA-16 should make Services runtime/internal wiring and keep cross-Pack execution
+through Capabilities, not direct Service object retrieval.
+
+04.1. Remove ctx.services examples
+----------------------------------
+
+DA-12 should not show ctx.services.get(...) as a Pack-facing cross-Pack access
+pattern.
+
+It should not show ctx.registerService(...) as an ordinary Pack-facing example
+unless another owning document explicitly defines a safe service registration
+facade.
+
+Recommended replacement:
+
+    Python Pack code interacts with other Packs through Turnix-mediated
+    capability calls, metadata/identity queries, and activation-control requests
+    where those surfaces are explicitly exposed by the owning documents.
+
+    Cross-Pack execution goes through Capabilities.
+
+    Internal runtime Services may back capability implementations, but ordinary
+    Pack code does not receive raw Service objects as a cross-Pack interaction
+    shortcut.
+
+04.2. DA-12 should defer exact ModCallContext shape to DA-30
+------------------------------------------------------------
+
+DA-12 may say:
+
+    Python Pack code may use ModCallContext-mediated surfaces explicitly exposed
+    by DA-30 and owning documents.
+
+DA-12 should not define the full ModCallContext facade or imply absent surfaces
+exist.
+
+Add stop-line:
+
+    DA-30 owns ModCallContext facade shape, absent surfaces, and invocation-scoped
+    lifetime. DA-12 only names ModCallContext to prevent native imports from
+    becoming a gateway bypass.
+
+==============================================================================
+05. TERMINOLOGY ALIGNMENT
+==============================================================================
+
+05.1. PackContext -> ModCallContext
+-----------------------------------
+
+The recommendation still uses PackContext. The target mostly uses
+ModCallContext, which is good.
+
+Ensure all remaining PackContext wording is translated.
+
+05.2. AppInstance -> Application / ApplicationRun
+-------------------------------------------------
+
+DA-12 currently says execution authorization happens in the current Pack,
+AppInstance, SavePack, adapter, policy, and trust context.
+
+Replace with canonical architecture terms:
+
+    Execution authorization answers whether a declared executable artifact may be
+    loaded or executed in the current Pack, Application/ApplicationRun,
+    SaveBundle, adapter, policy, and trust context.
+
+More precise phrasing:
+
+    ... in the current Pack, ApplicationRun, SaveBundle/Application context,
+    adapter, policy, and trust context.
+
+Use ApplicationRun for live execution context and SaveBundle/Application where
+persistence/durable identity matters.
+
+05.3. SavePack -> SaveBundle
+----------------------------
+
+Replace SavePack where durable persistence closure or save-local retained Pack
+material is meant.
+
+DA-12 should not define SaveBundle semantics, but it should not repeat SavePack
+as current architecture vocabulary.
+
+05.4. Orchestration Unit -> OrchestrationUnit
+---------------------------------------------
+
+Use OrchestrationUnit when referring to the first-class type name.
+
+==============================================================================
+06. REQUIRED IMPORT OUTCOME STOP-LINES
+==============================================================================
+
+DA-12 should contain or preserve a compact import-outcome boundary:
+
+    Importing and module loading answer how a permitted code artifact is obtained
+    and made available.
+
+    Importing is not discovery, dependency declaration, generic resolution,
+    visibility override, adapter selection, execution authorization, activation,
+    execution authority, capability permission, Kernel authority,
+    ModCallContext authority, Job lifecycle, OrchestrationUnit lifecycle,
+    background work guarantee, native backend import authority, filesystem path
+    lookup, committed-state mutation, persistent I/O result, artifact/export
+    outcome, ComparisonResult, Replay outcome, Resume outcome, Retry outcome, or
+    audit workflow outcome.
+
+    If imported code later participates in another domain, that domain defines the
+    resulting domain outcome.
+
+This belongs in DA-12 because DA-12 owns import/module-loading boundaries.
+
+Do not expand DA-12 into the detailed lifecycle documents for those other domains.
+
+==============================================================================
+07. WHAT TO PRESERVE FROM CURRENT DA-12
+==============================================================================
+
+Preserve these boundaries, but rewrite PackContext/AppInstance/SavePack/service
+and activation-entry assumptions where present:
+
+    - Importing is not dependency declaration.
+    - Importing is not resolution.
+    - Importing is not adapter selection.
+    - Importing is not execution authorization.
+    - Importing is not activation.
+    - Importing is not execution authority.
+    - Importing is not capability permission.
+    - Native language imports do not understand Turnix semantics.
+    - Arbitrary native language cross-Pack importing is forbidden.
+    - Python Pack code is not backend implementation code merely because the
+      backend is Python.
+    - Cross-Pack native Python imports are not allowed.
+    - JavaScript Pack code has no Node.js runtime assumption, no filesystem
+      access, no per-Pack import maps, and no native cross-Pack imports.
+    - JavaScript dynamic cross-Pack loading routes through turnixImport.
+    - turnixImport is mediated loading, not authority.
+    - turnixImport selectors are identity-based, not paths, URIs, or semver
+      references.
+    - Importing respects already-resolved dependency identity.
+    - Importing does not reopen dependency resolution.
+    - File matching is exact and non-heuristic.
+    - Ambiguous imports are errors.
+    - Missing imports are errors.
+    - No implicit index.js, filename guessing, or directory guessing.
+    - turnixImport module evaluation is not activation.
+    - Module evaluation is not Turnix-recognized execution by itself.
+    - Import-time side effects are outside Turnix guarantees.
+    - Background work started outside Turnix orchestration has no Turnix
+      guarantee.
+    - Import errors are hard, explicit, classified, and explainable.
+    - Import errors do not become capability permission failures by default.
+    - Import errors do not become Job terminal outcomes by default.
+
+==============================================================================
+08. WHAT TO ADD OR CHANGE IN THE REVISED DA-12
+==============================================================================
+
+08.1. Add canonical terminology note
+------------------------------------
+
+Add a compact note near the interpretation or concept section:
+
+    DA-12 uses canonical architecture names:
+
+        ModCallContext:
+            invocation-scoped Pack-facing gateway into Turnix
+
+        ApplicationRun:
+            one live execution period of an Application
+
+        SaveBundle:
+            durable persistence closure of an Application
+
+        ExecutionAdapter:
+            adapter boundary for executing declared Pack code
+
+    Older notes may use PackContext, AppInstance, or SavePack. DA-12 does not use
+    those names as primary architecture terms unless a compatibility note
+    explicitly says so.
+
+Do not write this as "V3 names", "new names", or "after the rewrite".
+
+08.2. Rewrite Python mediated access section
+--------------------------------------------
+
+Remove service-object access examples and direct ctx.services examples.
+
+Keep capability calls, metadata queries, and activation-control requests only
+where owning documents define those surfaces.
+
+Recommended model:
+
+    Python Pack code interacts with other Packs only through Turnix-mediated
+    capability calls, metadata/identity queries, and activation-control requests
+    explicitly exposed by owning documents.
+
+    There is no Python equivalent of turnixImport as a native cross-Pack symbol or
+    executable-code import mechanism.
+
+08.3. Rewrite activation-entry section
+--------------------------------------
+
+Replace the current `CANONICAL ENTRYPOINTS` section with a compact import/
+activation-boundary section:
+
+    DA-12 does not define the complete activation lifecycle.
+
+    DA-14 owns activation entries, lifecycle phases, phase barriers, cyclic
+    activation handling, registration publication, final Activated state, and
+    activation failure semantics.
+
+    DA-12 owns only the import/module-loading distinction: loading/evaluating a
+    module does not make it activated, does not grant lifecycle participation,
+    and does not publish registrations.
+
+08.4. Add activation-entry / private-module / exported-module distinction
+------------------------------------------------------------------------
+
+Add the P01 role split where useful:
+
+    - activation entry
+    - private implementation module
+    - exported module surface
+
+Keep it focused on module-loading implications, not activation lifecycle detail.
+
+08.5. Keep turnixImport exact enough for implementation discipline
+------------------------------------------------------------------
+
+Keep the custom loader name turnixImport.
+
+Do not replace it with native ESM imports.
+
+Do not turn it into generic JavaScript import maps, Node.js imports, filesystem
+imports, semver selectors, URIs, or permissive fallback loading.
+
+08.6. Add DA-30 stop-line
+-------------------------
+
+DA-12 should explicitly say DA-30 owns ModCallContext gateway shape and absent
+surfaces.
+
+08.7. Keep exact implementation details open
+--------------------------------------------
+
+Do not define final RPC field names, served artifact URL structure, cache
+strategy, compiled TypeScript output naming, dynamic import bundling strategy,
+turnixImport implementation internals, or concrete error envelope fields unless
+an implementation specification owns those details.
+
+==============================================================================
+09. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    PackContext
+        -> ModCallContext
+
+    PackContext authority
+        -> ModCallContext gateway authority
+
+    runs without PackContext authority
+        -> runs without ModCallContext gateway authority
+
+    AppInstance
+        -> ApplicationRun when live runtime context is meant
+        -> Application when durable identity is meant
+
+    AppInstance lifecycle outcome
+        -> ApplicationRun lifecycle outcome
+
+    SavePack
+        -> SaveBundle where durable persistence closure is meant
+        -> SaveBundle/Application context where save-scoped execution context is
+           meant
+
+    save scoping
+        -> SaveBundle/Application scoping, when architecture identity is meant
+
+    services where allowed by DA-16
+        -> capability calls and other explicitly exposed mediated surfaces owned
+           by DA-16/DA-30, avoiding direct service-object access
+
+    ctx.services.get(name)
+        -> remove, or replace with ctx.callCapability(...) where cross-Pack
+           execution is meant
+
+    ctx.registerService(name, instance)
+        -> remove from Pack-facing import examples, or mark as internal/runtime
+           service registration if an owning document explicitly defines it
+
+    onLoad(ctx) is the only supported activation entrypoint
+        -> DA-14 owns supported activation lifecycle entrypoints and phase
+           semantics. DA-12 only states that importing/module loading is not
+           activation.
+
+    onLoad(ctx) is the first moment Turnix intentionally executes pack code
+        -> remove or replace with DA-14-owned phase language; do not make DA-12
+           define the first activation phase
+
+    Meaningful Turnix-recognized execution waits for the supported activation entrypoint
+        -> Meaningful Turnix-recognized execution waits for a supported DA-14-owned
+           activation or orchestration path
+
+    current Dv3 terminology / current Dv3 type names / current Dv3 names
+        -> canonical architecture terminology / canonical architecture type names
+
+    Any final-document wording like "In V3, turnixImport..."
+        -> replace with direct architecture language such as "turnixImport..."
+
+==============================================================================
+10. ACCEPTANCE CONDITIONS FOR THE REVISED DA-12
+==============================================================================
+
+A revised DA-12 is acceptable when all of the following are true:
+
+    - It preserves native language imports as unable to understand or bypass
+      Turnix semantics.
+
+    - It preserves no arbitrary native cross-Pack imports.
+
+    - It preserves Python Pack code as not backend implementation code.
+
+    - It preserves no cross-Pack native Python import mechanism.
+
+    - It preserves JavaScript cross-Pack loading through turnixImport.
+
+    - It keeps turnixImport as mediated loading, not authority.
+
+    - It keeps turnixImport selectors identity-based, not filesystem paths, URIs,
+      or semver-qualified references.
+
+    - It preserves dependency consistency during import.
+
+    - It preserves importing as identity-based, not version-selection-based.
+
+    - It preserves exact file matching and no guessing.
+
+    - It preserves default-entry behavior without implicit index.js or directory
+      guessing.
+
+    - It preserves importing as separate from activation.
+
+    - It preserves module evaluation as not Turnix-recognized activation.
+
+    - It preserves import-time side effects as outside Turnix guarantees.
+
+    - It preserves unsupported background work outside Turnix guarantees.
+
+    - It preserves import errors as hard, explicit, classified import errors.
+
+    - It uses ModCallContext instead of PackContext.
+
+    - It avoids ctx.services and direct Service object access as ordinary
+      Pack-facing import/mediated-access examples.
+
+    - It uses ApplicationRun / Application / SaveBundle where those concepts must
+      be named.
+
+    - It aligns activation-entry wording with DA-14/P01 and does not freeze DA-12
+      to a single onLoad-only activation lifecycle model.
+
+    - It distinguishes activation entries, private implementation modules, and
+      exported module surfaces where module-loading semantics require it.
+
+    - It keeps DA-14 as owner of activation lifecycle, phase barriers, cyclic
+      activation, registration publication, final Activated state, and activation
+      failure semantics.
+
+    - It keeps DA-16 as owner of capability permission semantics.
+
+    - It keeps DA-23/DA-27 as owner of ExecutionAdapter and adapter lifecycle
+      semantics.
+
+    - It keeps DA-30 as owner of ModCallContext facade and absent-surface
+      semantics.
+
+    - It does not define concrete served artifact URLs, cache strategy, bundling
+      strategy, RPC fields, TypeScript artifact naming, or final turnixImport
+      implementation internals unless an owning implementation specification
+      fixes them.
+
+    - It does not mention audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+==============================================================================
+11. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-12.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform a targeted rewrite of activation-entry wording and Python mediated
+access examples.
+
+Use REWRITE-DA-12 only as translated boundary-preservation guidance. Do not keep
+it as an obsolete historical artifact and do not copy its stale PackContext,
+AppInstance, SavePack, service-access, or single-onLoad activation assumptions
+into the rewritten DA.
+
+Do not include audit/source metadata or version/process framing in the final
+DA-12 documentation. The final DA-12 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-12 should remain the importing, module-loading, code-boundary, turnixImport,
+import dependency consistency, module evaluation, background-work, and
+import-error document.
+
+DA-12 should not become:
+
+    - activation lifecycle protocol
+    - cyclic activation protocol
+    - ModCallContext specification
+    - Capability/permission specification
+    - Service registry specification
+    - ExecutionAdapter lifecycle/trust specification
+    - Application/ApplicationRun lifecycle specification
+    - SaveBundle specification
+    - Job lifecycle specification
+    - OrchestrationUnit lifecycle specification
+    - RuntimeHost command/lifecycle specification
+    - PackManager operation specification
+    - concrete RPC/served-artifact/cache/bundling implementation specification
+
+The main work is to preserve DA-12's strong import/module-loading boundaries
+while aligning it with P01 activation-entry roles, DA-16 service/capability
+boundaries, and DA-30 ModCallContext absence rules.
+
+==============================================================================
+END OF AUDIT RESULT - DA-12
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-12
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-12_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------

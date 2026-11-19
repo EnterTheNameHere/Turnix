@@ -1,0 +1,697 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-08 TRACE RECORD SERIALIZATION SCHEMA
+==============================================================================
+
+Document title:
+    IS-08 - Trace Record Serialization Schema
+
+Target IS path:
+    docs/design/IS-08_TRACE_RECORD_SERIALIZATION_SCHEMA.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-08
+    DOC_FILE: docs/design/IS-08_TRACE_RECORD_SERIALIZATION_SCHEMA.txt
+    DOC_REV: 1
+    DOC_GIT: bdf2886
+    GitHub blob SHA seen by assistant:
+        277bb4c6287c7aead69b56902ee20005ce386fdb
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-08_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-08 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-08 because the IS-08 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-08 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-07_RUNTIME_HOST_TRACE_SCHEMA.txt
+    - docs/design/IS-08_TRACE_RECORD_SERIALIZATION_SCHEMA.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, namespace, redaction, and profile-boundary
+    fixes.
+
+    IS-08 is a useful concrete implementation specification for serialized trace
+    record envelopes. It should not be rewritten from scratch.
+
+    Its strongest invariant is correct: IS-08 serializes DA-03 trace event
+    evidence and does not create new trace semantics. It owns the concrete
+    serialized envelope while DA-03 owns trace meaning, trace DAG semantics, span
+    semantics, trace access semantics, and loss evidence semantics.
+
+    Required fixes are targeted: replace obsolete AppInstance terminology and
+    namespaces, keep serialization profiles from becoming semantic owners, keep
+    redaction/unknown/unavailable markers from allowing false inference, and
+    preserve the boundary between serialized records, trace-store indexes, export
+    metadata, and domain-owned trace meanings.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-08 correctly defines serialized trace record envelope shape, DA-03 field
+    mapping, domain-specific attribute placement, RuntimeHost-domain IS-07 field
+    placement, parent/cause correlation, span references, timestamp/level/reason
+    conventions, redaction/unavailable markers, extension fields, validation
+    categories, profiles, and relation to trace stores and exports.
+
+    It does not try to define trace meaning, trace event semantics, trace DAG
+    semantics, span semantics, trace access semantics, loss evidence semantics,
+    RuntimeHost trace semantics, RuntimeHost field vocabulary, RPC semantics,
+    UI trace reasons, adapter trace reasons, OrchestrationUnit trace reasons,
+    trace store layout, trace index format, trace query language, trace UI
+    rendering, or export bundle format.
+
+2. Good DA-03 boundary.
+
+    The document says IS-08 serializes the DA-03 trace event model and does not
+    create new trace semantics.
+
+    DA-03-owned fields retain their DA-03 meanings when serialized.
+
+3. Good serialized-record boundary.
+
+    A serialized trace record is a concrete representation of one trace event or
+    one trace event projection. It is not the trace event meaning itself.
+
+4. Good domain-ownership boundary.
+
+    Domain documents own their trace reason identifiers and domain trace-context
+    meanings. Serialization does not transfer semantic authority from the owning
+    domain document to the trace record format.
+
+5. Good RuntimeHost placement boundary.
+
+    IS-07 owns RuntimeHost-domain field vocabulary. IS-08 owns only the placement
+    of IS-07 fields in the serialized trace record envelope.
+
+    RuntimeHost-domain fields remain RuntimeHost-domain attributes even when a
+    storage backend indexes them separately. Indexed copies do not replace the
+    canonical serialized record.
+
+6. Good reason/domain boundary.
+
+    reason serialization does not define reason meaning. Reason meaning remains
+    owned by the document that owns the reason identifier.
+
+    domain identifies the primary trace reason domain. Multi-domain correlation
+    is represented through attributes and correlation fields, not by multiple
+    primary domain values.
+
+7. Good timestamp/order boundary.
+
+    timestamp records when trace evidence was emitted or accepted according to
+    DA-03 semantics. It does not imply deterministic execution ordering by itself.
+
+8. Good parent/correlation boundary.
+
+    parentEventIds represent DA-03 parent references. relatedEventIds do not imply
+    causality. Consumers do not invent parentEventIds from timestamps alone.
+
+9. Good span boundary.
+
+    span serialization records span references only. DA-03 owns span semantics.
+    spanStatus does not redefine domain outcome unless the owning domain
+    explicitly maps that relation.
+
+10. Good redaction/unknown/unavailable separation.
+
+    The document preserves distinctions between absent, null, unknown,
+    unavailable, and redacted values. It explicitly says consumers do not infer
+    concrete values from redacted, unknown, or unavailable markers.
+
+11. Good extension-field limits.
+
+    Extension fields do not redefine DA-03 trace semantics, domain-owned trace
+    reason meanings, or IS-08 top-level field meanings. Portable interpretation
+    does not require implementation-local extension fields unless promoted by a
+    later authoritative specification.
+
+12. Good trace-store/export separation.
+
+    Trace store layout and indexes are outside IS-08. Indexing a field does not
+    move semantic ownership from the serialized record to the index. Export
+    metadata does not redefine individual trace record semantics.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-08 still uses AppInstance in several places:
+
+        - AppInstance-domain trace reason identifiers
+        - attributes.appInstance namespace
+        - later AppInstance trace schema
+        - AppInstance domain value
+        - AppInstance correlation fields
+        - level error does not define AppInstance failure
+        - future AppInstance domain trace schemas
+        - unsupported list mentions AppInstance failure
+
+    Current source-stack correction:
+        Proposal P02 defines:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of an Application
+
+    Required consequence for IS-08:
+        Replace AppInstance terminology with Application and/or ApplicationRun
+        according to meaning.
+
+        Likely namespace/domain replacement:
+
+            attributes.appInstance
+                -> attributes.application and/or attributes.applicationRun
+
+            AppInstance domain
+                -> Application and/or ApplicationRun domain, if both domains are
+                   needed
+
+            AppInstance failure
+                -> Application lifecycle outcome and/or ApplicationRun lifecycle
+                   outcome; usually ApplicationRun failure when live runtime
+                   execution is meant
+
+        Do not preserve AppInstance as a current trace domain merely because old
+        documents used it.
+
+2. RuntimeHost IS-07 placement still lists appInstanceId.
+
+    The RuntimeHost attribute placement examples include appInstanceId under
+    attributes.runtimeHost.
+
+    Required consequence for IS-08:
+        Replace that example with applicationId and/or applicationRunId after
+        IS-07 is updated.
+
+        IS-08 should mirror the accepted IS-07 field vocabulary and must not keep
+        stale field examples that contradict IS-07.
+
+3. Domain namespace vocabulary may need SaveBundle / ApplicationDefinition terms.
+
+    IS-08 default namespaces include persistence, but not SaveBundle explicitly.
+    This may be fine if persistence owns SaveBundle-related field placement, but
+    the current architecture treats SaveBundle as a first-class persistence
+    closure identity.
+
+    Required consequence for IS-08:
+        Decide whether SaveBundle fields belong under attributes.persistence,
+        attributes.application, attributes.applicationRun, a dedicated
+        attributes.saveBundle namespace, or a domain trace schema defined later.
+
+        Do not call SaveBundle a Pack, and do not hide SaveBundle identity where
+        trace consumers need it for portable interpretation.
+
+4. Application/ApplicationRun domain split should not be guessed casually.
+
+    Some traces may describe durable Application identity and some may describe
+    live ApplicationRun lifecycle. A single Application namespace might be too
+    broad; a single ApplicationRun namespace might omit durable identity.
+
+    Required consequence for IS-08:
+        Keep exact domain namespace split open if the owning domain trace schemas
+        are not finalized.
+
+        It is safe to say AppInstance is no longer current and must be translated,
+        but the final namespace choice should follow the accepted domain trace
+        vocabulary.
+
+5. Reason/domain initial vocabularies can falsely finalize future domain schema.
+
+    IS-08 lists initial domain values and domain namespaces. That is useful, but
+    exact domain vocabulary finalization remains open later in the same document.
+
+    Required consequence for IS-08:
+        Preserve the distinction between initial serialization values and final
+        vocabulary finalization. If Application/ApplicationRun/SaveBundle changes
+        are made, keep exact domain vocabulary finalization open unless later
+        authoritative schema sources resolve it.
+
+6. Redaction marker schema is partly concrete while marked open later.
+
+    IS-08 says redaction markers are JSON objects containing marker and
+    reasonCategory, and unknown/unavailable markers use the same shape. Later it
+    lists exact redaction/unavailable/unknown marker schema as open.
+
+    This is not wrong, but it can be misread as fully final.
+
+    Required consequence for IS-08:
+        Clarify that marker object shape is the minimum semantic shape, while
+        exact marker schema details remain open.
+
+        Preserve the distinction between absent, null, unknown, unavailable, and
+        redacted values.
+
+7. Profiles must not become semantic shortcuts.
+
+    Trace profiles may exist for full internal storage, compact logs,
+    diagnostics, audit exports, privacy-redacted exports, and tests.
+
+    The target already says profiles do not redefine field meanings and may omit
+    fields only when explicitly defined.
+
+    Required consequence for IS-08:
+        Preserve and strengthen that profile omission does not erase the meaning
+        of omitted domain evidence. A compact or redacted profile is not proof
+        that omitted data never existed.
+
+8. Portable interpretation and validation need unknown-domain safety.
+
+    IS-08 says UnknownDomain and UnknownReason do not require discarding a record
+    when otherwise structurally valid, while MalformedTraceRecord prevents
+    authoritative interpretation.
+
+    This is good.
+
+    Required consequence for IS-08:
+        Preserve forward-compatible storage and unknown display behavior, but keep
+        the boundary that unknown reasons are not silently treated as known
+        reasons.
+
+9. Source file / offset metadata could leak local paths.
+
+    serialization.sourceFile and sourceOffset can be useful storage metadata.
+    The document also leaves redaction rules open.
+
+    Required consequence for IS-08:
+        Add or preserve that sourceFile/sourceOffset are serialization metadata,
+        not trace event meaning, and may need redaction or profile-specific
+        omission. They do not grant file access or prove current file existence.
+
+10. Attribute payloads are evidence only, not authority.
+
+    IS-08 already says attributes do not create authority.
+
+    Required consequence for IS-08:
+        Preserve this and make it cover domain namespaces, RuntimeHost attributes,
+        client/user/principal fields, path/endpoint summaries, indexed field
+        copies, and extension fields.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate to Application and/or ApplicationRun according to meaning.
+
+2. Do not preserve attributes.appInstance as a current namespace unless a later
+   compatibility alias explicitly keeps it.
+
+3. Do not preserve AppInstance as an initial domain value.
+
+    Translate to Application and/or ApplicationRun domain values, or leave exact
+    domain vocabulary open pending the owning domain trace schemas.
+
+4. Do not preserve appInstanceId under attributes.runtimeHost.
+
+    Replace with applicationId and/or applicationRunId after IS-07 is updated.
+
+5. Do not preserve AppInstance failure in level/outcome stop-lines.
+
+    Replace with Application lifecycle outcome and/or ApplicationRun lifecycle
+    outcome.
+
+6. Do not hide SaveBundle identity under old SavePack assumptions.
+
+    If a SaveBundle trace field is needed, define or reserve current
+    SaveBundle-aware placement through the owning domain schema.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-08.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance terminology.
+
+    Replace:
+
+        AppInstance-domain trace reason identifiers
+        attributes.appInstance
+        later AppInstance trace schema
+        AppInstance domain value
+        AppInstance correlation fields
+        AppInstance failure
+        AppInstance domain trace schemas
+
+    with Application and/or ApplicationRun terminology according to accepted
+    domain trace vocabulary.
+
+2. Replace appInstanceId examples.
+
+    Replace appInstanceId in RuntimeHost attribute examples with applicationId
+    and/or applicationRunId after IS-07 field vocabulary is updated.
+
+3. Decide namespace/domain placement for Application and ApplicationRun.
+
+    If both durable Application and live ApplicationRun evidence exist, define
+    separate namespaces or clearly define how one namespace carries both.
+
+    Do not silently collapse durable Application identity and live ApplicationRun
+    lifecycle into one ambiguous field group.
+
+4. Decide whether SaveBundle needs explicit namespace support.
+
+    If SaveBundle trace fields are expected to be portable, define or reserve
+    their placement through a current namespace or owning domain trace schema.
+
+    If persistence owns the placement, say so directly.
+
+5. Clarify initial vocabulary vs final vocabulary.
+
+    Domain namespace names and initial domain values may be listed, but exact
+    domain vocabulary finalization remains open unless a later source resolves it.
+
+6. Clarify marker schema finality.
+
+    Keep marker, reasonCategory as minimum semantic shape if intended.
+
+    Keep exact redaction / unknown / unavailable marker schema open unless later
+    source resolves it.
+
+7. Strengthen profile omission guardrail.
+
+    Add or preserve wording:
+
+        A trace profile may omit fields only according to its profile definition.
+        Profile omission does not prove omitted domain evidence never existed and
+        does not redefine the underlying trace event meaning.
+
+8. Strengthen sourceFile/sourceOffset guardrail.
+
+    Add or preserve wording:
+
+        sourceFile and sourceOffset are serialization metadata, not trace event
+        meaning. They may be redacted or omitted by profile. They do not grant
+        file access and do not prove current file existence.
+
+9. Preserve unknown-domain / unknown-reason behavior.
+
+    Keep unknown domain/reason records storable/displayable when structurally
+    valid, but unknown reason identifiers must not be silently interpreted as
+    known reasons.
+
+10. Preserve malformed-record boundary.
+
+    Keep MalformedTraceRecord from authoritative interpretation.
+
+11. Preserve index/export boundaries.
+
+    Keep:
+
+        indexing a field does not move semantic ownership from the serialized
+        record to the index
+        indexed copies do not replace the canonical serialized record
+        export metadata does not redefine individual trace record semantics
+
+12. Preserve extension-field limits.
+
+    Keep namespacing, collision avoidance, ignorable unsupported extensions, and
+    no redefinition of DA-03 semantics, domain reason meanings, or IS-08 top-level
+    field meanings.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun terminology.
+
+    2. Keep Core Concept, Serialized Trace Record Envelope, and DA-03 Field
+       Mapping.
+
+    3. Update Attribute Payload Layout to replace appInstance namespace and to
+       clarify current Application / ApplicationRun / SaveBundle placement.
+
+    4. Update RuntimeHost Attribute Placement examples to match accepted IS-07
+       field names.
+
+    5. Update Domain Attribute Namespaces, Reason Serialization, and Domain
+       Serialization to remove AppInstance and use current domain terms or leave
+       exact domain vocabulary open.
+
+    6. Keep Timestamp, Parent/Causal Links, Span, Correlation, Serialization
+       Metadata, Redaction/Unavailable, Extension Fields, Validation,
+       Minimum Portable Record, Profiles, Trace Stores/Exports, Domain Trace
+       Schemas, Unsupported, Open Questions, and Locked Summary sections.
+
+    7. Add stronger profile omission and sourceFile/sourceOffset guardrails.
+
+Do not turn IS-08 into DA-03 trace semantics, IS-07 RuntimeHost trace vocabulary,
+a trace store layout specification, trace index specification, trace query
+language, trace viewer specification, export bundle format, security/redaction
+policy specification, or domain trace schema for Application/ApplicationRun.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. It does NOT define section
+
+    Current risk:
+        AppInstance-domain trace reason identifiers
+
+    Safer wording:
+        Application-domain and ApplicationRun-domain trace reason identifiers
+
+2. Attribute namespaces
+
+    Current risk:
+        appInstance
+
+    Safer wording:
+        application
+        applicationRun
+
+    Exact final namespace split should follow the accepted domain trace schema.
+
+3. RuntimeHost placement examples
+
+    Current risk:
+        appInstanceId
+
+    Safer wording:
+        applicationId
+        applicationRunId
+
+4. Domain namespace section
+
+    Current risk:
+        appInstance attributes are placed under attributes.appInstance unless a
+        later AppInstance trace schema defines another compatible placement.
+
+    Safer wording:
+        Application and ApplicationRun attributes are placed under their accepted
+        domain namespaces unless a later compatible trace schema defines another
+        placement.
+
+5. Reason serialization
+
+    Current risk:
+        AppInstance-domain trace records use DA-20 AppInstance-domain trace reason
+        identifiers...
+
+    Safer wording:
+        Application-domain and ApplicationRun-domain trace records use their
+        owning lifecycle trace reason identifiers or permitted implementation-
+        specific extensions.
+
+6. Domain serialization
+
+    Current risk:
+        Initial domain values include AppInstance.
+
+    Safer wording:
+        Initial domain values include Application and/or ApplicationRun if those
+        domains are defined by the owning trace schema.
+
+7. Level serialization
+
+    Current risk:
+        error level does not by itself define ... AppInstance failure ...
+
+    Safer wording:
+        error level does not by itself define ... Application lifecycle outcome,
+        ApplicationRun failure ...
+
+8. Relation to domain trace schemas
+
+    Current risk:
+        Future domain trace schemas may define AppInstance...
+
+    Safer wording:
+        Future domain trace schemas may define Application, ApplicationRun,
+        SaveBundle, RPC, UI, adapter, OrchestrationUnit, Job, capability,
+        decision, transaction, Window, or persistence field vocabularies.
+
+9. Unsupported list
+
+    Current risk:
+        treating level error as Job failure, AppInstance failure...
+
+    Safer wording:
+        treating level error as Job failure, ApplicationRun failure, adapter
+        failure, OrchestrationUnit failure, RuntimeHost failure, or Window
+        finalization by itself
+
+10. Profile omission guardrail
+
+    Add:
+        Profile omission does not prove omitted domain evidence never existed and
+        does not redefine the underlying trace event meaning.
+
+11. sourceFile/sourceOffset guardrail
+
+    Add:
+        sourceFile and sourceOffset are serialization metadata, not trace event
+        meaning. They may be redacted or omitted by profile. They do not grant
+        file access and do not prove current file existence.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-08
+==============================================================================
+
+Accept the rewritten IS-08 only if all of the following are true:
+
+1. It remains an implementation specification for serialized trace record shape.
+
+2. It does not redefine DA-03 trace meaning, trace event semantics, trace DAG,
+   span semantics, trace access semantics, loss evidence semantics, trace-store
+   layout, indexing, query, UI rendering, or export bundle behavior.
+
+3. It does not redefine RuntimeHost trace reason identifiers, RuntimeHost field
+   vocabulary, RPC trace semantics, UI trace reason ownership,
+   OrchestrationUnit trace reasons, adapter trace reasons, Application,
+   ApplicationRun, SaveBundle, Job, transaction, Window, or persistence trace
+   semantics.
+
+4. All AppInstance terminology has been translated to Application and/or
+   ApplicationRun according to meaning.
+
+5. appInstanceId examples have been replaced with applicationId and/or
+   applicationRunId after IS-07 alignment.
+
+6. Domain namespaces and domain values do not preserve AppInstance as a current
+   domain unless a later compatibility alias explicitly keeps it.
+
+7. SaveBundle identity is not hidden under old SavePack assumptions.
+
+8. Serialization does not transfer semantic authority from owning domain documents
+   to the trace record format.
+
+9. attributes, domain namespaces, RuntimeHost attributes, extension fields,
+   profile fields, and indexed copies do not create authority.
+
+10. reason serialization does not define reason meaning and unknown reasons are
+    not silently treated as known reasons.
+
+11. domain serialization identifies one primary trace reason domain; multi-domain
+    correlation remains attributes/correlation, not multiple primary domains.
+
+12. timestamp does not imply deterministic execution ordering by itself.
+
+13. relatedEventIds do not imply causality and consumers do not invent
+    parentEventIds from timestamps alone.
+
+14. span serialization remains reference serialization only and does not redefine
+    span semantics or domain outcome.
+
+15. redacted, unknown, unavailable, absent, and null remain distinct.
+
+16. marker schema finality is clear: either marker object shape is a minimum
+    semantic shape with details open, or the exact marker schema is finalized by a
+    later source.
+
+17. Profiles may omit fields only under explicit profile definitions, and profile
+    omission does not redefine trace event meaning.
+
+18. sourceFile/sourceOffset remain serialization metadata only and do not grant
+    file access or prove current file existence.
+
+19. Validation preserves the distinction between structurally unknown but valid
+    records and malformed records that prevent authoritative interpretation.
+
+20. Trace store indexes and export metadata do not replace canonical serialized
+    trace records or redefine individual trace record semantics.
+
+21. Extension fields are namespaced or otherwise distinguishable, do not redefine
+    top-level fields or owning-domain semantics, and are not required for portable
+    interpretation unless later specifications promote them.
+
+22. Open questions remain open unless a later authoritative source resolves them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-08 with targeted terminology, namespace, redaction, and profile-boundary
+fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into DA-03 trace semantics,
+IS-07 RuntimeHost trace vocabulary, trace-store layout, trace indexing, trace
+query language, trace UI rendering, export bundle format, security/redaction
+policy, or Application/ApplicationRun domain trace schema.
+
+Translate obsolete AppInstance wording and namespaces into current Application /
+ApplicationRun terminology. Align RuntimeHost placement examples with the final
+IS-07 field names. Preserve the serialization-not-meaning boundary, reason/domain
+ownership, marker distinctions, profile omission rules, index/export separation,
+extension-field limits, and all open questions about exact schemas, profiles,
+trace store layout, migration, and binary/chunked alternatives.
+
+==============================================================================
+END OF AUDIT-IS-08 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-08-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-08_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------

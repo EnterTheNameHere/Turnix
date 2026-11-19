@@ -1,0 +1,813 @@
+==============================================================================
+AUDIT RESULT - DA-21 RPC, CHANNELS, TRANSPORTS AND MESSAGE FLOW
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-21_RPC_CHANNELS_TRANSPORTS_AND_MESSAGE_FLOW.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-21_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-21_RPC_CHANNELS_TRANSPORTS_AND_MESSAGE_FLOW.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-21_RECOMMENDATION.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Correct in substance, with small current-name and owner-boundary translation.
+
+    The recommendation correctly preserves DA-21's central model: RPC is a logical
+    communication boundary, RPCChannel is transport-neutral, Transport is the
+    concrete carrier, WebSocket is one concrete transport, JSON is one concrete
+    envelope/schema representation, acknowledgement is not outcome, routing is not
+    authority, request acceptance is not final success, RPC request identity is
+    distinct from Job and OrchestrationUnit identity, subscription delivery is not
+    domain truth, and transport timeout/disconnect/cancellation are not domain
+    outcomes.
+
+    The recommendation still carries some stale AppInstance/session-era wording.
+    Translate that to Application/ApplicationRun, View/client binding, generation,
+    trace scope, or retained-artifact workflow scope where appropriate.
+
+Document verdict:
+    Keep with small terminology and owner-boundary fixes.
+
+DA-21 is architecturally strong and should not be heavily rewritten.
+
+The target already contains many of the correct Dv3 updates: ApplicationRun is
+used in the main non-ownership list and trace context; RPC outcome wording is
+already separated from Job, ApplicationRun, artifact export, retained-result,
+comparison, Replay, Resume, Retry, and audit workflow outcomes; and RPC trace
+wording already says retention and loss remain governed by DA-03.
+
+The main required fixes are:
+
+    - remove or translate `generation or session mismatch` so DA-21 does not
+      reintroduce Session as a core concept
+    - add DA-24, DA-25, DA-26, DA-27, and DA-29 to upstream/cross-reference
+      visibility where DA-21 already names OrchestrationUnit, artifact/export,
+      workflow, adapter lifecycle, or PackManager outcomes
+    - clarify DA-23 / DA-27 split: DA-23 owns execution-adapter boundary semantics;
+      DA-27 owns adapter lifecycle, failure, disconnect, trust, and isolation
+      semantics
+    - replace `Execution Adapter` as a type name with `ExecutionAdapter` where the
+      canonical umbrella type is meant
+    - add or preserve DA-25 / DA-26 stop-lines for subscription/update/result-
+      retrieval/artifact/export/comparison/Replay/Resume/Retry/audit workflow
+      wording
+    - preserve DA-05 and DA-07 stop-lines where retained payloads, retained
+      results, exported closures, structural comparison inputs, storage, or
+      workflow I/O are touched
+    - preserve DA-03 as trace substrate/retention/loss owner
+    - avoid final-document version/process metadata leakage
+
+Primary conclusion:
+    Keep DA-21 as the abstract RPC, RPCChannel, transport, routing,
+    acknowledgement, request/acceptance/reply/error, emit/subscribe/cancel,
+    correlation, timeout/disconnect, and RPC-domain trace document. Apply targeted
+    terminology and owner-boundary fixes only.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-21 should not keep older terminology merely because it appears in older source
+material or recommendations.
+
+Specifically, the rewrite should not preserve:
+
+    - Session as a core architecture object
+    - session mismatch as a current trace reason phrase unless it is explicitly a
+      compatibility alias and not a core Session identity
+    - AppInstance as runtime identity vocabulary
+    - appInstanceId as current runtime trace identity where ApplicationRun is meant
+    - Execution Adapter as a type name when ExecutionAdapter is the canonical
+      umbrella type
+    - DA-23 as owner of adapter lifecycle semantics where DA-27 is the lifecycle
+      owner
+    - RPC as transport
+    - RPC as WebSocket
+    - RPC as JSON envelope
+    - acknowledgement as request success
+    - request acceptance as final success
+    - RPC request identity as jobId
+    - RPC request identity as orchestrationUnitId
+    - RPC routing as permission
+    - RPC routing as Pack activation
+    - RPC routing as adapter authorization
+    - RPC routing as RuntimeHost command acceptance
+    - subscription delivery as domain truth
+    - unsubscribe as automatic cancellation
+    - transport timeout as Job timeout
+    - transport disconnect as Job cancellation
+    - transport disconnect as adapter failure
+    - transport disconnect as RuntimeHost failure
+    - transport disconnect as Window finalization
+    - transport disconnect as artifact/export failure
+    - transport disconnect as Replay / Resume / Retry failure
+    - RPC observability as committed-state authority
+    - RPC trace evidence as replacement for owning-domain trace evidence
+
+Canonical translations:
+
+    AppInstance -> ApplicationRun where live runtime incarnation is meant
+    AppInstance -> Application where durable Application identity is meant
+    appInstanceId -> applicationRunId where live runtime identity is meant
+    session mismatch -> generation mismatch, client binding mismatch, View binding
+        mismatch, channel generation mismatch, reconnect generation mismatch, or
+        protocol compatibility mismatch, depending on intended concrete semantics
+    Execution Adapter -> ExecutionAdapter where the umbrella type is meant
+    Orchestration Unit -> OrchestrationUnit if that wording appears during edit
+
+The useful part of the older recommendation is not the old naming. The useful
+part is this boundary:
+
+    DA-21 owns communication-domain meaning. It does not own the domain outcomes
+    that RPC may carry, request, report, correlate, acknowledge, subscribe to, or
+    deliver.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-21 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, RPC is not transport.
+    - The new design removes Session.
+    - This rewrite added DA-25 and DA-26 stop-lines.
+    - Unlike V2, acknowledgement is not outcome.
+    - Codex kept session mismatch wording.
+    - This audit decided DA-21 should not own Job outcome.
+    - DA-21 was rewritten because of the audit.
+
+Those facts may be useful in audit files, migration notes, compatibility notes,
+branch notes, changelogs, or explicitly historical documents. They do not belong
+in the architecture document itself.
+
+The final DA-21 should simply define RPC, RPCChannel, Transport, message
+categories, routing, request acceptance, Job-backed / adapter-mediated /
+RuntimeHost operation correlation, emit/subscribe/update flow, timeout,
+disconnect, cancellation, RPCChannel contract, RPC-domain trace obligations,
+implementation-spec split, open questions, and locked summary.
+
+==============================================================================
+02. WHAT DA-21 GETS RIGHT
+==============================================================================
+
+02.1. RPC / channel / transport split is strong
+-----------------------------------------------
+
+DA-21 correctly separates:
+
+    - RPC as logical communication boundary
+    - RPCChannel as transport-neutral communication interface
+    - Transport as concrete carrier
+    - WebSocket as one concrete transport
+    - JSON as one concrete envelope/schema representation
+
+Preserve this strongly.
+
+02.2. Message delivery and work completion are distinct
+-------------------------------------------------------
+
+DA-21 correctly says message delivery, acknowledgement, request acceptance,
+handler execution, Job creation, and Job terminal outcome are distinct events.
+
+It correctly says successful message delivery is not successful work completion.
+
+Preserve this.
+
+02.3. Transport failure is not domain failure
+---------------------------------------------
+
+DA-21 correctly says Turnix does not treat transport failure as Job failure.
+
+It also separates transport timeout, Job timeout, adapter timeout, RuntimeHost
+timeout, disconnect, cancellation request, and downstream policy/lifecycle
+outcome.
+
+Preserve this.
+
+02.4. RuntimeHost / RPC authority split is strong
+-------------------------------------------------
+
+DA-21 correctly says RuntimeHost entry surfaces and command surfaces may use RPC,
+but RPC use does not make RPC the RuntimeHost authority owner.
+
+Preserve this.
+
+02.5. Trace-visible wording is already mostly corrected
+-------------------------------------------------------
+
+DA-21 already says trace-visible RPC flow means RPC-domain trace emission
+obligation where applicable, while trace retention and loss remain governed by
+DA-03.
+
+Preserve this.
+
+02.6. RPC outcome wording is already strong
+-------------------------------------------
+
+DA-21 already says RPC outcome wording does not define Job outcome,
+ApplicationRun outcome, artifact export, retained-result authority, comparison,
+Replay, Resume, Retry, or audit workflow outcome.
+
+Preserve this and strengthen owner references where needed.
+
+02.7. Routing model is strong
+-----------------------------
+
+DA-21 correctly says routing identifies the logical target but does not grant
+permission, activate Packs, select/authorize adapters, bypass capability
+mediation, grant workspace ownership, accept RuntimeHost commands, or create an
+ApplicationRun by itself.
+
+Preserve this.
+
+02.8. Request acceptance is not final success
+---------------------------------------------
+
+DA-21 correctly separates immediate reply, structured error, accepted Job-backed
+work, adapter-mediated work, RuntimeHost operation, and rejected-before-domain
+outcomes.
+
+Preserve this.
+
+02.9. RPC request identity is distinct from domain identities
+-------------------------------------------------------------
+
+DA-21 correctly says RPC request identity, jobId, adapter instance identity,
+runtimeHostId, and operation identities are distinct and only correlated when the
+domain object exists.
+
+Preserve this.
+
+02.10. RPCChannel contract is transport-neutral
+-----------------------------------------------
+
+DA-21 correctly says RPCChannel does not define message schema, WebSocket
+behavior, Job semantics, adapter lifecycle semantics, or RuntimeHost lifecycle or
+command-surface semantics.
+
+Preserve this and add OrchestrationUnit / Window / artifact / workflow stop-lines
+if DA-21 keeps naming those domains.
+
+02.11. DA / IS split is strong
+------------------------------
+
+DA-21 correctly says IS-01 owns concrete RPC message envelope schema and IS-02
+owns concrete WebSocket RPC flow, while implementation specs cannot redefine DA-
+level RPC semantics.
+
+Preserve this.
+
+==============================================================================
+03. REQUIRED FIX: SESSION WORDING
+==============================================================================
+
+DA-21 still includes:
+
+    generation or session mismatch
+
+Session has been removed from core architecture.
+
+Replace or scope this wording.
+
+Possible replacements depending on intended meaning:
+
+    - generation mismatch
+    - frontend generation mismatch
+    - View binding mismatch
+    - frontend client binding mismatch
+    - channel generation mismatch
+    - reconnect generation mismatch
+    - protocol compatibility mismatch
+    - stale client generation
+
+Recommended neutral replacement:
+
+    generation or client-binding mismatch
+
+If a concrete implementation still has a field named `session`, treat it as an
+implementation-level compatibility or protocol field. Do not let it reintroduce
+Session as a core architecture object.
+
+Do not introduce MainSession, HiddenSession, TemporarySession, SessionRegistry,
+Session-owned Pipeline, Session-owned memory, Session-owned View, or ctx.sessions
+semantics.
+
+==============================================================================
+04. REQUIRED FIX: ADD OWNER VISIBILITY FOR NAMED DOWNSTREAM DOMAINS
+==============================================================================
+
+DA-21 already names many downstream domains that are missing from the upstream
+list or not-definition list.
+
+Add or otherwise expose these owner references where DA-21 keeps touching them:
+
+    DA-05:
+        payload identity, Chunk, ChunkId, ValueRef, decode, integrity, retained
+        value representation
+
+    DA-07:
+        persistent-I/O authority, Reader/Writer providers, storage roots,
+        filesystem rules, backup/snapshot behavior, streaming I/O
+
+    DA-08:
+        Window kind, Window ordering, ActiveWindow, SafePointWindow,
+        AbortedWindow, Window finalization, finalized runtime history
+
+    DA-24:
+        OrchestrationUnit lifecycle and mutation-authority semantics
+
+    DA-25:
+        WindowManifest, WindowExport, Minimal Audit Bundle, digest
+        representation, partial export, missing material, offline inspection
+        artifact semantics
+
+    DA-26:
+        ComparisonResult, equality modes, Replay, Resume, Retry, and audit
+        workflow semantics
+
+    DA-27:
+        adapter lifecycle, trust, isolation, failure, disconnect, and adapter-
+        domain trace semantics
+
+    DA-29:
+        PackManager catalog, graph-preparation, repair, View, write, and
+        PackManager-domain operation semantics
+
+This does not mean DA-21 owns those domains. It means DA-21 should name the
+owning documents when its communication model touches their boundaries.
+
+==============================================================================
+05. REQUIRED FIX: DA-23 / DA-27 ADAPTER SPLIT
+==============================================================================
+
+DA-21 currently says adapter lifecycle semantics remain owned by DA-23 in some
+places.
+
+Current split:
+
+    DA-23:
+        execution adapter boundary semantics
+
+    DA-27:
+        adapter lifecycle, trust, isolation, failure, disconnect, adapter-domain
+        trace, and lifecycle classification semantics
+
+Recommended replacements:
+
+    Adapter execution-boundary semantics remain owned by DA-23.
+
+    Adapter lifecycle, failure, disconnect, and lifecycle classification semantics
+    remain owned by DA-27.
+
+Where DA-21 says a request rejected before adapter-mediated work exists does not
+produce adapter execution failure unless DA-23 classifies that relationship,
+change to:
+
+    unless DA-23 / DA-27 or the adapter-owning documents classify that
+    relationship explicitly
+
+or more precisely:
+
+    DA-23 owns execution-boundary semantics. DA-27 owns adapter lifecycle/failure
+    classification.
+
+==============================================================================
+06. REQUIRED FIX: EXECUTIONADAPTER TERMINOLOGY
+==============================================================================
+
+DA-21 uses `Execution Adapter` as a spaced type name.
+
+Use canonical type spelling:
+
+    ExecutionAdapter
+
+when referring to the umbrella adapter type.
+
+Phrases such as `execution adapter boundary` can remain ordinary prose where not
+used as a type name, but headings/lists and first-class concept references should
+use ExecutionAdapter.
+
+==============================================================================
+07. DA-25 / DA-26 ARTIFACT AND WORKFLOW STOP-LINES
+==============================================================================
+
+DA-21 can carry, route, acknowledge, subscribe to, or deliver messages related to
+artifacts and workflows.
+
+Preserve this boundary:
+
+    RPC may carry or correlate messages related to artifacts, exports, retained
+    results, comparison, Replay, Resume, Retry, or audit workflows.
+
+    Carrying, acknowledging, routing, subscribing to, or delivering those messages
+    does not define artifact/export authority, ComparisonResult, Replay outcome,
+    Resume outcome, Retry outcome, or audit workflow outcome.
+
+    DA-25 owns artifact/export meanings.
+
+    DA-26 owns comparison, Replay, Resume, Retry, and audit workflow meanings.
+
+Do not let RPC message flow become artifact/workflow authority.
+
+==============================================================================
+08. RETAINED-RESULT RETRIEVAL STOP-LINE
+==============================================================================
+
+DA-21 leaves retained-result retrieval flow for Job-backed RPC open.
+
+That is valid as communication-flow scope, but DA-21 should not define result
+meaning.
+
+Preserve this boundary:
+
+    DA-21 may define or constrain the RPC flow used to request or deliver a
+    retained result.
+
+    DA-21 does not define whether the retained result is authoritative state,
+    artifact material, Job result material, Replay material, Resume material,
+    Retry material, or audit workflow material.
+
+    DA-19 owns Job result semantics.
+
+    DA-25 owns artifact/export semantics.
+
+    DA-26 owns Replay, Resume, Retry, comparison, and audit workflow semantics.
+
+    DA-05 owns retained value representation.
+
+    DA-07 owns persistent-I/O authority.
+
+==============================================================================
+09. TRACE WORDING
+==============================================================================
+
+Follow the DA-03 cross-document trace wording check.
+
+RPC trace requirements are RPC-domain emission obligations.
+
+Trace retention, trace pruning, trace loss, event structure, trace DAG semantics,
+span mechanics, and trace storage semantics remain owned by DA-03.
+
+RPC observability does not replace owning-domain trace evidence, including:
+
+    - capability-domain trace evidence
+    - decision/policy trace evidence
+    - Job trace evidence
+    - OrchestrationUnit trace evidence
+    - debugger trace evidence
+    - Application/ApplicationRun trace evidence
+    - adapter-domain trace evidence
+    - RuntimeHost trace evidence
+    - Window trace evidence
+    - artifact/export trace evidence
+    - comparison / Replay / Resume / Retry / audit workflow trace evidence
+    - PackManager trace evidence
+    - committed-state trace evidence
+
+Do not let RPC trace wording imply that trace evidence is committed state or that
+trace persistence is guaranteed forever.
+
+==============================================================================
+10. WHAT TO PRESERVE FROM CURRENT DA-21
+==============================================================================
+
+Preserve these boundaries, translating stale terminology where present:
+
+    - RPC is logical communication boundary, not transport
+    - RPC is not WebSocket
+    - RPC is not JSON
+    - RPCChannel is transport-neutral
+    - Transport is the concrete carrier
+    - transport-specific framing, handshake, encoding, buffering, and
+      reconnection rules belong to implementation specifications
+    - message delivery is not work completion
+    - acknowledgement confirms message receipt or transport-level handling only
+    - acknowledgement does not imply request success, capability execution,
+      adapter execution, Job creation, or Job success
+    - concrete message type names and fields belong to IS-01 or implementation
+      specs
+    - routing identifies logical target but does not grant permission, activate
+      Packs, authorize adapters, bypass capability mediation, grant workspace
+      ownership, accept RuntimeHost command, or create ApplicationRun by itself
+    - capability-routed RPC remains subject to DA-16
+    - adapter-facing RPC remains subject to DA-23 and DA-27 as appropriate
+    - RuntimeHost control-surface RPC remains subject to DA-28
+    - request acceptance is not final operation success unless operation contract
+      says so
+    - rejected-before-Job does not produce Job terminal outcome
+    - rejected-before-adapter-work does not produce adapter lifecycle outcome
+      unless adapter-owning documents classify it
+    - rejected-before-RuntimeHost-command-acceptance does not produce RuntimeHost
+      outcome unless DA-28 classifies it
+    - RPC request identity, jobId, adapter identity, runtimeHostId, and
+      orchestrationUnitId remain distinct
+    - subscription delivery is not domain truth
+    - unsubscribe is not automatic cancellation
+    - transport timeout is not Job timeout, adapter timeout, RuntimeHost timeout,
+      OrchestrationUnit timeout, Replay/Resume/Retry timeout, or audit workflow
+      timeout by default
+    - transport disconnect is not Job cancellation, adapter failure, RuntimeHost
+      failure, OrchestrationUnit cancellation, Window finalization,
+      artifact/export failure, Replay/Resume/Retry failure, audit workflow failure,
+      or committed-state mutation by default
+    - RPC cancellation messages are requests, not arbitrary execution kill
+    - RPCChannel reports connection loss explicitly
+    - DA / IS split remains intact
+
+==============================================================================
+11. WHAT TO ADD OR CHANGE IN THE REVISED DA-21
+==============================================================================
+
+11.1. Remove Session wording
+----------------------------
+
+Replace `generation or session mismatch` with current non-Session wording.
+
+11.2. Add owner visibility
+--------------------------
+
+Add DA-05, DA-07, DA-08, DA-24, DA-25, DA-26, DA-27, and DA-29 if the document
+keeps naming their domains.
+
+11.3. Clarify adapter ownership split
+-------------------------------------
+
+Use DA-23 for execution-adapter boundary semantics and DA-27 for adapter lifecycle
+semantics.
+
+11.4. Normalize ExecutionAdapter
+--------------------------------
+
+Use ExecutionAdapter where the canonical umbrella type is meant.
+
+11.5. Preserve DA-25 / DA-26 stop-lines
+---------------------------------------
+
+Keep artifact/export and workflow outcomes outside DA-21.
+
+11.6. Preserve retained-result retrieval stop-line
+--------------------------------------------------
+
+Keep retained-result retrieval as communication-flow scope only. Result meaning
+belongs to DA-19, DA-25, DA-26, DA-05, or DA-07 depending on what the retained
+material is.
+
+11.7. Keep implementation details open
+--------------------------------------
+
+Do not define concrete JSON envelope fields, WebSocket frame flow, handshake
+sequence, concrete trace reason payload schema, channel identity encoding, peer
+identity encoding, adapter metadata fields, RuntimeHost metadata fields,
+retained-result retrieval concrete API, non-WebSocket transport behavior, or
+transport implementation internals unless an owning implementation specification
+fixes them.
+
+==============================================================================
+12. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    generation or session mismatch
+        -> generation or client-binding mismatch
+        -> generation mismatch
+        -> channel generation mismatch
+        -> View binding mismatch
+        -> reconnect generation mismatch
+        depending on intended concrete semantics
+
+    AppInstance
+        -> ApplicationRun where live runtime incarnation is meant
+        -> Application where durable Application identity is meant
+
+    AppInstance lifecycle
+        -> Application/ApplicationRun lifecycle
+
+    AppInstance documents
+        -> Application/ApplicationRun documents
+
+    appInstanceId
+        -> applicationRunId where live runtime identity is meant
+        -> applicationId only where durable Application identity is meant
+
+    Execution Adapter
+        -> ExecutionAdapter
+
+    Adapter lifecycle semantics remain owned by DA-23
+        -> Adapter execution-boundary semantics remain owned by DA-23;
+           adapter lifecycle semantics remain owned by DA-27
+
+    An adapter-facing RPC message remains subject to DA-23
+        -> An adapter-facing RPC message remains subject to DA-23 and DA-27 as
+           appropriate
+
+    RPC trace evidence does not replace AppInstance trace evidence
+        -> RPC trace evidence does not replace Application/ApplicationRun trace
+           evidence
+
+    trace-visible
+        -> RPC-domain trace emission obligation, with retention/loss governed by
+           DA-03
+
+    current Dv3 terminology / current Dv3 type names / current Dv3 names
+        -> canonical architecture terminology / canonical architecture type names
+
+    Any final-document wording like "In V3, RPC..."
+        -> replace with direct architecture language such as "RPC..."
+
+==============================================================================
+13. ACCEPTANCE CONDITIONS FOR THE REVISED DA-21
+==============================================================================
+
+A revised DA-21 is acceptable when all of the following are true:
+
+    - It preserves RPC as logical communication boundary, not transport.
+
+    - It preserves RPCChannel as transport-neutral.
+
+    - It preserves Transport as concrete carrier.
+
+    - It preserves WebSocket as one concrete transport.
+
+    - It preserves JSON as one concrete envelope/schema representation.
+
+    - It preserves message delivery, acknowledgement, request acceptance, handler
+      execution, Job creation, OrchestrationUnit creation, adapter-mediated work,
+      RuntimeHost operation, Window finalization, artifact/export operation,
+      workflow operation, and final outcome as distinct concepts.
+
+    - It preserves acknowledgement as communication handling, not request success
+      or work outcome.
+
+    - It preserves routing as not permission, activation, adapter authorization,
+      RuntimeHost authority, Window finalization, artifact/export authority,
+      ComparisonResult, Replay/Resume/Retry authority, or audit workflow authority.
+
+    - It preserves request acceptance as not final success unless operation
+      contract explicitly defines acceptance as result.
+
+    - It preserves RPC request identity as distinct from jobId,
+      orchestrationUnitId, adapter identity, runtimeHostId, RuntimeHost operation
+      identity, Window identity, artifact identity, and workflow identity.
+
+    - It preserves rejected-before-domain-object semantics: no Job terminal outcome
+      before Job exists, no OrchestrationUnit terminal outcome before
+      OrchestrationUnit exists, no adapter lifecycle outcome before adapter work is
+      classified, and no RuntimeHost operation outcome before RuntimeHost command
+      acceptance.
+
+    - It preserves subscription delivery as not domain truth.
+
+    - It preserves unsubscribe as not automatic cancellation.
+
+    - It preserves transport timeout, disconnect, and cancellation as
+      communication-domain events, not automatic domain outcomes.
+
+    - It preserves RPC cancellation message as a request, not arbitrary execution
+      kill.
+
+    - It preserves DA-03 as trace substrate/retention/loss owner.
+
+    - It preserves DA-16 as capability permission owner.
+
+    - It preserves DA-17 as decision/policy owner.
+
+    - It preserves DA-19 as Job lifecycle owner.
+
+    - It preserves DA-20 as Application/ApplicationRun lifecycle and runtime
+      identity owner.
+
+    - It preserves DA-23 as execution-adapter boundary owner.
+
+    - It preserves DA-24 as OrchestrationUnit lifecycle and mutation-authority
+      owner.
+
+    - It preserves DA-25 as artifact/export owner.
+
+    - It preserves DA-26 as comparison/Replay/Resume/Retry/audit workflow owner.
+
+    - It preserves DA-27 as adapter lifecycle owner.
+
+    - It preserves DA-28 as RuntimeHost owner.
+
+    - It preserves DA-29 as PackManager operation owner when PackManager operations
+      are named.
+
+    - It removes or scopes session mismatch wording so Session is not reintroduced
+      as a core architecture object.
+
+    - It uses ExecutionAdapter where the canonical umbrella type is meant.
+
+    - It does not define concrete JSON envelope fields, WebSocket frame flow,
+      handshake sequence, concrete trace reason payload schema, channel identity
+      encoding, peer identity encoding, adapter metadata fields, RuntimeHost
+      metadata fields, retained-result retrieval concrete API, non-WebSocket
+      transport behavior, or transport implementation internals unless an owning
+      implementation specification fixes them.
+
+    - It does not mention audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+==============================================================================
+14. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-21.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform targeted terminology and owner-boundary fixes:
+
+    - replace `generation or session mismatch` with current non-Session wording
+    - add DA-25 / DA-26 stop-lines where subscription, update, retained-result
+      retrieval, artifact/export, comparison, Replay, Resume, Retry, or audit
+      workflow wording appears
+    - preserve RPC as logical boundary, not transport
+    - preserve RPCChannel as transport-neutral
+    - preserve acknowledgement as communication handling, not operation outcome
+    - preserve routing as not authority
+    - preserve request acceptance as not final success
+    - preserve RPC request as not Job and not OrchestrationUnit
+    - preserve subscription delivery as not domain truth
+    - preserve transport timeout, disconnect, and cancellation as not domain
+      outcomes
+    - preserve DA-03 trace substrate ownership and keep RPC trace as RPC-domain
+      emission obligation
+    - clarify DA-23 / DA-27 split where adapter lifecycle is named
+    - use ExecutionAdapter where the canonical umbrella type is meant
+    - translate AppInstance wording to Application/ApplicationRun where any stale
+      wording remains
+
+Use REWRITE-DA-21 only as translated boundary-preservation guidance. Do not copy
+process metadata or obsolete wording into the final DA.
+
+Do not include audit/source metadata or version/process framing in the final
+DA-21 documentation. The final DA-21 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-21 should remain the abstract RPC, RPCChannel, transport, routing,
+request/reply/error/acknowledgement, emit/subscribe/cancel, timeout/disconnect,
+correlation, and RPC-domain trace document.
+
+DA-21 should not become:
+
+    - concrete JSON envelope specification
+    - concrete WebSocket flow specification
+    - trace substrate specification
+    - capability/permission specification
+    - user-decision/policy specification
+    - Job lifecycle specification
+    - Application/ApplicationRun lifecycle specification
+    - execution adapter boundary specification
+    - adapter lifecycle specification
+    - frontend UI specification
+    - RuntimeHost lifecycle/command/entry/workspace specification
+    - OrchestrationUnit lifecycle or mutation-authority specification
+    - Window finalization specification
+    - artifact/export specification
+    - comparison / Replay / Resume / Retry / audit workflow specification
+    - PackManager operation specification
+    - concrete transport implementation specification
+
+The main work is to preserve DA-21's strong communication-boundary model while
+removing stale Session wording, clarifying adapter ownership split, and keeping
+artifact/workflow/result meanings in their owning DAs.
+
+==============================================================================
+END OF AUDIT RESULT - DA-21
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-21
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-21_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------

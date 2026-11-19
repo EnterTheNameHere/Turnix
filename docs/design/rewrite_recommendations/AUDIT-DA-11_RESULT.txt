@@ -1,0 +1,766 @@
+==============================================================================
+AUDIT RESULT - DA-11 GENERIC RESOLUTION SEMANTICS
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-11_GENERIC_RESOLUTION_SEMANTICS.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-11_RECOMMENDATION.txt
+
+Files read for this audit turn:
+    docs/design/rewrite_recommendations/REWRITE-DA-11_RECOMMENDATION.txt
+    docs/design/DA-11_GENERIC_RESOLUTION_SEMANTICS.txt
+
+Standing audit context:
+    docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Correct in substance.
+
+    The recommendation correctly classifies DA-11 as compatible and advises a
+    targeted edit, not a heavy rewrite.
+
+Document verdict:
+    Keep with targeted boundary, terminology, owner-reference, and trace wording
+    fixes.
+
+DA-11 should remain the generic, dependency-agnostic, side-effect-free resolution
+mechanics document.
+
+DA-11 owns:
+
+    - PackRequest grammar
+    - PackRequest parsing and internal representation
+    - candidate enumeration
+    - whole-candidate comparison
+    - candidate equivalence / non-equivalence handling
+    - hard and soft constraint application
+    - deterministic selection contract
+    - ambiguity and failure signaling
+    - resolution-domain observability and resolution reason identifiers
+
+DA-11 does not own discovery, pack identity semantics, dependency meaning,
+activation, importing, runtime loading, PackManager repair, user-decision policy,
+capability permission, Job lifecycle, OrchestrationUnit lifecycle, RuntimeHost
+semantics, adapter lifecycle, SaveBundle behavior, Application/ApplicationRun
+lifecycle, or committed-state authority.
+
+Primary required fixes:
+
+    - preserve resolution as side-effect-free deterministic selection from an
+      already-built registry snapshot
+    - keep PackRequest syntax as identity/request syntax, not filesystem syntax
+    - keep PackRequest internal representation carrying request identity and
+      request constraints, not higher-level policy
+    - preserve structural candidate enumeration as candidate discovery within the
+      already-built snapshot, not winner selection
+    - preserve whole-candidate comparison and avoid manifest merging or synthetic
+      candidate composition
+    - preserve candidate equivalence as single deterministic winner plus
+      shadowed-equivalent diagnostics, not multiple winners
+    - preserve hard constraints as exclusion and soft constraints as
+      discouragement
+    - preserve one explicit consumer-supplied resolution context per resolution
+      attempt
+    - preserve deterministic ordering as explicit and consumer-supplied
+    - preserve explicit ambiguity and external decision handling
+    - preserve explicit classified resolution failure and no silent fallback
+    - strengthen the source-level boundary that resolution selects; it does not
+      make runtime meaning
+    - translate stale AppInstance and SavePack wording to Application /
+      ApplicationRun / SaveBundle terminology where relevant
+    - update owner stop-lines for DA-03, DA-09, DA-10, DA-12, DA-13, DA-14,
+      DA-16, DA-17, DA-19, DA-20, DA-21, DA-23, DA-24, DA-27, DA-28, and DA-29
+      where relevant
+    - refine trace wording so DA-03 owns trace substrate, retention, loss, trace
+      DAG, event structure, and span semantics while DA-11 owns resolution-domain
+      trace reason identifiers
+    - clean up local numbering gaps and duplicate subsection numbering where
+      stable references matter
+    - avoid final-document rewrite/process metadata leakage
+
+Primary conclusion:
+    Keep DA-11. The work is boundary tightening and terminology modernization,
+    not conceptual replacement.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-11 should not preserve older terms merely because they appear in older source
+material or recommendation text.
+
+Specifically, the rewrite should not preserve as current terminology:
+
+    - AppInstance where Application or ApplicationRun is meant
+    - AppInstance lifecycle where Application/ApplicationRun lifecycle is meant
+    - SavePack where SaveBundle is meant
+    - SavePack-local resolution where SaveBundle-local resolution or retained
+      SaveBundle-local Pack material is meant
+    - PackContext as activation authority wording where ModCallContext or DA-14
+      activation-phase authority is meant
+    - resolution context as hidden policy carrier
+    - PackManager graph preparation as resolution authority
+    - discovery/root precedence as universal resolution ordering
+    - trace evidence as resolution truth beyond retained evidence
+    - origin as authenticity proof
+    - equivalence as multiple loaded winners
+    - ambiguity as resolver-owned policy persistence
+
+Canonical translations:
+
+    AppInstance -> ApplicationRun where one live execution/incarnation is meant
+    AppInstance -> Application where durable Application identity is meant
+    appInstanceId -> applicationRunId where live execution identity is meant
+    appInstanceId -> applicationId only where durable Application identity is meant
+    SavePack -> SaveBundle where durable persistence closure is meant
+    SavePack-local -> SaveBundle-local where persistent closure scope is meant
+    PackContext -> ModCallContext only where invocation-scoped Pack facade is meant
+    PackContext -> DA-14 activation context/entry context only where activation
+        lifecycle participation is meant
+
+Important clarification:
+    DA-11 already strongly defines resolution as side-effect-free mechanics. Do
+    not rewrite that away. The necessary edit is to remove stale terms, tighten
+    owner stop-lines, and avoid over-broad context/ordering assumptions.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-11 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, resolution no longer activates packs.
+    - The audit decided to keep DA-11.
+    - The recommendation says no heavy rewrite.
+    - This rewrite adds DA-28 and DA-29 stop-lines.
+    - Codex preserved stale AppInstance wording.
+
+Those facts may be useful in audit files, migration notes, compatibility notes,
+branch notes, changelogs, or explicitly historical documents. They do not belong
+in the architecture document itself.
+
+The final DA-11 should simply define generic resolution mechanics.
+
+==============================================================================
+02. WHAT DA-11 GETS RIGHT
+==============================================================================
+
+02.1. Resolution is correctly side-effect-free
+----------------------------------------------
+
+DA-11 correctly says resolution answers which concrete pack identity satisfies a
+PackRequest inside the current resolution context.
+
+It also correctly says resolution is side-effect-free and consumes a PackRequest,
+a snapshot of discovered/indexed pack descriptors, and a higher-consumer-supplied
+resolution context.
+
+Preserve this.
+
+02.2. Discovery and resolution are correctly separated
+------------------------------------------------------
+
+DA-11 correctly says discovery builds the candidate universe and resolution
+selects from that already-built universe.
+
+Preserve this. Do not allow resolution to rescan files, lazily read manifests, or
+repair discovery output.
+
+02.3. PackRequest grammar is strong
+-----------------------------------
+
+DA-11 correctly defines PackRequest grammar:
+
+    [<author>@]<packTreeId>[@<semverRequirement>]
+
+It correctly keeps syntax case-sensitive, forbids filesystem paths and slashes,
+allows dots only for hierarchy, and avoids implicit defaults inside the raw
+reference string.
+
+Preserve this.
+
+02.4. Single-@ disambiguation is deterministic
+----------------------------------------------
+
+DA-11 correctly says a single @ suffix is parsed first as semantic-version
+requirement, and if that parsing fails, it is treated as author.
+
+Preserve this unless a later syntax design intentionally changes it.
+
+02.5. PackRequest carries request, not policy
+---------------------------------------------
+
+DA-11 correctly says PackRequest is immutable and carries only normalized request
+identity and request constraints, not optionality, source preference, prerelease
+allowance, or persisted ambiguity decisions.
+
+Preserve this.
+
+02.6. Candidate enumeration is correctly structural
+---------------------------------------------------
+
+DA-11 correctly says enumeration matches packTreeId, author, kind, and collects
+remaining structurally compatible candidates without ordering, preference,
+fallback, optionality, or winner selection.
+
+Preserve this.
+
+02.7. Whole-candidate boundary is strong
+----------------------------------------
+
+DA-11 correctly says resolution operates on whole discovered candidate artifacts
+and does not merge duplicate manifests, stack fields, or compose synthetic
+candidates from shadowed candidates.
+
+Preserve this.
+
+02.8. Candidate equivalence is correctly bounded
+------------------------------------------------
+
+DA-11 correctly says equivalent candidates do not all load or all become winners;
+the first equivalent candidate in deterministic order wins, and later equivalent
+candidates remain shadowed-equivalent diagnostics.
+
+Preserve this.
+
+02.9. Hard and soft constraints are distinct
+--------------------------------------------
+
+DA-11 correctly says hard constraints exclude candidates, while soft constraints
+discourage selection without erasing candidate identity.
+
+Preserve this.
+
+02.10. Ambiguity and failure are explicit
+-----------------------------------------
+
+DA-11 correctly says ambiguity requires external decision and the generic resolver
+does not guess or auto-persist decisions. It also correctly says failures are
+explicit, classified, observable, and never fall back silently.
+
+Preserve this.
+
+==============================================================================
+03. REQUIRED FIX: SOURCE-LEVEL BOUNDARY STATEMENT
+==============================================================================
+
+Add or preserve a compact boundary statement near the core concept or locked
+summary.
+
+Recommended source-level boundary:
+
+    Resolution is side-effect-free deterministic selection from an already-built
+    snapshot of discovered and indexed pack descriptors.
+
+    Resolution consumes one PackRequest, one registry snapshot, and one explicit
+    consumer-supplied resolution context.
+
+    Resolution does not discover, index, merge manifests, lazily read manifests,
+    switch context, guess policy, persist ambiguity decisions, activate packs,
+    import code, load runtimes, grant runtime access, grant capability
+    permission, define user-decision policy, or define runtime lifecycle
+    outcomes.
+
+    Resolution output is either one resolved concrete pack identity, one
+    classified resolution failure, or one classified ambiguity requiring external
+    decision.
+
+This is the central DA-11 boundary.
+
+==============================================================================
+04. REQUIRED FIX: RESOLUTION CONTEXT IS EXPLICIT AND CONSUMER-SUPPLIED
+==============================================================================
+
+DA-11 already states that resolution always occurs inside one explicit resolution
+context and that the generic resolver does not invent or switch context.
+
+Preserve and strengthen this.
+
+Recommended wording:
+
+    The resolution context is supplied by the surrounding consumer.
+
+    The generic resolver does not create, infer, switch, mix, or persist a
+    resolution context.
+
+    A resolution attempt has exactly one active resolution context.
+
+    If a consumer wants source preference, prerelease rules, save-local graph
+    intent, selected graph restoration, pinned graph evidence, or user-selected
+    override behavior, that consumer must supply those semantics explicitly in
+    its context or pre-resolution candidate population.
+
+    DA-11 does not define those consumer policies.
+
+This prevents resolution context from becoming hidden policy authority.
+
+==============================================================================
+05. REQUIRED FIX: ORDERING IS EXPLICIT AND CONSUMER-SUPPLIED
+==============================================================================
+
+DA-11 correctly says deterministic ordering is stable, reproducible, independent
+of incidental iteration order, free of randomness, and supplied by the surrounding
+consumer.
+
+Preserve this.
+
+Recommended boundary:
+
+    DA-11 defines the requirement that selection order be total and deterministic.
+
+    DA-11 does not define every consumer's ordering policy.
+
+    Discovery/root precedence such as custom > first-party > third-party may be
+    one consumer-provided ordering input, but it must not silently override
+    SaveBundle-local material, selected graph intent, pinned graph evidence,
+    explicit user choice, Application semantics, ApplicationRun semantics, or
+    consumer-specific source policy unless an owning document says so.
+
+==============================================================================
+06. REQUIRED FIX: CANDIDATE EQUIVALENCE IS NOT AUTHENTICITY
+==============================================================================
+
+DA-11 correctly says candidate origin alone does not prove authenticity.
+
+Preserve and make the boundary explicit:
+
+    Candidate equivalence is comparison equivalence for the current resolution
+    purpose.
+
+    Fingerprint equivalence, where available and relevant, means the full
+    fingerprint strings are equal.
+
+    Origin context may be surfaced for explanation.
+
+    Origin alone is not authenticity proof.
+
+    Same canonicalPackId and packVersion with different fingerprints are
+    candidate divergence, not equivalent candidates.
+
+    Warning, allow, deny, remember, or user-decision behavior for divergence is
+    owned by DA-17 and the surrounding consumer, not DA-11.
+
+==============================================================================
+07. REQUIRED FIX: AMBIGUITY IS EXTERNAL DECISION, NOT RESOLVER POLICY
+==============================================================================
+
+DA-11 correctly says ambiguity pauses resolution and requires external policy or
+user decision.
+
+Preserve and strengthen:
+
+    The generic resolver does not guess.
+
+    The generic resolver does not persist ambiguity decisions.
+
+    The surrounding consumer or DA-17-mediated decision handling owns user-facing
+    warning, allow, deny, remember, and remembered-decision behavior.
+
+    Once an external decision is made, any persistence of that decision is owned
+    by the consumer / DA-17 / DA-06 policy-storage boundary, not by generic
+    resolution.
+
+==============================================================================
+08. REQUIRED FIX: RESOLUTION IS NOT ACTIVATION, IMPORTING, OR RUNTIME LOADING
+==============================================================================
+
+DA-11 already says resolution does not load code, activate packs, guarantee
+execution order, or grant runtime access.
+
+Preserve and update owner references:
+
+    DA-12 owns importing and module-loading rules.
+
+    DA-14 owns activation lifecycle, activation phases, cycle handling, and final
+    Activated state.
+
+    DA-23 owns abstract execution adapter authority boundaries.
+
+    DA-27 owns adapter lifecycle, trust, isolation, failure, and disconnect
+    semantics.
+
+    DA-28 owns RuntimeHost workspace ownership and command-surface semantics.
+
+    DA-11 may select a concrete pack identity that later domains use, but it does
+    not make that later identity active, imported, loaded, executable, trusted, or
+    runtime-authorized.
+
+==============================================================================
+09. REQUIRED FIX: RESOLUTION IS NOT DEPENDENCY MEANING
+==============================================================================
+
+DA-11 is dependency-agnostic.
+
+Preserve:
+
+    DA-13 owns dependency meaning, dependency strength, provider-role, pinned,
+    copied, source-specific dependency policy, advisory relation semantics, and
+    graph intent.
+
+    DA-11 may be invoked by DA-13 or graph-building consumers to resolve a
+    PackRequest, but DA-11 does not decide whether a dependency is hard, soft,
+    advisory, copied, pinned, provider-role, or source-specific.
+
+    Request strength or optionality is outside DA-11.
+
+==============================================================================
+10. REQUIRED FIX: RESOLUTION IS NOT PACKMANAGER REPAIR
+==============================================================================
+
+DA-29 owns PackManager catalog, graph-preparation, repair, View, write, and
+PackManager-domain trace semantics.
+
+DA-11 should not become PackManager repair authority.
+
+Recommended boundary:
+
+    PackManager may invoke generic resolution as one step in graph preparation or
+    repair analysis.
+
+    Invoking resolution does not transfer PackManager repair, write, catalog,
+    View, or graph-preparation authority to DA-11.
+
+    DA-11 returns resolved identity, ambiguity, or failure. It does not repair
+    catalog state or mutate graph intent.
+
+==============================================================================
+11. REQUIRED FIX: APPLICATION / APPLICATIONRUN / SAVEBUNDLE TERMINOLOGY
+==============================================================================
+
+DA-11 recommendation text still uses AppInstance and SavePack in guardrail
+examples.
+
+Translate where those ideas are retained in the final DA-11 text:
+
+    AppInstance -> ApplicationRun
+        where one live execution/incarnation is meant
+
+    AppInstance -> Application
+        where durable Application identity is meant
+
+    AppInstance lifecycle -> Application/ApplicationRun lifecycle
+        if both durable and live identity domains are involved
+
+    SavePack -> SaveBundle
+        where durable persistence closure is meant
+
+    SavePack-local resolution -> SaveBundle-local resolution or resolution over
+        SaveBundle-local retained Pack material, depending on meaning
+
+Do not expand DA-11 into Application/ApplicationRun or SaveBundle lifecycle. DA-20
+and SaveBundle-owner documents own those meanings.
+
+==============================================================================
+12. REQUIRED FIX: TRACE WORDING
+==============================================================================
+
+DA-11 correctly owns resolution observability and resolution-domain trace reason
+identifiers.
+
+Refine wording so DA-03 remains trace-substrate owner.
+
+Recommended wording:
+
+    Resolution trace obligations are resolution-domain emission obligations.
+
+    DA-11 owns resolution-domain reason identifiers needed to explain candidate
+    enumeration, filtering, constraint rejection, soft discouragement, selection,
+    shadowed equivalence, ambiguity, and failure.
+
+    DA-03 owns trace substrate, trace retention, trace loss, trace DAG, event
+    structure, and span semantics.
+
+    Trace evidence does not become committed state.
+
+    Trace evidence is not resolution truth beyond retained evidence.
+
+This keeps DA-11 in the resolution-domain observability lane.
+
+==============================================================================
+13. REQUIRED FIX: LOCAL NUMBERING / REFERENCE CLEANUP
+==============================================================================
+
+DA-11 currently has local numbering issues that can affect stable reference use:
+
+    - section 02 jumps from 02.9 to 02.14
+    - section 10 contains both 10.1 constraint classes and 10.1 hard constraints
+      as a subsection
+    - later truncated target ranges suggest no conceptual loss, but stable
+      references should be normalized in the final document
+
+Normalize numbering without changing architecture meaning.
+
+This is not a heavy conceptual rewrite, but stable references matter in design
+area documents.
+
+==============================================================================
+14. WHAT TO PRESERVE FROM CURRENT DA-11
+==============================================================================
+
+Preserve these boundaries, translating stale terminology where needed:
+
+    - resolution mechanics only
+    - resolution is generic and dependency-agnostic
+    - resolution is side-effect-free
+    - resolution consumes one PackRequest, one registry snapshot, and one explicit
+      resolution context
+    - resolution returns exactly one resolved concrete pack identity, one
+      classified failure, or one classified ambiguity
+    - same inputs and same context produce same outcome
+    - resolver does not mutate the registry snapshot
+    - resolver does not trigger new discovery
+    - resolver does not combine partial candidate data into a new candidate
+    - PackRequest grammar is identity/request syntax, not filesystem syntax
+    - PackRequest is immutable after creation
+    - PackRequest carries request constraints, not higher-level policy
+    - candidate enumeration is structural only
+    - resolution operates on whole discovered candidate artifacts
+    - duplicate manifest candidates are not merged
+    - equivalent candidates select one deterministic winner
+    - shadowed-equivalent candidates remain observable
+    - same canonicalPackId and packVersion with different fingerprints are
+      non-equivalent
+    - origin alone is not authenticity proof
+    - hard constraints permanently exclude
+    - soft constraints discourage without erasing candidate identity
+    - resolution context is explicit and not invented
+    - deterministic ordering is total and consumer-supplied
+    - no silent substitution
+    - ambiguity is explicit and externally resolved
+    - generic resolver does not auto-persist decisions
+    - resolution failure is explicit, classified, observable, and never silently
+      falls back
+    - resolution is not activation
+    - resolution-domain trace reason identifiers are DA-11-owned
+
+==============================================================================
+15. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    resolution context supplied by a higher consumer
+        -> explicit consumer-supplied resolution context
+
+    registry snapshot
+        -> already-built snapshot of discovered and indexed pack descriptors
+        where clarity is needed
+
+    AppInstance
+        -> ApplicationRun where live execution identity is meant
+        -> Application where durable identity is meant
+
+    AppInstance lifecycle
+        -> Application/ApplicationRun lifecycle
+
+    SavePack
+        -> SaveBundle where durable persistence closure is meant
+
+    SavePack-local resolution
+        -> SaveBundle-local resolution or resolution over SaveBundle-local
+           retained Pack material, depending on intended meaning
+
+    PackContext authority
+        -> DA-14 activation context or DA-30 ModCallContext, depending on intended
+           meaning
+
+    resolution trace evidence is resolution truth
+        -> retained trace evidence may explain resolution behavior, but DA-03 owns
+           trace substrate/retention/loss and trace evidence is not committed state
+
+    external policy or user decision is required
+        -> external DA-17-mediated decision or consumer-supplied policy is required,
+           depending on the caller
+
+    consumer-specific strategy
+        -> consumer-supplied context, policy, and ordering criteria
+
+    resolution failure never falls back silently
+        -> keep
+
+    resolution is not activation
+        -> keep and expand with DA-12 / DA-14 / DA-23 / DA-27 / DA-28 ownership
+           where needed
+
+==============================================================================
+16. ACCEPTANCE CONDITIONS FOR THE REVISED DA-11
+==============================================================================
+
+A revised DA-11 is acceptable when all of the following are true:
+
+    - It keeps DA-11 focused on generic, side-effect-free resolution mechanics.
+
+    - It preserves PackRequest grammar and deterministic single-@ disambiguation.
+
+    - It preserves PackRequest as immutable request representation, not policy.
+
+    - It preserves structural candidate enumeration.
+
+    - It preserves the whole-candidate boundary and does not merge manifests.
+
+    - It preserves candidate equivalence as one deterministic winner plus
+      shadowed-equivalent diagnostics, not multiple winners.
+
+    - It preserves same-identity same-version fingerprint difference as
+      candidate divergence / non-equivalence.
+
+    - It preserves origin as context, not authenticity proof.
+
+    - It preserves hard constraints as exclusion and soft constraints as
+      discouragement.
+
+    - It preserves explicit consumer-supplied resolution context.
+
+    - It preserves deterministic consumer-supplied ordering.
+
+    - It preserves explicit ambiguity and external decision handling.
+
+    - It preserves explicit classified failure and no silent fallback.
+
+    - It keeps DA-03 as trace substrate, retention, loss, trace DAG, event
+      structure, and span owner.
+
+    - It keeps DA-09 as discovery/root/candidate-production owner.
+
+    - It keeps DA-10 as pack identity, hierarchy, and visibility owner.
+
+    - It keeps DA-12 as importing and module-loading owner.
+
+    - It keeps DA-13 as dependency meaning, dependency strength, and graph intent
+      owner.
+
+    - It keeps DA-14 as activation lifecycle owner.
+
+    - It keeps DA-16 as service/capability/permission owner.
+
+    - It keeps DA-17 as warning/allow/deny/remember/user-decision and remembered
+      policy owner.
+
+    - It keeps DA-19 as Job lifecycle and terminal outcome owner.
+
+    - It keeps DA-20 as Application/ApplicationRun lifecycle and runtime identity
+      owner.
+
+    - It keeps DA-21 as RPC/channel/transport owner.
+
+    - It keeps DA-23/DA-27 as ExecutionAdapter boundary/lifecycle/trust/isolation
+      owners.
+
+    - It keeps DA-24 as OrchestrationUnit lifecycle and mutation-authority owner.
+
+    - It keeps DA-28 as RuntimeHost workspace and command-surface owner.
+
+    - It keeps DA-29 as PackManager graph-preparation/repair/catalog/View/write
+      owner.
+
+    - It translates AppInstance / SavePack wording to Application / ApplicationRun
+      / SaveBundle terminology where appropriate.
+
+    - It does not include audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+    - It normalizes numbering enough that stable references are not ambiguous.
+
+==============================================================================
+17. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-11.
+
+Do not perform a heavy conceptual rewrite.
+
+Make targeted edits:
+
+    - keep resolution as side-effect-free selection from an already-built registry
+      snapshot
+    - keep PackRequest syntax as identity/request syntax
+    - keep PackRequest internal representation carrying request, not policy
+    - keep candidate enumeration structural only
+    - keep resolution operating on whole discovered candidates
+    - keep candidate equivalence from becoming multiple winners
+    - keep hard constraints excluding and soft constraints discouraging
+    - keep resolution context explicit and consumer-supplied
+    - keep deterministic ordering explicit and consumer-supplied
+    - keep ambiguity explicit and externally resolved
+    - keep resolution failure explicit and classified
+    - keep resolution separate from discovery, indexing, visibility computation,
+      dependency meaning, dependency strength, save-specific override policy,
+      user-decision policy, PackManager repair, activation, importing, runtime
+      loading, execution order, capability permission, Job lifecycle,
+      OrchestrationUnit lifecycle, RuntimeHost semantics, adapter lifecycle,
+      Application/ApplicationRun lifecycle, SaveBundle runtime behavior, and
+      committed-state authority
+    - translate AppInstance / SavePack wording to Application / ApplicationRun /
+      SaveBundle terminology where appropriate
+    - refine trace wording so DA-03 remains trace substrate, retention, loss,
+      trace DAG, event structure, and span owner
+    - normalize numbering gaps and duplicate subsection numbering
+
+Do not include audit/source metadata or version/process framing in the final
+DA-11 documentation. The final DA-11 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-11 should remain the PackRequest grammar, request parsing, candidate
+enumeration, whole-candidate comparison, constraint application, deterministic
+selection, ambiguity/failure signaling, and resolution-domain observability
+document.
+
+DA-11 should not become:
+
+    - discovery specification
+    - pack identity / visibility specification
+    - dependency meaning / dependency strength specification
+    - save-specific override policy specification
+    - user-decision policy specification
+    - PackManager repair specification
+    - activation lifecycle specification
+    - importing/module-loading specification
+    - runtime loading specification
+    - execution order specification
+    - capability permission specification
+    - Job lifecycle specification
+    - OrchestrationUnit lifecycle specification
+    - RuntimeHost workspace/command-surface specification
+    - adapter lifecycle/trust/isolation specification
+    - Application/ApplicationRun lifecycle specification
+    - SaveBundle runtime behavior specification
+    - committed-state authority specification
+
+The main work is to preserve generic resolution as deterministic selection while
+preventing context, ordering, ambiguity, or candidate-equivalence rules from
+silently becoming cross-domain authority.
+
+==============================================================================
+END OF AUDIT RESULT - DA-11
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-11
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-11_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------

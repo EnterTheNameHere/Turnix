@@ -1,0 +1,584 @@
+===============================================================================
+DESIGN AREA DA-30 - MODCALLCONTEXT INVOCATION GATEWAY SEMANTICS
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines ModCallContext as the invocation-scoped, Pack-bound gateway supplied
+to Pack callbacks and handlers invoked by Tertalis.
+
+Purpose:
+--------
+This document defines the identity, lifetime, bindings, authority limits,
+facade shape, and cross-document relationships of ModCallContext.
+
+It defines:
+- ModCallContext as a first-class Tertalis type
+- invocation-scoped and Pack-bound gateway semantics
+- fresh context creation for each callback or invocation
+- identity and current bindings that may be carried by a context
+- non-retention after callback or invocation completion
+- registration behavior for callbacks and metadata
+- the conceptual Pack-facing facade set
+- surfaces that ModCallContext explicitly does not expose
+- relationships to ExecutionAdapter, Memory, configuration, resources, I/O,
+  trace, capabilities, Jobs, hooks, processing, events, and timers
+- the absence of Session from ModCallContext and the core callback model
+
+It does NOT define:
+- Session as a core Tertalis concept
+- exact host-language API shapes
+- concrete context-object serialization
+- ExecutionAdapter lifecycle or trust policy
+- Memory commit rules
+- configuration materialization rules
+- persistent I/O storage layout
+- capability grant policy
+- event or timer schemas
+- ProcessingRun participation-policy schemas
+- trace record serialization
+
+Upstream Documents:
+-------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-06
+- DA-07
+- DA-14
+- DA-16
+- DA-19
+- DA-20
+- DA-23
+- DA-24
+
+
+===============================================================================
+01. DOCUMENT ROLE
+===============================================================================
+
+01.01. ModCallContext is a first-class Tertalis type.
+
+01.02. ModCallContext is the invocation-scoped, Pack-bound gateway through
+      which Pack callbacks and handlers invoked by Tertalis interact with
+      platform-mediated operations.
+
+01.03. Pack code receives only the operations exposed through the current
+      ModCallContext.
+
+01.04. The exposed operations are limited to operations granted for the
+      current invocation.
+
+01.05. Tertalis supplies ModCallContext to Pack code invoked through platform
+      entrypoints such as:
+      - onLoad(ctx, ...)
+      - onEntryLoaded(ctx, ...)
+      - onEntriesLoaded(ctx, ...)
+      - eventHandler(ctx, event)
+      - timerHandler(ctx, timer)
+      - processingHook(ctx, stage)
+      - capabilityHandler(ctx, request)
+
+01.06. ModCallContext is not Kernel authority.
+
+01.07. ModCallContext is not a Session.
+
+01.08. The core callback model does not require Session identity for Pack
+      callbacks, ApplicationRuns, Jobs, Events, Timers, capabilities,
+      ProcessingRuns, or Views.
+
+
+===============================================================================
+02. LIFETIME AND RETENTION
+===============================================================================
+
+02.01. Tertalis creates a fresh ModCallContext for each callback or invocation
+      that needs Pack-facing platform access.
+
+02.02. A ModCallContext is invocation-scoped.
+
+02.03. Pack code does not retain a ModCallContext after the callback or
+      invocation completes.
+
+02.04. A retained host-language reference to a ModCallContext is invalid
+      after callback or invocation completion.
+
+02.05. A ModCallContext may also become invalid when:
+      - the OrchestrationUnit ends
+      - the Transaction commits or aborts
+      - the ProcessingRun advances stage
+      - the Job becomes terminal
+      - the cancellation scope ends
+      - the permission scope changes
+
+02.06. Registrations retain owner identity, callback endpoint, metadata, and
+      registration scope.
+
+02.07. Registrations do not retain the ModCallContext that created them.
+
+02.08. When a retained registration later fires, Tertalis constructs a fresh
+      ModCallContext for that callback invocation.
+
+
+===============================================================================
+03. IDENTITY AND CURRENT BINDINGS
+===============================================================================
+
+03.01. ModCallContext may expose read-only identity information for the
+      current invocation.
+
+03.02. Identity information may include:
+      - applicationId
+      - applicationRunId
+      - actingPackId
+      - invocationId
+      - correlation descriptors
+      - cause descriptors
+
+03.03. Pack code cannot replace actingPackId, applicationId, or
+      applicationRunId through ModCallContext.
+
+03.04. ModCallContext may expose read-only current bindings for the current
+      invocation.
+
+03.05. Current bindings may include:
+      - OrchestrationUnit
+      - Transaction
+      - Job
+      - ProcessingRun
+      - ProcessingPipeline stage
+      - lifecycle phase
+      - Event
+      - Timer
+      - capability invocation
+      - View, when relevant
+      - cancellation state
+      - deadline state
+      - granted operations
+
+03.06. Bindings are present only when meaningful for the current invocation.
+
+03.07. Absence of a binding means the invocation has no authority or identity
+      for that concept.
+
+03.08. ModCallContext does not fabricate missing authority merely to provide a
+      convenient API shape.
+
+
+===============================================================================
+04. AUTHORITY MODEL
+===============================================================================
+
+04.01. Kernel authority remains in the Kernel and platform-controlled
+      services.
+
+04.02. ModCallContext exposes mediated operations only.
+
+04.03. Gateway operations are constrained by:
+      - the acting Pack
+      - the current Application
+      - the current ApplicationRun
+      - granted capabilities
+      - current lifecycle phase
+      - current OrchestrationUnit
+      - current Transaction
+      - cancellation state
+      - deadline state
+      - stage-specific granted operations
+      - stage-specific permissions
+
+04.04. ModCallContext does not grant raw file access, raw transport access,
+      adapter control, debugger control, host command access, direct
+      SaveBundle mutation, or backend service access unless a separate
+      mediated operation explicitly exposes narrow controlled behavior.
+
+04.05. ModCallContext can request Memory reads or mutations only through the
+      rules owned by DA-04 and DA-24.
+
+04.06. ModCallContext can use capability operations only through the rules
+      owned by DA-16.
+
+04.07. ModCallContext can observe or contribute trace evidence only through
+      trace-mediated surfaces and applicable trace schemas.
+
+04.08. ModCallContext does not combine Memory, configuration, and trace into
+      a single state authority.
+
+04.09. Ordinary Pack code does not directly commit Transactions through
+      ModCallContext.
+
+04.10. Ordinary Pack code does not directly assign terminal Job state
+       through ModCallContext.
+
+
+===============================================================================
+05. FACADE SHAPE
+===============================================================================
+
+05.01. The exact host-language API shape remains implementation and
+      implementation-specification work.
+
+05.02. The conceptual Pack-facing facade set is:
+      - identity
+      - current
+      - execution
+      - memory
+      - config
+      - permissions
+      - capabilities
+      - jobs
+      - hooks
+      - processing
+      - events
+      - timers
+      - resources
+      - io
+      - trace
+
+05.03. Representation differences across host languages and adapters do not
+      change ModCallContext meaning.
+
+05.04. ModCallContext exposes Pack-facing mediated facades.
+
+05.05. ModCallContext does not expose backend service objects.
+
+05.06. A facade name identifies a responsibility boundary.
+
+05.07. A facade name does not by itself define exact method names, argument
+      shapes, return shapes, serialization, or host-language syntax.
+
+
+===============================================================================
+06. EXPLICITLY ABSENT SURFACES
+===============================================================================
+
+06.01. ModCallContext does not expose:
+      - ctx.kernel
+      - ctx.runtimeHost
+      - ctx.services
+      - ctx.journal
+      - ctx.rawFilesystem
+      - ctx.transaction.commit
+      - ctx.job.setTerminalState
+      - ctx.sessions
+
+06.02. These absences prevent Pack code from bypassing Kernel authority,
+      OrchestrationUnit authority, transaction ownership, Job lifecycle
+      ownership, Session removal, and I/O mediation.
+
+06.03. Ordinary Pack code does not receive raw service objects.
+
+06.04. Internal services remain trusted runtime wiring.
+
+06.05. Pack code provides operations by registering capability handlers.
+
+06.06. Pack code consumes operations by invoking capabilities.
+
+06.07. Ordinary Pack code does not receive a generic journal facade.
+
+06.08. Journal is runtime-generated or domain-generated retained evidence.
+
+06.09. Pack-facing needs for evidence, notification, state, and retained data
+      are covered through trace, events, memory, and mediated I/O.
+
+06.10. A future domain may define a narrow typed journal operation.
+
+06.11. DA-30 does not expose append-anything journal access.
+
+
+===============================================================================
+07. EXECUTIONADAPTER RELATIONSHIP
+===============================================================================
+
+07.01. ExecutionAdapters host Pack code and deliver callbacks under the
+      execution-boundary rules owned by DA-23.
+
+07.02. Tertalis may represent ModCallContext differently across host languages
+      and adapters.
+
+07.03. Representation differences do not change ModCallContext semantics.
+
+07.04. An ExecutionAdapter does not own ModCallContext authority.
+
+07.05. An ExecutionAdapter conveys the context to Pack code.
+
+07.06. An ExecutionAdapter enforces the lifetime and boundary requirements
+      assigned to that adapter.
+
+07.07. Same-language Pack code does not bypass ModCallContext merely because
+      it shares a language with platform implementation code.
+
+07.08. Same-process Pack code does not bypass ModCallContext merely because
+      direct calls are physically possible.
+
+
+===============================================================================
+08. MEMORY, CONFIGURATION, RESOURCES, I/O, AND TRACE
+===============================================================================
+
+08.01. ctx.memory provides scoped authoritative-state access only when the
+      current invocation has state authority.
+
+08.02. Memory writes through ModCallContext stage into the current
+      Transaction.
+
+08.03. Memory writes through ModCallContext do not directly change committed
+      state.
+
+08.04. If the callback is read-only, write operations are absent or rejected.
+
+08.05. ctx.config provides scoped configuration access.
+
+08.06. Effective configuration, save-bound configuration, Pack-global
+      configuration, and workspace/runtime configuration are distinct
+      configuration scopes.
+
+08.07. The acting Pack does not gain another Pack's private configuration
+      through ModCallContext.
+
+08.08. Configuration writes through ModCallContext remain scoped and
+      transactional when they affect authoritative Application state.
+
+08.09. ctx.resources provides mediated read-only access to Pack-authored
+      resources.
+
+08.10. Pack-authored resources may include prompts, templates, schemas,
+       assets, and static authored data.
+
+08.11. ctx.resources avoids broad persistent I/O for ordinary reads of
+       Pack-owned files.
+
+08.12. ctx.io provides mediated scoped I/O.
+
+08.13. ctx.io does not expose unrestricted raw filesystem access.
+
+08.14. ctx.io does not expose direct SaveBundle-directory mutation.
+
+08.15. Scoped I/O may cover Application data, SaveBundle data, Pack-global
+       userdata, and explicitly granted external paths.
+
+08.16. I/O writes through ModCallContext remain permission checked, root
+       constrained, IoManager mediated, trace-visible, and atomic or staged
+       where required.
+
+08.17. ctx.trace records evidence and diagnostics correlated with the current
+       invocation.
+
+08.18. Trace evidence produced through ModCallContext does not become
+       committed-state authority.
+
+08.19. Pack code supplies domain metadata, result information, and reason
+       information through trace helpers.
+
+08.20. Pack code does not forge runtime correlation identity through trace
+       helpers.
+
+
+===============================================================================
+09. CAPABILITIES, JOBS, HOOKS, AND PROCESSING
+===============================================================================
+
+09.01. ctx.capabilities provides mediated registration, invocation, and
+      inspection where the current invocation allows those operations.
+
+09.02. Capability registration and invocation are attributed to the acting
+      Pack and current Application.
+
+09.03. Capability provider identity may vary.
+
+09.04. Service objects remain internal runtime wiring.
+
+09.05. ctx.jobs exposes observable work-lifecycle operations where the
+      current invocation allows those operations.
+
+09.06. A Job is an observable lifecycle handle.
+
+09.07. Pack code does not directly assign terminal Job state.
+
+09.08. ctx.hooks exposes registration and current-hook inspection where the
+      current invocation allows those operations.
+
+09.09. Hook registrations retain owner Pack, ProcessingPipeline stage,
+      callback endpoint, scope, and participation policy.
+
+09.10. Hook registration normally affects future ProcessingRuns.
+
+09.11. Hook registration does not retroactively join a currently executing
+       ProcessingRun unless a specific current-run mechanism is defined.
+
+09.12. Processing hooks receive a context bound to the ProcessingRun,
+       ProcessingPipeline stage, and relevant OrchestrationUnit when those
+       bindings exist.
+
+09.13. A Hook does not borrow the original requester's authority.
+
+09.14. ctx.processing creates or controls ProcessingRuns through Tertalis.
+
+09.15. Tertalis handles ProcessingRun creation, ProcessingPipeline selection,
+       hook-plan snapshot, temporary staged state, streaming, retry or
+       restart, cancellation, structured errors, nested Transaction, and Job
+       creation where needed.
+
+09.16. Processing calls do not require a Session parameter as a core concept.
+
+09.17. Hooks are not Events.
+
+09.18. Processing hooks are not Pack lifecycle callbacks.
+
+
+===============================================================================
+10. EVENTS AND TIMERS
+===============================================================================
+
+10.01. Events are cheap semantic notifications.
+
+10.02. ctx.events exposes event emission, subscription, unsubscription, and
+      current-event inspection where the current invocation allows those
+      operations.
+
+10.03. Event callbacks receive a fresh ModCallContext bound to the Event and
+      cause that triggered the callback.
+
+10.04. Event listeners do not transform the emitted payload.
+
+10.05. Event listeners do not return a result used by the producer.
+
+10.06. Event listener order is not guaranteed unless a separate event-domain
+      contract defines ordering.
+
+10.07. Event listener failure does not retroactively fail completed producer
+      work.
+
+10.08. Lifecycle callbacks are not Events.
+
+10.09. Processing hooks are not Events.
+
+10.10. Timer registrations retain owner Pack, Application, schedule,
+       callback endpoint, lifetime, and policy metadata.
+
+10.11. Timer registrations do not retain old ModCallContext objects.
+
+10.12. Timer callbacks receive a fresh ModCallContext bound to the Timer and
+       cause that triggered the callback.
+
+10.13. Timer firing creates new orchestrated work.
+
+10.14. Persistent timers are Application state.
+
+10.15. Run-scoped timers disappear when the ApplicationRun ends.
+
+
+===============================================================================
+11. SESSION REMOVAL
+===============================================================================
+
+11.01. Session is not present in ModCallContext.
+
+11.02. ctx.sessions does not exist.
+
+11.03. Session-relative Memory does not exist in the core platform.
+
+11.04. The core model does not define Session as required for Pack callbacks,
+      ApplicationRuns, Jobs, Events, Timers, capabilities, ProcessingRuns,
+      or Views.
+
+11.05. Processing calls do not require a Session parameter.
+
+11.06. Application-defined interaction continuity that persists across runtime
+      boundaries belongs to Application-defined committed state, not to a
+      core Session type.
+
+11.07. Temporary interaction context belongs to OrchestrationUnit-scoped or
+      ProcessingRun-scoped state.
+
+11.08. Private or hidden processing belongs to ProcessingRun participation and
+      visibility policy.
+
+11.09. Application-defined context references may appear in ProcessingRun
+      requests.
+
+11.10. Tertalis does not interpret Application-defined context references as a
+       universal Session type.
+
+
+===============================================================================
+12. STOP-LINES
+===============================================================================
+
+12.01. This document does not define Application, ApplicationRun, AppPack, or
+      SaveBundle identity beyond the bindings a context may carry.
+
+12.02. This document does not define resolved pack graph construction,
+      activation-plan schemas, pack-entry selection, or Pack activation
+      phase semantics.
+
+12.03. This document does not define committed-state storage, Memory commit
+      rules, durable-save layout, Window retention, artifact export, Replay,
+      Resume, or Retry.
+
+12.04. This document does not define UI rendering, RPC transport schemas,
+      RuntimeHost command syntax, catalog operations, or PackManager
+      behavior.
+
+12.05. This document does not define exact host-language API shapes, context
+      serialization, exact permission-grant policy, exact Event schemas,
+      exact Timer schemas, exact ProcessingRun participation-policy schemas,
+      exact I/O URI/reference models, or adapter-specific invalidation
+      mechanics.
+
+12.06. This document does not define ExecutionAdapter lifecycle or trust
+      policy.
+
+12.07. This document does not define capability grant policy.
+
+12.08. This document does not define trace record serialization.
+
+12.09. This document does not define concrete facade method names.
+
+
+===============================================================================
+13. OPEN ISSUES
+===============================================================================
+
+13.01. OPEN: concrete host-language API shapes remain implementation or
+      implementation-specification work.
+
+13.02. OPEN: exact context field names and method names remain
+      implementation or implementation-specification work.
+
+13.03. OPEN: concrete context-object serialization remains outside this
+      document.
+
+13.04. OPEN: exact trace helper output remains implementation or
+      implementation-specification work.
+
+13.05. OPEN: exact ctx.io reference model remains future design or
+      implementation-specification work.
+
+13.06. OPEN: exact current-run hook participation mechanics remain future
+      design or implementation-specification work if needed.
+
+13.07. OPEN: exact adapter-specific invalidation behavior remains
+      adapter-specific implementation or implementation-specification work.
+
+
+===============================================================================
+END OF DA-30 - MODCALLCONTEXT INVOCATION GATEWAY SEMANTICS
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-30
+DOC_FILE: docs/design/DA-30_MODCALLCONTEXT_INVOCATION_GATEWAY_SEMANTICS.txt
+DOC_REV: 4
+DOC_GIT: fc124a6
+----------------

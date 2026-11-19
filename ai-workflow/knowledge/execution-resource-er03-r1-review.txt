@@ -1,0 +1,114 @@
+ER-03-R1 INDEPENDENT REVIEW / RESIDUAL R2 CLEANUP OWNERSHIP
+=========================================================
+Owner: Integration. Date: 2026-11-03.
+Reviewed correction: 00bb521d8c7587b98f8e627703390c169a86333b.
+Exact correction parent: a9f810d1f87fd948703f799eab44847cf0d6826b.
+Original source: 63931d5ba89d2e449894bce46ccc3fbd10c7c13f.
+Canonical report parent: 77367ae5cb180ac5351775f26f9cae4b8a2ad895.
+Worker: execution-resource-llamacpp. Authorization remains 445a4f9.
+
+Disposition
+-----------
+The original three R1 gate failures are corrected in the independently exercised
+source. All 24 new durable cases and 47 original focused cases pass. The adapted
+three-case diagnostic preserves the failing original behavior and correctly
+accepts atomic shutdown admission as the alternative winner. No weakening of
+the original no-finalization assertion was found in that adaptation.
+
+ER-03 remains NOT integrated/accepted: an additional failed-initialization cleanup
+race is independently reproduced below. Correct it as ER-03-R2 under the existing
+authorization; no extra proposal gate unless a broader contract change is needed.
+Do not replay synchronization or coordination commits as production changes.
+
+R2: host resource finalization crosses an outstanding abort cleanup callback
+---------------------------------------------------------------------------
+executionSessions.hostClosePreflight(stop) reserves shutdown admission for each
+runtime, then closes broker/resource admission. For pending initializations it
+permits an attempt in phase 'cleanup' to proceed to executionResources.finishClose
+before testing hasLifecycleWork. That ER-01 service finalizer can invoke the
+provider's release callback and stop its process even while the failed attempt's
+broker-owned lease finalizer is still executing under finalizationScope.
+
+The later pending/lifecycle-work check does return typed incomplete cleanup, but
+only after the resource effect has occurred. Callback-free admission closure is
+valid; destroying a callback-owned resource before its owner unwinds is not.
+Runtime roots/cleanup tickets must cover effects, not just legacy teardown.
+
+Exact deterministic reproduction on corrected source:
+1. Use the submitted real host/manifest/composer/grant/domain fixture with fake
+   process/HTTP only. Add a legitimate onApplicationCreate hook that invokes the
+   registered switch capability for A and then raises before the first save.
+   Recompute its trusted source selector to match the changed test entry bytes.
+2. Wrap the real published binding's leaseCloser with an Event pause before its
+   original close. Failed initialization reaches abort/cleanup after loading A.
+   Confirm attempt.phase == 'cleanup', _cleanupAdmissions is nonempty and the
+   exact owned fake process is still live.
+3. While that lease callback is still outstanding, call host.stop. It reports
+   LlmExecutionCleanupError but nevertheless terminates the process before the
+   callback is released. Assertion: 'Host finalized process across live abort
+   cleanup callback'. The initializer preserves its original hook ValueError.
+
+No timing/sleep inference, real inference, production-source edits or forged
+ownership were used. The Event controls a callback already owned by the broker;
+the original provider close is left intact and runs after the pause is released.
+This is a residual path beyond the original preflight-versus-composer races, not
+a claim that the original three cases still fail on R1.
+
+Required correction / evidence
+-------------------------------
+Host shutdown must respect actual in-progress failed-attempt finalizer ownership
+before any ER-01/provider effect or legacy runtime teardown. Make the ownership
+decision atomic at the callback/effect boundary; do not fix this with a detached
+hasLifecycleWork check that races a finalizer starting immediately afterward.
+Keep exact resources rooted until the active owner returns, return typed pending
+without waiting under lanes, and preserve retry/reporting of truly pending or
+unknown cleanup after the owner unwinds. Do not hold lanes across callbacks,
+silently recover an unknown domain, or permanently strand otherwise-drainable
+cleanup by making all phase='cleanup' attempts indistinguishable from live owners.
+Audit equivalent resource-finishClose paths and retain both winner orderings.
+Add a durable real-lifecycle/fake-IO regression, not only a synthetic gate flag.
+
+Publish correction parent/head plus focused/relevant/full tests through canonical
+Integration inbox. Preserve R1 tickets, Job/transaction serialization, exact grants,
+per-batch rollback and original ER/LC/PM/G contracts. No ER-04, consumer edits,
+models, scheduler or broader admission redesign is assigned by this correction.
+
+Runnable reproduction
+-----------------------
+Raw Python: knowledge/execution-resource-er03-r2-cleanup-reproducer.txt.
+From exact corrected worker source plus this canonical coordination material:
+  Copy-Item ai-workflow/knowledge/execution-resource-er03-r2-cleanup-reproducer.txt python-embedded/er03-r2-cleanup-reproducer.py
+  .\python-embedded\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','python-embedded/er03-r2-cleanup-reproducer.py']))"
+Expected on 00bb521: 1 failed at the process-lifetime assertion above. A correction
+must preserve the no-finalization assertion while the callback actually owns it;
+do not weaken it to checking only that host.stop eventually reports pending.
+
+Actual independent review / verification
+-----------------------------------------
+Own Integration Python 3.15.0b4, MSC 1951 AMD64 / pytest 9.2.0. Exact corrected
+source archived under python-embedded/er03-review-00bb521, using Integration's own
+runtime with archive cwd inserted at sys.path[0]. Printed providerComposition path
+confirmed the archive, not older Integration backend. No worker/user checkout
+modified; no source series cherry-picked or merged into Integration.
+
+From each exact archive cwd, command prefix:
+  ..\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(ARGS))"
+Independent ARGS/results on corrected source:
+  ['-q','--import-mode=importlib','--tb=short','tests/backend/application/test_compositionAdmission.py','tests/first_party/llmDrivers/test_llamaCppExecutionResources.py','../er03-r1-gate-reproducer.py']
+    74 passed in 2.26s, zero skips (71 durable plus 3 adapted reproductions).
+  ['-q','--import-mode=importlib','--tb=short','tests/first_party/llmDrivers','tests/backend/llm','tests/backend/context','tests/backend/runtime','tests/backend/application','tests/backend/orchestration','tests/backend/packs','tests/backend/telemetry','tests/first_party/observationBridge']
+    852 passed in 9.23s, zero skips.
+  ['-q','--import-mode=importlib','--tb=short','tests']
+    1702 passed in 10.98s, zero skips.
+  ['-q','--import-mode=importlib','--tb=short','../er03_cleanup_review_reproducer.py']
+    1 failed in 0.23s. This local diagnostic is the raw published R2 reproducer
+    with only its local file-path header differing.
+On original archive er03-review-63931d5, same adapted R1 diagnostic:
+    3 failed in 0.37s, retaining the original failure assertions.
+
+git diff 63931d5 a9f810d --exit-code -- backend first-party tests passed empty;
+diff checks for both source commits passed. Inspected all correction production
+diffs and new 24-case test module. No independent Ruff/header/docstring audit run.
+Existing embedded-home warning persists with passing tests. Stock required
+retention/freshness remains unsupported; actual physical reuse, binary/model
+effects, real monitoring, ER-04 and consumer migration remain unmet/separate.
